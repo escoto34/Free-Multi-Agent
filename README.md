@@ -1,7 +1,10 @@
-# Multi-Agent Ecosystem
+# Free-Multi-Agent
 
 Two independent multi-agent pipelines sharing a common infrastructure layer, powered by three LLM providers on their free/trial tiers: **Groq**, **OpenRouter**, and **Cohere**.
 
+```
+At the moment model_router.yaml isnt connected to the system so a change in it should not change results or which model or provider is used.
+```
 ## Systems
 
 ### System A — Vibe Coding
