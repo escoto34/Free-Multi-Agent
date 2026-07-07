@@ -1,0 +1,107 @@
+# =============================================================================
+# Model Router Configuration
+# All model assignments, fallbacks, quotas, and expiration dates.
+# =============================================================================
+
+providers:
+  groq:
+    base_url: "https://api.groq.com/openai/v1"
+    env_key: "GROQ_API_KEY"
+    daily_limit_per_model: 800 # 90% of real ~1,000 RPD limit
+    models:
+      - "openai/gpt-oss-120b"
+      - "openai/gpt-oss-20b"
+      - "openai/gpt-oss-safeguard-20b"
+      - "qwen/qwen3.6-27b"
+      - "groq/compound-mini" # Tavily-integrated web search, no extra config
+
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    env_key: "OPENROUTER_API_KEY"
+    daily_limit_shared: 45 # 90% of real ~50 RPD, SHARED across all :free models
+    models:
+      - "cohere/north-mini-code:free"
+      - "tencent/hy3:free"
+
+  cohere:
+    env_key: "COHERE_API_KEY"
+    daily_limit: 28 # Conservative midpoint of 25-30 calls/day from 1,000/month
+    # NOTE: Trial tier is contractually non-commercial. See quotas.py for details.
+
+# --- Deprecated models (Groq, 17-Jun-2026) — DO NOT USE ---
+deprecated:
+  - "llama-3.1-8b-instant"
+  - "llama-3.3-70b-versatile"
+  - "qwen/qwen3-32b"
+  - "llama-4-scout-17b-16e-instruct"
+
+# =============================================================================
+# System A — Vibe Coding Pipeline
+# =============================================================================
+vibe_coding:
+  architect:
+    provider: "cohere"
+    model: "command-a-plus-05-2026" # Command A+, Apache 2.0, 128K context
+    # DO NOT use command-a-reasoning-08-2025 — evaluation-only in production
+
+  coder:
+    provider: "openrouter"
+    model: "cohere/north-mini-code:free" # Stable free tier, no announced expiration
+
+  debugger:
+    provider: "openrouter"
+    model: "tencent/hy3:free"
+    free_until: "2026-07-21" # Hard date from model page — NOT an estimate
+    fallback:
+      provider: "groq"
+      model: "openai/gpt-oss-120b"
+
+  max_fix_cycles: 3 # After 3 failed fix cycles → git reset --hard
+
+# =============================================================================
+# System B — Deep Research Pipeline
+# =============================================================================
+deep_research:
+  safety_filter:
+    provider: "groq"
+    model: "openai/gpt-oss-safeguard-20b"
+
+  context_compressor:
+    provider: "openrouter"
+    model: "tencent/hy3:free"
+    free_until: "2026-07-21"
+    fallback:
+      provider: "groq"
+      model: "openai/gpt-oss-120b"
+
+  web_search:
+    provider: "groq"
+    model: "groq/compound-mini" # Tavily-integrated, no additional config
+
+  grounding:
+    provider: "cohere"
+    model: "command-a-plus-05-2026"
+    # Uses documents=[{"data": {"text": ...}}] for grounding — NOT connectors
+
+  synthesizer:
+    provider: "cohere"
+    model: "command-r-plus-08-2024" # Command R+ for reliable structured citations
+
+# =============================================================================
+# General Fallback Cascade
+# =============================================================================
+fallback_cascade:
+  # When Cohere quota exhausted → try Hy3 on OpenRouter
+  cohere_fallback:
+    provider: "openrouter"
+    model: "tencent/hy3:free"
+
+  # When OpenRouter quota exhausted → try gpt-oss-120b on Groq
+  openrouter_fallback:
+    provider: "groq"
+    model: "openai/gpt-oss-120b"
+
+  # When Groq quota exhausted (specific model) → try OpenRouter
+  groq_fallback:
+    provider: "openrouter"
+    model: "cohere/north-mini-code:free"

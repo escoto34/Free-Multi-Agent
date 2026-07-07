@@ -1,0 +1,686 @@
+{
+  "nodes": [
+    {
+      "id": "_agents_rules_graphify_rules",
+      "label": "Graphify Knowledge Graph Rules",
+      "file_type": "rationale",
+      "source_file": "/home/escoto/Documentos/MultiAgent/.agents/rules/graphify.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "_agents_workflows_graphify_workflow",
+      "label": "Graphify Workflow",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/.agents/workflows/graphify.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_overview",
+      "label": "Implementation Plan Overview",
+      "file_type": "document",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_fase_0",
+      "label": "Phase 0 - Repository Scaffolding",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_fase_1",
+      "label": "Phase 1 - Clients and Quotas Layer",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_fase_2",
+      "label": "Phase 2 - Pydantic Schemas",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_fase_3",
+      "label": "Phase 3 - PydanticAI Agents",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_fase_4",
+      "label": "Phase 4 - LangGraph System A (Vibe Coding)",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_fase_5",
+      "label": "Phase 5 - LangGraph System B (Deep Research)",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_fase_6",
+      "label": "Phase 6 - CLI and Observability",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_fase_7",
+      "label": "Phase 7 - Tests and Light CI",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "implementation_plan_definition_of_done",
+      "label": "Definition of Done",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_overview",
+      "label": "Multi-Agent Ecosystem README",
+      "file_type": "document",
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_vibe_coding",
+      "label": "System A - Vibe Coding Pipeline",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_deep_research",
+      "label": "System B - Deep Research Pipeline",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_tech_stack",
+      "label": "Multi-Agent Tech Stack",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_quota_limits",
+      "label": "LLM Provider Quota Limits",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "readme_deprecated_models",
+      "label": "Groq Deprecated Models List",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "config_model_router_configuration",
+      "label": "Model Router Configuration File",
+      "file_type": "document",
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "config_model_router_providers",
+      "label": "LLM Providers Configuration",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "config_model_router_vibe_coding",
+      "label": "Vibe Coding Model Assignments",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "config_model_router_deep_research",
+      "label": "Deep Research Model Assignments",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "config_model_router_fallback_cascade",
+      "label": "General Fallback Cascade Configuration",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_dependencies",
+      "label": "Project Dependencies",
+      "file_type": "document",
+      "source_file": "/home/escoto/Documentos/MultiAgent/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_pydantic_ai",
+      "label": "Pydantic-AI Dependency",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_langgraph",
+      "label": "LangGraph Dependencies",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "requirements_llm_sdks",
+      "label": "LLM SDK Dependencies",
+      "file_type": "concept",
+      "source_file": "/home/escoto/Documentos/MultiAgent/requirements.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "_agents_rules_graphify_rules",
+      "target": "_agents_workflows_graphify_workflow",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/home/escoto/Documentos/MultiAgent/.agents/rules/graphify.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_fase_0",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_fase_1",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_fase_2",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_fase_3",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_fase_4",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_fase_5",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_fase_6",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_fase_7",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "implementation_plan_definition_of_done",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "readme_overview",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "config_model_router_configuration",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "implementation_plan_overview",
+      "target": "requirements_dependencies",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/Implementation_plan.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_overview",
+      "target": "readme_vibe_coding",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_overview",
+      "target": "readme_deep_research",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_overview",
+      "target": "readme_tech_stack",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_overview",
+      "target": "readme_quota_limits",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_overview",
+      "target": "readme_deprecated_models",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_vibe_coding",
+      "target": "config_model_router_vibe_coding",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_deep_research",
+      "target": "config_model_router_deep_research",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_tech_stack",
+      "target": "requirements_dependencies",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "config_model_router_configuration",
+      "target": "config_model_router_providers",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "config_model_router_configuration",
+      "target": "config_model_router_vibe_coding",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "config_model_router_configuration",
+      "target": "config_model_router_deep_research",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "config_model_router_configuration",
+      "target": "config_model_router_fallback_cascade",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "config_model_router_vibe_coding",
+      "target": "config_model_router_fallback_cascade",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "config_model_router_deep_research",
+      "target": "config_model_router_fallback_cascade",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_dependencies",
+      "target": "requirements_pydantic_ai",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_dependencies",
+      "target": "requirements_langgraph",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "requirements_dependencies",
+      "target": "requirements_llm_sdks",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "/home/escoto/Documentos/MultiAgent/requirements.txt",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_vibe_coding",
+      "target": "implementation_plan_fase_4",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme_deep_research",
+      "target": "implementation_plan_fase_5",
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "config_model_router_vibe_coding",
+      "target": "implementation_plan_fase_4",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "config_model_router_deep_research",
+      "target": "implementation_plan_fase_5",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "vibe_coding_system",
+      "label": "Vibe Coding System Specification",
+      "nodes": [
+        "readme_vibe_coding",
+        "implementation_plan_fase_4",
+        "config_model_router_vibe_coding"
+      ],
+      "relation": "form",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md"
+    },
+    {
+      "id": "deep_research_system",
+      "label": "Deep Research System Specification",
+      "nodes": [
+        "readme_deep_research",
+        "implementation_plan_fase_5",
+        "config_model_router_deep_research"
+      ],
+      "relation": "form",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "/home/escoto/Documentos/MultiAgent/README.md"
+    },
+    {
+      "id": "llm_providers_and_quotas",
+      "label": "LLM Providers and Quota Management",
+      "nodes": [
+        "config_model_router_providers",
+        "readme_quota_limits",
+        "implementation_plan_fase_1"
+      ],
+      "relation": "participate_in",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "/home/escoto/Documentos/MultiAgent/config/model_router.yaml"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}
