@@ -2,19 +2,20 @@
 
 Two independent multi-agent pipelines sharing a common infrastructure layer, powered by three LLM providers on their free/trial tiers: **Groq**, **OpenRouter**, and **Cohere**.
 
-```
-At the moment model_router.yaml isnt connected to the system so a change in it should not change results or which model or provider is used.
-```
+`config/model_router.yaml` is the single source of truth for provider/model/fallback assignments. It is loaded at runtime by `core/agent_config.py`, and every agent (`architect`, `coder`, `debugger`, `safety_filter`, `context_compressor`, `web_search`, `grounding`, `synthesizer`) reads its provider/model/fallback from it via `get_agent_config(...)` instead of hardcoding them in Python. **Editing the YAML now changes real behavior on the next run.**
+
 ## Systems
 
 ### System A — Vibe Coding
-An automated coding pipeline: **Architect → Coder → Debugger** with unit tests as quality gates and real Git rollback if 3 fix cycles are exhausted.
+An automated coding pipeline: **Architect → Coder → Test Executor → Debugger** with unit tests as quality gates and real Git rollback if 3 fix cycles are exhausted.
 
 | Role       | Provider   | Model                          | Notes                                   |
 |------------|------------|--------------------------------|------------------------------------------|
 | Architect  | Cohere     | `command-a-plus-05-2026`       | Command A+, Apache 2.0, 128K context     |
 | Coder      | OpenRouter | `cohere/north-mini-code:free`  | Stable free tier                         |
 | Debugger   | OpenRouter | `tencent/hy3:free`             | **Free until 2026-07-21** → fallback: `openai/gpt-oss-120b` on Groq |
+
+> Provider/model values above reflect the current `config/model_router.yaml`. Since the YAML is now the live source of truth, treat this table as a snapshot — check the YAML directly for the values actually in effect.
 
 ### System B — Deep Research
 A research pipeline: **Safety Filter → Context Compression → Web Search → Grounding/Citations → Final Synthesis** with SQLite checkpointing for mid-pipeline resumption.
@@ -62,6 +63,33 @@ Additionally, `core/router.py` treats an HTTP-200-but-empty completion (`EmptyCo
 
 None of this guarantees the final report is 100% accurate — it guarantees the pipeline won't *silently* present unverified or fabricated content as if it were grounded. Manually spot-checking specific figures/dates in any final report (especially case-study sections) is still recommended before using it for anything formal.
 
+## Reliability Safeguards (System A — Vibe Coding)
+
+`coder_node` (`graphs/vibe_coding_graph.py`) writes files produced by an untrusted, free-tier LLM directly to disk, so it carries its own guardrails:
+
+1. **Path-traversal protection** — every file path returned by the Coder agent is resolved against the repo root and rejected (`UnsafeFilePathError`) if it's absolute or escapes the root via `..`, so a malformed or adversarial path can't write outside the project.
+2. **All-or-nothing writes** — every path is validated *before* any file is touched. A single bad path aborts the whole batch instead of leaving a half-written set of files on disk.
+3. **Atomic per-file writes** — each file is written to a temp path in the same directory and then atomically renamed into place, so a crash mid-write can't leave a truncated file behind.
+
+## opencode Integration (MCP)
+
+The Vibe Coding pipeline is also exposed as an MCP tool (`run_vibe_coding`) so it can be driven from [opencode](https://opencode.ai) instead of (or alongside) the CLI.
+
+| File | Purpose |
+|------|---------|
+| `mcp_server.py` | MCP server (stdio transport) wrapping `graphs/vibe_coding_graph.py`. Loads its own `.env` (same folder) on startup via `python-dotenv`, so API keys don't need to be exported in the parent shell. |
+| `opencode.json.example` | Template for opencode's MCP config. Copy to `opencode.json` and fill in the absolute path to `mcp_server.py` for your machine. |
+| `opencode.json` | **Git-ignored.** Your local, machine-specific config — contains the absolute path to `mcp_server.py`, which differs per clone/machine. |
+
+### Setup
+1. `cp opencode.json.example opencode.json`
+2. Edit `opencode.json`, replacing the placeholder path with the absolute path to your local `mcp_server.py`.
+3. Make sure `.env` (same folder as `mcp_server.py`) has your API keys.
+4. Register `opencode.json` as a **global** opencode config (`~/.config/opencode/opencode.json`) if you want `run_vibe_coding` available from any directory, not just this repo's folder — opencode only auto-loads project-scoped configs when launched from inside (or below) the folder that contains them.
+
+### Important: this is a repo-agnostic tool
+`run_vibe_coding` operates on whatever Git repository is the current working directory when opencode invokes it (`coder_node` resolves the repo root via `get_git_repo(".")`), **not necessarily this `MultiAgent` repo**. This is intentional — it lets you use the same registered MCP server as a general-purpose vibe-coding tool across any of your projects. Be mindful of this: invoking `run_vibe_coding` from inside a different Git repo will write files and create commits/rollbacks *there*, using this pipeline's models and logic.
+
 ## Installation
 
 ### 1. Clone the repository
@@ -94,6 +122,8 @@ cp .env.example .env
 #   OPENROUTER_API_KEY=...
 #   COHERE_API_KEY=...
 ```
+
+> Also add `opencode.json` to `.gitignore` if you set up the opencode MCP integration below — it contains an absolute, machine-specific path and shouldn't be committed. Use `opencode.json.example` as the tracked template instead.
 
 ### 5. Initialize Git (required for System A rollback)
 
@@ -129,6 +159,8 @@ MultiAgent/
 ├── .gitignore
 ├── requirements.txt
 ├── README.md
+├── opencode.json.example         # Template for opencode MCP config (copy to opencode.json, not tracked in git)
+├── mcp_server.py                 # MCP server exposing run_vibe_coding to opencode/any MCP client
 ├── config/
 │   └── model_router.yaml         # Model assignments, fallbacks, quotas, dates — live config, read at runtime
 ├── core/
@@ -145,19 +177,19 @@ MultiAgent/
 │   ├── __init__.py
 │   ├── vibe_coding/
 │   │   ├── __init__.py
-│   │   ├── architect.py          # Cohere command-a-plus-05-2026
-│   │   ├── coder.py              # OpenRouter north-mini-code:free
-│   │   └── debugger.py           # OpenRouter hy3:free → fallback gpt-oss-120b
+│   │   ├── architect.py          # Cohere command-a-plus-05-2026 (via model_router.yaml)
+│   │   ├── coder.py              # OpenRouter north-mini-code:free (via model_router.yaml)
+│   │   └── debugger.py           # OpenRouter hy3:free → fallback gpt-oss-120b (via model_router.yaml)
 │   └── deep_research/
 │       ├── __init__.py
-│       ├── safety_filter.py      # Groq gpt-oss-safeguard-20b
-│       ├── context_compressor.py # OpenRouter hy3:free → fallback gpt-oss-120b
-│       ├── web_search.py         # Groq compound-mini (Tavily) + query-size guard + no-live-search abort
+│       ├── safety_filter.py      # Groq gpt-oss-safeguard-20b (via model_router.yaml)
+│       ├── context_compressor.py # OpenRouter hy3:free → fallback gpt-oss-120b (via model_router.yaml)
+│       ├── web_search.py         # Groq compound-mini (Tavily) + query-size guard + no-live-search abort (via model_router.yaml)
 │       ├── grounding.py          # Cohere documents= grounding, builds GroundedReport in Python (not model-authored JSON)
-│       └── synthesizer.py        # Cohere command-r-plus-08-2024 final synthesis
+│       └── synthesizer.py        # Cohere command-r-plus-08-2024 final synthesis (via model_router.yaml)
 ├── graphs/
 │   ├── __init__.py
-│   ├── vibe_coding_graph.py      # LangGraph: Architect→Coder→Debugger + Git rollback
+│   ├── vibe_coding_graph.py      # LangGraph: Architect→Coder→Test Executor→Debugger + safe atomic writes + Git rollback
 │   └── deep_research_graph.py    # LangGraph: 5-stage pipeline + SQLite checkpoints + search-abort routing
 ├── cli.py                        # Click CLI entry point
 └── tests/

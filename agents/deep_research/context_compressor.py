@@ -9,6 +9,7 @@ from typing import Optional
 
 from pydantic_ai import Agent
 
+from core.agent_config import get_agent_config
 from core.router import call_agent
 from schemas.deep_research import CondensedTrends
 
@@ -48,30 +49,31 @@ def run_context_compressor(
     fallback_override: Optional[dict[str, str]] = None,
 ) -> CondensedTrends:
     """Run the Context Compressor agent to identify trends and guide web search.
-    Uses OpenRouter tencent/hy3:free with fallback options.
+
+    Provider/model/fallback are read from config/model_router.yaml
+    (``deep_research.context_compressor``) rather than hardcoded, so editing
+    the YAML actually changes runtime behaviour.
     """
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Extract search targets for: {query}"},
     ]
-    # In deep_research, the compressor uses openrouter tencent/hy3:free
-    # fallback: groq/openai/gpt-oss-120b
-    fb = fallback_override or {
-        "provider": "groq",
-        "model": "openai/gpt-oss-120b",
-    }
+
+    cfg = get_agent_config("deep_research", "context_compressor")
+    fb = fallback_override or cfg.get("fallback")
+
     caller = router_instance or call_agent
     if hasattr(caller, "call_agent"):
         resp = caller.call_agent(
-            provider="openrouter",
-            model="tencent/hy3:free",
+            provider=cfg["provider"],
+            model=cfg["model"],
             messages=messages,
             fallback=fb,
         )
     else:
         resp = caller(
-            provider="openrouter",
-            model="tencent/hy3:free",
+            provider=cfg["provider"],
+            model=cfg["model"],
             messages=messages,
             fallback=fb,
         )

@@ -12,10 +12,6 @@ import pytest
 from pathlib import Path
 import git
 
-from schemas.vibe_coding import TechnicalSpec, CodeArtifact, DebugReport
-from schemas.deep_research import SafetyClassification, CondensedTrends, GroundedReport
-from graphs.vibe_coding_graph import get_vibe_coding_graph
-from graphs.deep_research_graph import get_deep_research_graph
 
 
 # ---------------------------------------------------------------------------
@@ -92,10 +88,6 @@ def test_vibe_coding_git_rollback_forced(temp_git_repo, monkeypatch):
         lambda *args, **kwargs: MockCompletedProcess()
     )
 
-    # Compile and run the Vibe Coding Graph
-    graph = get_vibe_coding_graph()
-
-    initial_state = {
         "idea": "Build a hello function",
         "spec": None,
         "artifact": None,

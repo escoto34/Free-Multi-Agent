@@ -1,6 +1,7 @@
 # Environment & secrets
 .env
 *.env
+opencode.json
 
 # Python
 __pycache__/

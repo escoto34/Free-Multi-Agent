@@ -1,7 +1,12 @@
 """
 Persistent SQLite-backed quota counters with automatic daily reset.
 
-Limits (safe margins — see ``config/model_router.yaml`` for rationale):
+Limits are read from ``config/model_router.yaml`` at call time via
+``core.agent_config.get_agent_config`` — the YAML is the single source of
+truth. The constants below (``GROQ_DAILY_LIMIT_PER_MODEL`` etc.) are kept
+only as a fallback for environments where the YAML isn't available (e.g.
+some unit tests that construct a ``QuotaTracker`` without a full project
+checkout) — if the YAML load succeeds, its values always win.
 
   +--------------+-----+-----------------------------------------------+
   | Provider     | RPD | Scope                                         |
@@ -11,8 +16,9 @@ Limits (safe margins — see ``config/model_router.yaml`` for rationale):
   | Cohere       |  28 | SHARED across all endpoints                    |
   +--------------+-----+-----------------------------------------------+
 
-Daily reset is **implicit**: queries filter by ``date.today()``, so a new day
-automatically starts at zero without needing a cron job or background thread.
+Daily reset is **implicit**: queries filter by ``date.today()``, so a new
+day automatically starts at zero without needing a cron job or background
+thread.
 
 WARNING — LEGAL, NOT TECHNICAL
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -31,12 +37,25 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
+from core.agent_config import get_agent_config
+
 # ---------------------------------------------------------------------------
-# Default safe-margin limits
+# Fallback safe-margin limits — used only if config/model_router.yaml can't
+# be loaded (see _limit_for below). Keep these in sync with the YAML anyway;
+# they're a safety net, not the primary source.
 # ---------------------------------------------------------------------------
-GROQ_DAILY_LIMIT_PER_MODEL: int = 800   # 80 % of real ~1 000 RPD
-OPENROUTER_DAILY_LIMIT: int = 45         # 90 % of real ~50 RPD (shared)
-COHERE_DAILY_LIMIT: int = 28             # Conservative midpoint 25-30/day
+GROQ_DAILY_LIMIT_PER_MODEL: int = 800  # 80 % of real ~1 000 RPD
+OPENROUTER_DAILY_LIMIT: int = 45  # 90 % of real ~50 RPD (shared)
+COHERE_DAILY_LIMIT: int = 28  # Conservative midpoint 25-30/day
+
+# Maps provider -> the YAML key under providers.<provider>.* that holds its
+# daily limit. Each provider uses a differently-named key because the scope
+# differs (per-model vs. shared-across-account).
+_YAML_LIMIT_KEY = {
+    "groq": "daily_limit_per_model",
+    "openrouter": "daily_limit_shared",
+    "cohere": "daily_limit",
+}
 
 _DEFAULT_DB_PATH = Path("data/quotas.db")
 
@@ -107,20 +126,31 @@ class QuotaTracker:
     def _limit_for(provider: str) -> int:
         """Return the daily limit for *provider*.
 
-        For Groq the limit is *per model*; for the others it is *per account*.
+        Reads from ``config/model_router.yaml`` (``providers.<provider>.*``)
+        first; falls back to the hardcoded module-level constants above if
+        the YAML can't be loaded or doesn't define that provider's limit key
+        (e.g. a stripped-down test fixture config).
+
+        For Groq the limit is *per model*; for the others it is *per
+        account* (shared).
         """
-        limits = {
+        fallback_limits = {
             "groq": GROQ_DAILY_LIMIT_PER_MODEL,
             "openrouter": OPENROUTER_DAILY_LIMIT,
             "cohere": COHERE_DAILY_LIMIT,
         }
-        limit = limits.get(provider)
-        if limit is None:
+        if provider not in fallback_limits:
             raise ValueError(
-                f"Unknown provider: {provider!r}. "
-                f"Valid: {sorted(limits)}"
+                f"Unknown provider: {provider!r}. Valid: {sorted(fallback_limits)}"
             )
-        return limit
+
+        try:
+            provider_cfg = get_agent_config("providers", provider)
+        except KeyError:
+            return fallback_limits[provider]
+
+        yaml_key = _YAML_LIMIT_KEY[provider]
+        return provider_cfg.get(yaml_key, fallback_limits[provider])
 
     # ------------------------------------------------------------------
     # Public API
@@ -171,8 +201,7 @@ class QuotaTracker:
         with self._lock, self._connect() as conn:
             if provider:
                 conn.execute(
-                    "DELETE FROM quota_usage "
-                    "WHERE provider = ? AND usage_date = ?",
+                    "DELETE FROM quota_usage WHERE provider = ? AND usage_date = ?",
                     (provider, today),
                 )
             else:

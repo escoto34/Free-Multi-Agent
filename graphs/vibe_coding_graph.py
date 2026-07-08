@@ -17,12 +17,12 @@ from pathlib import Path
 from typing import Any, Optional, TypedDict
 
 import git
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from schemas.vibe_coding import TechnicalSpec, CodeArtifact, DebugReport
 from agents.vibe_coding.architect import run_architect
 from agents.vibe_coding.coder import run_coder
 from agents.vibe_coding.debugger import run_debugger
+from schemas.vibe_coding import CodeArtifact, DebugReport, TechnicalSpec
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # State definition
 # ---------------------------------------------------------------------------
+
 
 class VibeCodingState(TypedDict):
     """LangGraph state representation for the Vibe Coding pipeline."""
@@ -47,6 +48,7 @@ class VibeCodingState(TypedDict):
 # ---------------------------------------------------------------------------
 # Git helper functions
 # ---------------------------------------------------------------------------
+
 
 def get_git_repo(path: str = ".") -> Optional[git.Repo]:
     """Retrieve the Git repository instance if available."""
@@ -90,6 +92,7 @@ def perform_git_rollback(repo: git.Repo, sha: str) -> bool:
 # Nodes implementation
 # ---------------------------------------------------------------------------
 
+
 def architect_node(state: VibeCodingState) -> dict[str, Any]:
     """Runs the Architect agent to design the TechnicalSpec."""
     logger.info("--- ARCHITECT NODE ---")
@@ -107,6 +110,88 @@ def architect_node(state: VibeCodingState) -> dict[str, Any]:
     except Exception as exc:
         logger.error("Architect node failed: %s", exc)
         return {"error": f"Architect error: {exc}"}
+
+
+class UnsafeFilePathError(Exception):
+    """Raised when the Coder agent tries to write outside the repo root or
+    to a path that isn't a plain relative file path."""
+
+
+def _resolve_repo_root() -> Path:
+    """Return the repo root to constrain writes to, falling back to cwd."""
+    repo = get_git_repo()
+    if repo is not None and repo.working_tree_dir:
+        return Path(repo.working_tree_dir).resolve()
+    return Path(".").resolve()
+
+
+def _validate_and_resolve_target(file_path: str, repo_root: Path) -> Path:
+    """Resolve `file_path` against `repo_root` and ensure it can't escape it.
+
+    Rejects absolute paths and any `..` traversal that would land outside
+    the repo root — the Coder agent's output is untrusted LLM content and
+    must not be able to write arbitrary files on the host.
+    """
+    if not isinstance(file_path, str) or not file_path.strip():
+        raise UnsafeFilePathError(f"Empty or invalid file path: {file_path!r}")
+
+    candidate = Path(file_path)
+    if candidate.is_absolute():
+        raise UnsafeFilePathError(
+            f"Refusing to write absolute path outside repo: {file_path!r}"
+        )
+
+    resolved = (repo_root / candidate).resolve()
+    try:
+        resolved.relative_to(repo_root)
+    except ValueError:
+        raise UnsafeFilePathError(
+            f"Refusing to write outside repo root ({repo_root}): {file_path!r}"
+        )
+    return resolved
+
+
+def _write_artifact_files(artifact: CodeArtifact, repo_root: Path) -> list[str]:
+    """Validate and write every file in `artifact.files` atomically.
+
+    All paths are validated *before* any file is touched, so a single bad
+    path aborts the whole batch instead of leaving a half-written set of
+    files on disk. Each file is written to a temp path in the same
+    directory and then atomically renamed into place, so a crash mid-write
+    can't leave a truncated/corrupt file behind either.
+
+    Returns the list of relative file paths that were written, in the
+    order they were written.
+    """
+    if not artifact.files:
+        raise ValueError("Coder returned an empty file set — nothing to write.")
+
+    # Pass 1: validate every path up front (fail fast, no partial writes).
+    resolved_targets: list[tuple[str, Path, str]] = []
+    for file_path, code in artifact.files.items():
+        if not isinstance(code, str):
+            raise UnsafeFilePathError(
+                f"File content for {file_path!r} is not a string (got {type(code).__name__})."
+            )
+        resolved = _validate_and_resolve_target(file_path, repo_root)
+        resolved_targets.append((file_path, resolved, code))
+
+    # Pass 2: write each file atomically (temp file + os.replace).
+    written: list[str] = []
+    for file_path, resolved, code in resolved_targets:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = resolved.with_name(f".{resolved.name}.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8", newline="") as fh:
+                fh.write(code)
+            os.replace(tmp_path, resolved)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+        written.append(file_path)
+        logger.info("Wrote file: %s", file_path)
+
+    return written
 
 
 def coder_node(state: VibeCodingState) -> dict[str, Any]:
@@ -134,15 +219,12 @@ def coder_node(state: VibeCodingState) -> dict[str, Any]:
         else:
             artifact = run_coder(spec)
 
-        # Write files physically to disk (if not mocking)
-        # Note: In mock tests, we can skip writing or verify separately.
-        # We will write files to disk to allow running real tests if in a real run.
-        for file_path, code in artifact.files.items():
-            path = Path(file_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "w") as fh:
-                fh.write(code)
-            logger.info("Wrote file: %s", file_path)
+        # Write files physically to disk, constrained to the repo root and
+        # atomically (all paths validated first, each file written via a
+        # temp-file + rename so a mid-write crash can't corrupt a file).
+        repo_root = _resolve_repo_root()
+        written = _write_artifact_files(artifact, repo_root)
+        logger.info("Coder wrote %d file(s) under %s", len(written), repo_root)
 
         return {"artifact": artifact, "error": None}
     except Exception as exc:
@@ -176,7 +258,9 @@ def test_executor_node(state: VibeCodingState) -> dict[str, Any]:
         logger.info("Test execution finished (exit code %d)", result.returncode)
         return {"test_logs": logs, "error": None}
     except Exception as exc:
-        logger.warning("Running real tests failed or timed out: %s. Using fallback log.", exc)
+        logger.warning(
+            "Running real tests failed or timed out: %s. Using fallback log.", exc
+        )
         return {"test_logs": f"Execution failed: {exc}", "error": None}
 
 
@@ -229,7 +313,9 @@ def git_rollback_node(state: VibeCodingState) -> dict[str, Any]:
     sha = state["git_checkpoint_sha"]
     if repo and sha:
         perform_git_rollback(repo, sha)
-        logger.info("Git rolled back successfully to clean state checkpoint %s", sha[:7])
+        logger.info(
+            "Git rolled back successfully to clean state checkpoint %s", sha[:7]
+        )
     else:
         logger.warning("Skipping Git rollback: Repo or checkpoint SHA missing.")
     return {}
@@ -238,6 +324,7 @@ def git_rollback_node(state: VibeCodingState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Routing logic
 # ---------------------------------------------------------------------------
+
 
 def debugger_routing(state: VibeCodingState) -> str:
     """Conditional edge from Debugger node."""
@@ -252,13 +339,16 @@ def debugger_routing(state: VibeCodingState) -> str:
         logger.warning("❌ Maximum fix attempts (3) reached. Rolling back and ending.")
         return "git_rollback"
 
-    logger.info("⤷ Refactor cycle required: returning to Coder node. attempt %d/3", attempts)
+    logger.info(
+        "⤷ Refactor cycle required: returning to Coder node. attempt %d/3", attempts
+    )
     return "coder"
 
 
 # ---------------------------------------------------------------------------
 # Graph definition
 # ---------------------------------------------------------------------------
+
 
 def get_vibe_coding_graph() -> StateGraph:
     """Build and compile the StateGraph for System A."""

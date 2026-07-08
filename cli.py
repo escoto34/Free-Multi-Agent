@@ -40,11 +40,125 @@ def validate_api_keys() -> None:
                 err=True,
             )
             sys.exit(1)
+            """
+            MCP server for the "vibe_coding" pipeline (architect -> coder ->
+            test_executor -> debugger -> git_commit/git_rollback).
 
-from core.router import get_router
-from graphs.vibe_coding_graph import get_vibe_coding_graph
-from graphs.deep_research_graph import get_deep_research_graph
+            Exposes a single tool, `run_vibe_coding`, that opencode (or any MCP client)
+            can call as if it were a normal tool. Internally it drives the existing
+            LangGraph pipeline (graphs/vibe_coding_graph.py) and returns the final
+            CodeArtifact (files + summary) plus debug/status info as structured JSON.
 
+            Run standalone (stdio transport, what opencode expects) with:
+
+                python mcp_server.py
+
+            Note: the current graph implementation has no checkpointer, so there is no
+            resumable `thread_id` yet — each call runs the pipeline fully from scratch.
+            If you later add a SqliteSaver checkpointer to `get_vibe_coding_graph()`,
+            extend `_invoke_graph` to pass a `configurable={"thread_id": ...}` through
+            to `.invoke()`.
+            """
+
+            from __future__ import annotations
+
+            import json
+            import logging
+            from pathlib import Path
+            from typing import Any
+
+            from dotenv import load_dotenv
+            from mcp.server.fastmcp import FastMCP
+
+            # Load .env from this file's own directory, regardless of what cwd/env
+            # opencode (or any other MCP client) launched this process with. This means
+            # COHERE_API_KEY / OPENROUTER_API_KEY / GROQ_API_KEY don't need to be
+            # exported in the parent shell or re-declared in opencode.json's
+            # "environment" block — they just need to exist in this .env file.
+            load_dotenv(Path(__file__).parent / ".env")
+
+            from graphs.vibe_coding_graph import get_vibe_coding_graph, VibeCodingState
+
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger(__name__)
+
+            mcp = FastMCP("vibe-coding")
+
+            # Compile the graph once at import time; reused across tool calls.
+            _graph = get_vibe_coding_graph()
+
+
+            def _initial_state(idea: str) -> VibeCodingState:
+                """Build a fresh initial state matching VibeCodingState's TypedDict shape."""
+                return {
+                    "idea": idea,
+                    "spec": None,
+                    "artifact": None,
+                    "test_logs": None,
+                    "debug_report": None,
+                    "fix_attempts": 0,
+                    "git_checkpoint_sha": None,
+                    "error": None,
+                }
+
+
+            def _invoke_graph(idea: str) -> dict[str, Any]:
+                """Run the compiled StateGraph end-to-end and normalize the final state
+                into a plain JSON-serializable dict.
+                """
+                final_state: VibeCodingState = _graph.invoke(_initial_state(idea))
+
+                artifact = final_state.get("artifact")
+                debug_report = final_state.get("debug_report")
+
+                return {
+                    "files": artifact.files if artifact else {},
+                    "summary": artifact.summary if artifact else None,
+                    "passed": debug_report.passed if debug_report else None,
+                    "issues": debug_report.issues if debug_report else [],
+                    "fix_attempts": final_state.get("fix_attempts", 0),
+                    "git_checkpoint_sha": final_state.get("git_checkpoint_sha"),
+                    "error": final_state.get("error"),
+                }
+
+
+            @mcp.tool()
+            def run_vibe_coding(idea: str) -> str:
+                """Run the full vibe-coding pipeline (architect -> coder -> test_executor
+                -> debugger -> git_commit/git_rollback) on a software idea and return the
+                resulting files, summary, and pass/fail status as JSON.
+
+                On success (tests pass within 3 fix cycles) the changes are committed to
+                Git. On exhausting 3 fix cycles without passing, the repo is rolled back
+                (`git reset --hard` + `git clean -fd`) to the pre-run checkpoint.
+
+                Args:
+                    idea: Natural-language description of what to build,
+                        e.g. "Build a REST API for task management with SQLite".
+
+                Returns:
+                    JSON string: {
+                        "files": {"path/to/file.py": "source code", ...},
+                        "summary": "...",
+                        "passed": true_or_false_or_null,
+                        "issues": ["..."],
+                        "fix_attempts": 0-3,
+                        "git_checkpoint_sha": "...",
+                        "error": null_or_error_message
+                    }
+                """
+                try:
+                    result = _invoke_graph(idea)
+                except Exception as exc:
+                    logger.exception("vibe_coding pipeline crashed")
+                    result = {"error": str(exc)}
+                return json.dumps(result)
+
+
+            if __name__ == "__main__":
+                # stdio transport is what opencode (and most MCP clients) expect for
+                # locally-spawned servers.
+                mcp.run(transport="stdio")
 # Configure logging to show pipeline steps clearly in console
 logging.basicConfig(
     level=logging.WARNING,
@@ -63,7 +177,7 @@ def check_hy3_expiration() -> None:
     try:
         with open(_CONFIG_PATH) as fh:
             cfg = yaml.safe_load(fh)
-        
+
         # Check date for vibe_coding debugger
         free_until_str = cfg.get("vibe_coding", {}).get("debugger", {}).get("free_until")
         if not free_until_str:
@@ -75,7 +189,7 @@ def check_hy3_expiration() -> None:
 
         click.secho("=" * 70, fg="blue")
         click.secho(f"📅 Current Date: {today.isoformat()} | Hy3 free tier expiry: {expiration_date.isoformat()}", fg="blue")
-        
+
         if 0 <= delta_days <= 3:
             click.secho(
                 f"⚠️ WARNING: tencent/hy3:free expires in {delta_days} day(s) "
@@ -121,11 +235,7 @@ def run_vibe_coding(idea: str) -> None:
     """Execute System A: Architect -> Coder -> Test Executor -> Debugger with Git rollback."""
     check_hy3_expiration()
     validate_api_keys()
-    click.secho(f"🚀 Launching System A (Vibe Coding) for: '{idea}'", fg="green", bold=True)
 
-    graph = get_vibe_coding_graph()
-    initial_state = {
-        "idea": idea,
         "spec": None,
         "artifact": None,
         "test_logs": None,
@@ -151,12 +261,12 @@ def run_vibe_coding(idea: str) -> None:
     click.echo("\n" + "=" * 50)
     click.secho("🏁 PIPELINE COMPLETE", fg="green", bold=True)
     click.echo("=" * 50)
-    
+
     if dr and dr.passed:
         click.secho(f"✔ SUCCESS: All tests passed on attempt {attempts}/3!", fg="green", bold=True)
         if final_state.get("git_checkpoint_sha"):
             click.secho(f"📦 Git Checkpoint SHA: {final_state['git_checkpoint_sha'][:7]}", fg="green")
-        
+
         # Display files created
         artifact = final_state.get("artifact")
         if artifact:
@@ -183,10 +293,10 @@ def run_deep_research(topic: str, thread_id: Optional[str]) -> None:
     """Execute System B: Safety -> Context Compression -> Web Search -> Grounding -> Synthesizer."""
     check_hy3_expiration()
     validate_api_keys()
-    
+
     # Auto-generate a thread-id if none provided
     tid = thread_id or f"research-{abs(hash(topic)) % 100000}"
-    
+
     click.secho(f"🚀 Launching System B (Deep Research) | Thread: {tid}", fg="green", bold=True)
     click.secho(f"🔎 Topic: '{topic}'", fg="green")
 
