@@ -18,9 +18,16 @@ import sys
 from datetime import date
 from pathlib import Path
 from typing import Optional
+
 import click
 import yaml
+from dotenv import load_dotenv
 
+load_dotenv(Path(__file__).parent / ".env")
+
+from graphs.vibe_coding_graph import get_vibe_coding_graph
+from graphs.deep_research_graph import get_deep_research_graph
+from core.router import get_router
 
 def validate_api_keys() -> None:
     """Validate that required API keys are configured and not placeholders."""
@@ -60,8 +67,6 @@ def validate_api_keys() -> None:
             to `.invoke()`.
             """
 
-            from __future__ import annotations
-
             import json
             import logging
             from pathlib import Path
@@ -77,7 +82,7 @@ def validate_api_keys() -> None:
             # "environment" block — they just need to exist in this .env file.
             load_dotenv(Path(__file__).parent / ".env")
 
-            from graphs.vibe_coding_graph import get_vibe_coding_graph, VibeCodingState
+            from graphs.vibe_coding_graph import VibeCodingState, get_vibe_coding_graph
 
             logging.basicConfig(level=logging.INFO)
             logger = logging.getLogger(__name__)
@@ -86,7 +91,6 @@ def validate_api_keys() -> None:
 
             # Compile the graph once at import time; reused across tool calls.
             _graph = get_vibe_coding_graph()
-
 
             def _initial_state(idea: str) -> VibeCodingState:
                 """Build a fresh initial state matching VibeCodingState's TypedDict shape."""
@@ -100,7 +104,6 @@ def validate_api_keys() -> None:
                     "git_checkpoint_sha": None,
                     "error": None,
                 }
-
 
             def _invoke_graph(idea: str) -> dict[str, Any]:
                 """Run the compiled StateGraph end-to-end and normalize the final state
@@ -120,7 +123,6 @@ def validate_api_keys() -> None:
                     "git_checkpoint_sha": final_state.get("git_checkpoint_sha"),
                     "error": final_state.get("error"),
                 }
-
 
             @mcp.tool()
             def run_vibe_coding(idea: str) -> str:
@@ -154,11 +156,12 @@ def validate_api_keys() -> None:
                     result = {"error": str(exc)}
                 return json.dumps(result)
 
-
             if __name__ == "__main__":
                 # stdio transport is what opencode (and most MCP clients) expect for
                 # locally-spawned servers.
                 mcp.run(transport="stdio")
+
+
 # Configure logging to show pipeline steps clearly in console
 logging.basicConfig(
     level=logging.WARNING,
@@ -172,6 +175,7 @@ _CONFIG_PATH = Path(__file__).parent / "config" / "model_router.yaml"
 # Hy3 Expiration Warning Helper
 # ---------------------------------------------------------------------------
 
+
 def check_hy3_expiration() -> None:
     """Read expiration dates from model_router.yaml and print warnings if near."""
     try:
@@ -179,7 +183,9 @@ def check_hy3_expiration() -> None:
             cfg = yaml.safe_load(fh)
 
         # Check date for vibe_coding debugger
-        free_until_str = cfg.get("vibe_coding", {}).get("debugger", {}).get("free_until")
+        free_until_str = (
+            cfg.get("vibe_coding", {}).get("debugger", {}).get("free_until")
+        )
         if not free_until_str:
             return
 
@@ -188,7 +194,10 @@ def check_hy3_expiration() -> None:
         delta_days = (expiration_date - today).days
 
         click.secho("=" * 70, fg="blue")
-        click.secho(f"📅 Current Date: {today.isoformat()} | Hy3 free tier expiry: {expiration_date.isoformat()}", fg="blue")
+        click.secho(
+            f"📅 Current Date: {today.isoformat()} | Hy3 free tier expiry: {expiration_date.isoformat()}",
+            fg="blue",
+        )
 
         if 0 <= delta_days <= 3:
             click.secho(
@@ -207,7 +216,10 @@ def check_hy3_expiration() -> None:
                 bold=True,
             )
         else:
-            click.secho(f"ℹ️ tencent/hy3:free remains active for {delta_days} more days.", fg="cyan")
+            click.secho(
+                f"ℹ️ tencent/hy3:free remains active for {delta_days} more days.",
+                fg="cyan",
+            )
         click.secho("=" * 70 + "\n", fg="blue")
     except Exception as exc:
         click.secho(f"Failed to check Hy3 expiration date: {exc}", fg="yellow")
@@ -216,6 +228,7 @@ def check_hy3_expiration() -> None:
 # ---------------------------------------------------------------------------
 # CLI Command Setup
 # ---------------------------------------------------------------------------
+
 
 @click.group()
 def main() -> None:
@@ -236,6 +249,9 @@ def run_vibe_coding(idea: str) -> None:
     check_hy3_expiration()
     validate_api_keys()
 
+    graph = get_vibe_coding_graph()
+
+    initial_state = {
         "spec": None,
         "artifact": None,
         "test_logs": None,
@@ -252,7 +268,11 @@ def run_vibe_coding(idea: str) -> None:
         sys.exit(1)
 
     if final_state.get("error"):
-        click.secho(f"❌ Pipeline terminated with error: {final_state['error']}", fg="red", bold=True)
+        click.secho(
+            f"❌ Pipeline terminated with error: {final_state['error']}",
+            fg="red",
+            bold=True,
+        )
         sys.exit(1)
 
     dr = final_state.get("debug_report")
@@ -263,9 +283,16 @@ def run_vibe_coding(idea: str) -> None:
     click.echo("=" * 50)
 
     if dr and dr.passed:
-        click.secho(f"✔ SUCCESS: All tests passed on attempt {attempts}/3!", fg="green", bold=True)
+        click.secho(
+            f"✔ SUCCESS: All tests passed on attempt {attempts}/3!",
+            fg="green",
+            bold=True,
+        )
         if final_state.get("git_checkpoint_sha"):
-            click.secho(f"📦 Git Checkpoint SHA: {final_state['git_checkpoint_sha'][:7]}", fg="green")
+            click.secho(
+                f"📦 Git Checkpoint SHA: {final_state['git_checkpoint_sha'][:7]}",
+                fg="green",
+            )
 
         # Display files created
         artifact = final_state.get("artifact")
@@ -274,8 +301,15 @@ def run_vibe_coding(idea: str) -> None:
             for fp in artifact.files.keys():
                 click.secho(f"  • {fp}", fg="cyan")
     else:
-        click.secho(f"❌ FAILURE: Tests failed to pass after {attempts} cycles.", fg="red", bold=True)
-        click.secho("🔄 Git state has been rolled back to original clean HEAD commit.", fg="yellow")
+        click.secho(
+            f"❌ FAILURE: Tests failed to pass after {attempts} cycles.",
+            fg="red",
+            bold=True,
+        )
+        click.secho(
+            "🔄 Git state has been rolled back to original clean HEAD commit.",
+            fg="yellow",
+        )
 
     # Display Quota Tracker Status
     router = get_router()
@@ -283,12 +317,18 @@ def run_vibe_coding(idea: str) -> None:
     if summary:
         click.echo("\nRemaining Quotas Today:")
         for label, stats in summary.items():
-            click.echo(f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}")
+            click.echo(
+                f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}"
+            )
 
 
 @run.command(name="deep-research")
 @click.argument("topic")
-@click.option("--thread-id", default=None, help="Optional thread ID to resume a previous execution checkpoint.")
+@click.option(
+    "--thread-id",
+    default=None,
+    help="Optional thread ID to resume a previous execution checkpoint.",
+)
 def run_deep_research(topic: str, thread_id: Optional[str]) -> None:
     """Execute System B: Safety -> Context Compression -> Web Search -> Grounding -> Synthesizer."""
     check_hy3_expiration()
@@ -297,7 +337,9 @@ def run_deep_research(topic: str, thread_id: Optional[str]) -> None:
     # Auto-generate a thread-id if none provided
     tid = thread_id or f"research-{abs(hash(topic)) % 100000}"
 
-    click.secho(f"🚀 Launching System B (Deep Research) | Thread: {tid}", fg="green", bold=True)
+    click.secho(
+        f"🚀 Launching System B (Deep Research) | Thread: {tid}", fg="green", bold=True
+    )
     click.secho(f"🔎 Topic: '{topic}'", fg="green")
 
     graph = get_deep_research_graph()
@@ -320,17 +362,28 @@ def run_deep_research(topic: str, thread_id: Optional[str]) -> None:
         final_state = graph.invoke(inputs, config=config)
     except Exception as exc:
         click.secho(f"❌ Execution failed: {exc}", fg="red", bold=True)
-        click.secho(f"💡 You can resume this execution from the failure point by running:", fg="yellow")
-        click.secho(f"   python cli.py run deep-research \"{topic}\" --thread-id {tid}", fg="cyan")
+        click.secho(
+            f"💡 You can resume this execution from the failure point by running:",
+            fg="yellow",
+        )
+        click.secho(
+            f'   python cli.py run deep-research "{topic}" --thread-id {tid}', fg="cyan"
+        )
         sys.exit(1)
 
     if final_state.get("error"):
-        click.secho(f"❌ Pipeline terminated with error: {final_state['error']}", fg="red", bold=True)
+        click.secho(
+            f"❌ Pipeline terminated with error: {final_state['error']}",
+            fg="red",
+            bold=True,
+        )
         sys.exit(1)
 
     safety = final_state.get("safety")
     if safety and not safety.is_safe:
-        click.secho("⚠️ PIPELINE ABORTED: Topic classification is UNSAFE.", fg="red", bold=True)
+        click.secho(
+            "⚠️ PIPELINE ABORTED: Topic classification is UNSAFE.", fg="red", bold=True
+        )
         click.echo(f"Reasons: {', '.join(safety.reasons)}")
         sys.exit(1)
 
@@ -353,7 +406,9 @@ def run_deep_research(topic: str, thread_id: Optional[str]) -> None:
     if summary:
         click.echo("\nRemaining Quotas Today:")
         for label, stats in summary.items():
-            click.echo(f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}")
+            click.echo(
+                f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}"
+            )
 
 
 if __name__ == "__main__":
