@@ -1,71 +1,83 @@
 """
-Coder agent using PydanticAI definition.
-Responsible for writing the actual source code matching the Architect's TechnicalSpec.
+Coder agent for System A (Vibe Coding).
+
+Implements the Architect's TechnicalSpec. When existing file contents are
+provided, merges changes while preserving useful logic not contradicted by
+the idea (unless it is redundant in context).
 """
 
 from __future__ import annotations
 
-import json
-from pydantic_ai import Agent
-from schemas.vibe_coding import CodeArtifact, TechnicalSpec
-from core.router import call_agent
+from typing import Optional
 
-SYSTEM_PROMPT = """You are an expert programmer.
-Your goal is to write full, working code matching the provided Technical Specification.
-Implement all files requested.
+from core.agent_runtime import run_structured_agent
+from schemas.vibe_coding import CodeArtifact, TechnicalSpec
+
+SYSTEM_PROMPT = """You are an expert programmer working on an EXISTING codebase.
+
+Your job is to implement the Technical Specification with MINIMAL disruption.
+
+## Preservation rules (critical)
+1. If EXISTING FILE CONTENTS are provided for a path, treat them as the source of truth.
+2. MERGE your changes into that code. Prefer surgical edits over full rewrites.
+3. PRESERVE useful logic that is NOT part of the user idea but is still valuable:
+   helpers, edge-case handling, comments that document non-obvious behavior,
+   imports still needed, public APIs other modules may rely on, error handling.
+4. You may REMOVE or rewrite logic ONLY when:
+   - it directly conflicts with the new idea / tests, OR
+   - it is clearly redundant or dead in the new context (duplicate of new code,
+     unused after the change, or obsolete with the new design).
+5. Do NOT drop unrelated functions/classes just because the idea did not mention them.
+6. For brand-new paths (no existing content), write complete, working files.
+7. Output the FULL final content of every file you touch (not a unified diff).
+
 You MUST output your response strictly as a JSON object matching this schema:
 {
   "files": {
      "relative/path/to/file1.py": "full source code for file1",
      "relative/path/to/file2.py": "full source code for file2"
   },
-  "summary": "Detailed summary of the changes and files implemented."
+  "summary": "What you changed AND what existing logic you intentionally preserved or removed (and why)."
 }
 
 Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
 """
 
-# Official PydanticAI Agent definition
-coder_agent = Agent(
-    "test",
-    output_type=CodeArtifact,
-    system_prompt=SYSTEM_PROMPT,
-)
+
+def _format_existing_block(existing_files: dict[str, str]) -> str:
+    if not existing_files:
+        return (
+            "EXISTING FILE CONTENTS: (none — all paths are new; implement from scratch)\n"
+        )
+    parts = [
+        "EXISTING FILE CONTENTS (preserve useful logic; merge, do not casually rewrite):\n"
+    ]
+    for path, content in existing_files.items():
+        parts.append(f"### FILE: {path}\n```\n{content}\n```\n")
+    return "\n".join(parts)
 
 
-def run_coder(spec: TechnicalSpec, router_instance=None) -> CodeArtifact:
-    """Run the Coder agent to implement the files requested in the TechnicalSpec."""
+def run_coder(
+    spec: TechnicalSpec,
+    router_instance=None,
+    existing_files: Optional[dict[str, str]] = None,
+) -> CodeArtifact:
+    """Implement the TechnicalSpec, merging into *existing_files* when present."""
+    existing_files = existing_files or {}
     prompt_payload = (
         f"Architecture design:\n{spec.architecture}\n\n"
         f"Files to create/modify:\n{spec.files_to_create}\n\n"
-        f"Test cases to pass:\n{spec.test_cases}"
+        f"Test cases to pass:\n{spec.test_cases}\n\n"
+        f"{_format_existing_block(existing_files)}"
     )
-
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt_payload},
     ]
-
-    # In vibe_coding, the coder uses openrouter cohere/north-mini-code:free
-    caller = router_instance or call_agent
-    if hasattr(caller, "call_agent"):
-        resp = caller.call_agent(
-            provider="openrouter",
-            model="cohere/north-mini-code:free",
-            messages=messages,
-        )
-    else:
-        resp = caller(
-            provider="openrouter",
-            model="cohere/north-mini-code:free",
-            messages=messages,
-        )
-
-    content = resp.content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[-1]
-        if content.endswith("```"):
-            content = content.rsplit("```", 1)[0]
-        content = content.strip()
-
-    return CodeArtifact.model_validate_json(content)
+    return run_structured_agent(
+        "vibe_coding",
+        "coder",
+        messages=messages,
+        schema=CodeArtifact,
+        router_instance=router_instance,
+    )

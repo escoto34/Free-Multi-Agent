@@ -1,7 +1,7 @@
-# Environment & secrets
+# Environment & secrets (live keys — only .env.example is tracked)
 .env
 *.env
-opencode.json
+!.env.example
 
 # Python
 __pycache__/
@@ -23,10 +23,11 @@ env/
 *.swp
 *.swo
 
-# SQLite databases (quota tracking, checkpoints)
+# SQLite databases (quota tracking, checkpoints, run history)
 *.db
 *.sqlite
 *.sqlite3
+data/
 
 # OS
 .DS_Store
@@ -36,3 +37,23 @@ Thumbs.db
 .pytest_cache/
 htmlcov/
 .coverage
+.coverage.*
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.tox/
+.nox/
+
+# Logs & local junk
+*.log
+*.bak
+*.orig
+*~
+
+# Generated knowledge graph (local tooling; not source)
+graphify-out/
+
+# Ad-hoc local scratch scripts (not part of the product)
+scratch/

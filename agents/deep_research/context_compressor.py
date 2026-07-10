@@ -1,16 +1,14 @@
 """
-Context Compressor agent using PydanticAI definition.
-Extracts search parameters, trends, and keywords from a research topic.
+Context Compressor agent for System B (Deep Research).
+
+Provider/model/fallback from config/model_router.yaml.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from pydantic_ai import Agent
-
-from core.agent_config import get_agent_config
-from core.router import call_agent
+from core.agent_runtime import run_structured_agent
 from schemas.deep_research import CondensedTrends
 
 SYSTEM_PROMPT = """You are an expert information synthesis and context compression agent.
@@ -35,68 +33,33 @@ You MUST output your response strictly as a JSON object matching this schema:
 Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
 """
 
-# Official PydanticAI Agent definition
-context_compressor_agent = Agent(
-    "test",
-    output_type=CondensedTrends,
-    system_prompt=SYSTEM_PROMPT,
-)
-
 
 def run_context_compressor(
     query: str,
     router_instance=None,
     fallback_override: Optional[dict[str, str]] = None,
 ) -> CondensedTrends:
-    """Run the Context Compressor agent to identify trends and guide web search.
-
-    Provider/model/fallback are read from config/model_router.yaml
-    (``deep_research.context_compressor``) rather than hardcoded, so editing
-    the YAML actually changes runtime behaviour.
-    """
+    """Extract short search terms from the research query."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Extract search targets for: {query}"},
     ]
+    trends = run_structured_agent(
+        "deep_research",
+        "context_compressor",
+        messages=messages,
+        schema=CondensedTrends,
+        router_instance=router_instance,
+        fallback_override=fallback_override,
+    )
 
-    cfg = get_agent_config("deep_research", "context_compressor")
-    fb = fallback_override or cfg.get("fallback")
-
-    caller = router_instance or call_agent
-    if hasattr(caller, "call_agent"):
-        resp = caller.call_agent(
-            provider=cfg["provider"],
-            model=cfg["model"],
-            messages=messages,
-            fallback=fb,
-        )
-    else:
-        resp = caller(
-            provider=cfg["provider"],
-            model=cfg["model"],
-            messages=messages,
-            fallback=fb,
-        )
-    content = resp.content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[-1]
-        if content.endswith("```"):
-            content = content.rsplit("```", 1)[0]
-        content = content.strip()
-
-    trends = CondensedTrends.model_validate_json(content)
-
-    # Defensive normalization: even with the tightened prompt above, don't
-    # trust the model to always obey. Cap count/length here too, so
-    # web_search.py always receives short, bounded terms regardless of what
-    # this specific call returned.
-    trimmed_technologies = []
+    # Defensive normalization — never trust the model alone.
+    trimmed: list[str] = []
     for term in trends.technologies[:6]:
         term = term.strip()
         if len(term) > 60:
             term = " ".join(term.split()[:6])
         if term:
-            trimmed_technologies.append(term)
-    trends.technologies = trimmed_technologies
-
+            trimmed.append(term)
+    trends.technologies = trimmed
     return trends

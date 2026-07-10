@@ -1,13 +1,9 @@
 """
-Command Line Interface for running Multi-Agent pipelines.
+Command Line Interface for Free-Multi-Agent.
 
-Commands:
-  - run vibe-coding "<idea>"
-  - run deep-research "<topic>"
-
-Features:
-  - Dynamically warns if tencent/hy3:free is expiring within 3 days or has expired.
-  - Formatted observability displaying step status, fallbacks used, and remaining quota.
+Pipelines (vibe-coding / deep-research) run only inside the interactive CLI
+via /do (planner chooses steps). Outer commands are chat, config, keys,
+providers, skills, quota, history.
 """
 
 from __future__ import annotations
@@ -20,172 +16,72 @@ from pathlib import Path
 from typing import Optional
 
 import click
-import yaml
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
-from graphs.vibe_coding_graph import get_vibe_coding_graph
-from graphs.deep_research_graph import get_deep_research_graph
+from core.agent_config import get_agent_config
 from core.router import get_router
+from core.runs import get_run_history
 
-def validate_api_keys() -> None:
-    """Validate that required API keys are configured and not placeholders."""
-    required = {
-        "OPENROUTER_API_KEY": "OpenRouter",
-        "GROQ_API_KEY": "Groq",
-        "COHERE_API_KEY": "Cohere",
-    }
-    for var, name in required.items():
-        val = os.environ.get(var)
-        if not val or not val.strip() or "your_" in val or "_here" in val:
-            click.secho(
-                f"❌ Error: Falta {var} en .env o tiene un valor placeholder.\n"
-                f"Por favor, configura tu API key de {name} en el archivo .env.",
-                fg="red",
-                bold=True,
-                err=True,
-            )
-            sys.exit(1)
-            """
-            MCP server for the "vibe_coding" pipeline (architect -> coder ->
-            test_executor -> debugger -> git_commit/git_rollback).
-
-            Exposes a single tool, `run_vibe_coding`, that opencode (or any MCP client)
-            can call as if it were a normal tool. Internally it drives the existing
-            LangGraph pipeline (graphs/vibe_coding_graph.py) and returns the final
-            CodeArtifact (files + summary) plus debug/status info as structured JSON.
-
-            Run standalone (stdio transport, what opencode expects) with:
-
-                python mcp_server.py
-
-            Note: the current graph implementation has no checkpointer, so there is no
-            resumable `thread_id` yet — each call runs the pipeline fully from scratch.
-            If you later add a SqliteSaver checkpointer to `get_vibe_coding_graph()`,
-            extend `_invoke_graph` to pass a `configurable={"thread_id": ...}` through
-            to `.invoke()`.
-            """
-
-            import json
-            import logging
-            from pathlib import Path
-            from typing import Any
-
-            from dotenv import load_dotenv
-            from mcp.server.fastmcp import FastMCP
-
-            # Load .env from this file's own directory, regardless of what cwd/env
-            # opencode (or any other MCP client) launched this process with. This means
-            # COHERE_API_KEY / OPENROUTER_API_KEY / GROQ_API_KEY don't need to be
-            # exported in the parent shell or re-declared in opencode.json's
-            # "environment" block — they just need to exist in this .env file.
-            load_dotenv(Path(__file__).parent / ".env")
-
-            from graphs.vibe_coding_graph import VibeCodingState, get_vibe_coding_graph
-
-            logging.basicConfig(level=logging.INFO)
-            logger = logging.getLogger(__name__)
-
-            mcp = FastMCP("vibe-coding")
-
-            # Compile the graph once at import time; reused across tool calls.
-            _graph = get_vibe_coding_graph()
-
-            def _initial_state(idea: str) -> VibeCodingState:
-                """Build a fresh initial state matching VibeCodingState's TypedDict shape."""
-                return {
-                    "idea": idea,
-                    "spec": None,
-                    "artifact": None,
-                    "test_logs": None,
-                    "debug_report": None,
-                    "fix_attempts": 0,
-                    "git_checkpoint_sha": None,
-                    "error": None,
-                }
-
-            def _invoke_graph(idea: str) -> dict[str, Any]:
-                """Run the compiled StateGraph end-to-end and normalize the final state
-                into a plain JSON-serializable dict.
-                """
-                final_state: VibeCodingState = _graph.invoke(_initial_state(idea))
-
-                artifact = final_state.get("artifact")
-                debug_report = final_state.get("debug_report")
-
-                return {
-                    "files": artifact.files if artifact else {},
-                    "summary": artifact.summary if artifact else None,
-                    "passed": debug_report.passed if debug_report else None,
-                    "issues": debug_report.issues if debug_report else [],
-                    "fix_attempts": final_state.get("fix_attempts", 0),
-                    "git_checkpoint_sha": final_state.get("git_checkpoint_sha"),
-                    "error": final_state.get("error"),
-                }
-
-            @mcp.tool()
-            def run_vibe_coding(idea: str) -> str:
-                """Run the full vibe-coding pipeline (architect -> coder -> test_executor
-                -> debugger -> git_commit/git_rollback) on a software idea and return the
-                resulting files, summary, and pass/fail status as JSON.
-
-                On success (tests pass within 3 fix cycles) the changes are committed to
-                Git. On exhausting 3 fix cycles without passing, the repo is rolled back
-                (`git reset --hard` + `git clean -fd`) to the pre-run checkpoint.
-
-                Args:
-                    idea: Natural-language description of what to build,
-                        e.g. "Build a REST API for task management with SQLite".
-
-                Returns:
-                    JSON string: {
-                        "files": {"path/to/file.py": "source code", ...},
-                        "summary": "...",
-                        "passed": true_or_false_or_null,
-                        "issues": ["..."],
-                        "fix_attempts": 0-3,
-                        "git_checkpoint_sha": "...",
-                        "error": null_or_error_message
-                    }
-                """
-                try:
-                    result = _invoke_graph(idea)
-                except Exception as exc:
-                    logger.exception("vibe_coding pipeline crashed")
-                    result = {"error": str(exc)}
-                return json.dumps(result)
-
-            if __name__ == "__main__":
-                # stdio transport is what opencode (and most MCP clients) expect for
-                # locally-spawned servers.
-                mcp.run(transport="stdio")
-
-
-# Configure logging to show pipeline steps clearly in console
 logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
 
-_CONFIG_PATH = Path(__file__).parent / "config" / "model_router.yaml"
+
+def _providers_used_by_config() -> set[str]:
+    """Providers referenced by active System A/B + cli roles."""
+    used: set[str] = set()
+    try:
+        from core.config_editor import list_roles
+
+        for row in list_roles():
+            if row.get("provider"):
+                used.add(str(row["provider"]))
+            fb = row.get("fallback")
+            if isinstance(fb, str) and "/" in fb:
+                used.add(fb.split("/", 1)[0])
+    except Exception:
+        used |= {"groq", "openrouter", "cohere"}
+    return used
 
 
-# ---------------------------------------------------------------------------
-# Hy3 Expiration Warning Helper
-# ---------------------------------------------------------------------------
+def validate_api_keys() -> None:
+    """Validate keys only for providers actually used in model_router.yaml roles."""
+    from core.keys import provider_env_map
+
+    env_map = provider_env_map()
+    needed = _providers_used_by_config()
+    missing: list[str] = []
+    for prov in sorted(needed):
+        env_name = env_map.get(prov)
+        if not env_name:
+            continue
+        val = os.environ.get(env_name)
+        if not val or not val.strip() or "your_" in val or "_here" in val:
+            missing.append(f"  {prov:12} → {env_name}  (multiagent keys set {prov})")
+    if missing:
+        click.secho(
+            "❌ Missing API keys for providers used by current roles:\n"
+            + "\n".join(missing)
+            + "\n\nOptional providers (mistral/gemini/cerebras) only needed if "
+            "assigned in /config or as fallbacks.",
+            fg="red",
+            bold=True,
+            err=True,
+        )
+        sys.exit(1)
 
 
 def check_hy3_expiration() -> None:
-    """Read expiration dates from model_router.yaml and print warnings if near."""
+    """Warn if tencent/hy3:free is near or past free_until (from YAML cache)."""
     try:
-        with open(_CONFIG_PATH) as fh:
-            cfg = yaml.safe_load(fh)
-
-        # Check date for vibe_coding debugger
-        free_until_str = (
-            cfg.get("vibe_coding", {}).get("debugger", {}).get("free_until")
-        )
+        free_until_str = get_agent_config("vibe_coding", "debugger").get("free_until")
+        if not free_until_str:
+            free_until_str = get_agent_config(
+                "deep_research", "context_compressor"
+            ).get("free_until")
         if not free_until_str:
             return
 
@@ -195,7 +91,8 @@ def check_hy3_expiration() -> None:
 
         click.secho("=" * 70, fg="blue")
         click.secho(
-            f"📅 Current Date: {today.isoformat()} | Hy3 free tier expiry: {expiration_date.isoformat()}",
+            f"📅 Current Date: {today.isoformat()} | Hy3 free tier expiry: "
+            f"{expiration_date.isoformat()}",
             fg="blue",
         )
 
@@ -203,7 +100,7 @@ def check_hy3_expiration() -> None:
             click.secho(
                 f"⚠️ WARNING: tencent/hy3:free expires in {delta_days} day(s) "
                 f"(on {expiration_date.isoformat()})!\n"
-                f"Please ensure fallback configurations (openai/gpt-oss-120b) are tested.",
+                f"Edit config/model_router.yaml to switch models; no Python changes needed.",
                 fg="yellow",
                 bold=True,
             )
@@ -211,7 +108,7 @@ def check_hy3_expiration() -> None:
             click.secho(
                 f"⚠️ WARNING: tencent/hy3:free EXPIRED {abs(delta_days)} day(s) ago "
                 f"(on {expiration_date.isoformat()})!\n"
-                f"Automatic fallback cascade to openai/gpt-oss-120b on Groq will be triggered.",
+                f"Fallback cascade (e.g. gpt-oss-120b on Groq) will be used when primary fails.",
                 fg="red",
                 bold=True,
             )
@@ -225,190 +122,311 @@ def check_hy3_expiration() -> None:
         click.secho(f"Failed to check Hy3 expiration date: {exc}", fg="yellow")
 
 
-# ---------------------------------------------------------------------------
-# CLI Command Setup
-# ---------------------------------------------------------------------------
+def _print_quota_summary() -> None:
+    router = get_router()
+    summary = router.quota.status_summary()
+    if not summary:
+        click.echo("No quota usage recorded today yet.")
+        return
+    click.echo("\nRemaining Quotas Today:")
+    for label, stats in summary.items():
+        click.echo(
+            f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}"
+        )
 
 
-@click.group()
-def main() -> None:
-    """Multi-Agent Ecosystem Command Line Interface."""
-    pass
+@click.group(invoke_without_command=True)
+@click.pass_context
+def main(ctx: click.Context) -> None:
+    """Free-Multi-Agent — interactive CLI (pipelines only inside the TUI).
+
+    With no subcommand (``multiagent`` / ``python cli.py``), opens the chat TUI.
+    Use /do inside the TUI (planner picks vibe/research) — not as outer subcommands.
+    """
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(chat_cmd)
+
+
+@main.command(name="quota")
+def show_quota() -> None:
+    """Show today's free-tier quota usage (from data/quotas.db)."""
+    _print_quota_summary()
+
+
+@main.command(name="history")
+@click.option("--limit", default=15, show_default=True, help="Max rows to show.")
+def show_history(limit: int) -> None:
+    """Show recent pipeline runs (from data/runs.db)."""
+    rows = get_run_history().list_recent(limit=limit)
+    if not rows:
+        click.echo("No runs recorded yet.")
+        return
+    for r in rows:
+        status = r["status"]
+        color = {
+            "success": "green",
+            "failed": "red",
+            "error": "red",
+            "aborted": "yellow",
+            "unsafe": "yellow",
+            "running": "cyan",
+        }.get(status, "white")
+        click.secho(
+            f"{r['created_at'][:19]}  {r['system']:14}  {status:8}  "
+            f"{(r['input_summary'] or '')[:60]}",
+            fg=color,
+        )
+        if r.get("error"):
+            click.echo(f"    error: {r['error'][:120]}")
+        if r.get("id"):
+            click.echo(f"    id: {r['id']}")
 
 
 @main.group()
-def run() -> None:
-    """Run a multi-agent orchestration graph."""
+def config() -> None:
+    """Inspect / edit model_router.yaml (single source of truth)."""
     pass
 
 
-@run.command(name="vibe-coding")
-@click.argument("idea")
-def run_vibe_coding(idea: str) -> None:
-    """Execute System A: Architect -> Coder -> Test Executor -> Debugger with Git rollback."""
-    check_hy3_expiration()
-    validate_api_keys()
+@config.command(name="show")
+def config_show() -> None:
+    """Print active provider/model per agent role."""
+    from core.config_editor import list_roles, get_cli_settings
 
-    graph = get_vibe_coding_graph()
+    for row in list_roles():
+        if row.get("scalar"):
+            click.echo(f"  {row['id']:32} = {row['model']}")
+            continue
+        if row.get("missing"):
+            click.secho(f"  {row['id']:32} (missing)", fg="yellow")
+            continue
+        fb = f"  fallback→ {row['fallback']}" if row.get("fallback") else ""
+        free = f"  free_until={row['free_until']}" if row.get("free_until") else ""
+        click.echo(f"  {row['id']:32} {row['provider']}/{row['model']}{free}{fb}")
+    settings = get_cli_settings()
+    click.echo(f"\n  cli.context_limit_tokens       = {settings['context_limit_tokens']}")
 
-    initial_state = {
-        "spec": None,
-        "artifact": None,
-        "test_logs": None,
-        "debug_report": None,
-        "fix_attempts": 0,
-        "git_checkpoint_sha": None,
-        "error": None,
-    }
 
+@config.command(name="set")
+@click.argument("role_id")
+@click.argument("provider")
+@click.argument("model")
+def config_set(role_id: str, provider: str, model: str) -> None:
+    """Set provider/model for a role, e.g. cli.planner groq openai/gpt-oss-120b"""
+    from core.config_editor import set_role
+
+    if "." not in role_id:
+        click.secho("role_id must be system.role", fg="red", err=True)
+        sys.exit(2)
+    system, role = role_id.split(".", 1)
     try:
-        final_state = graph.invoke(initial_state)
+        node = set_role(system, role, provider=provider, model=model)
     except Exception as exc:
-        click.secho(f"❌ Execution failed: {exc}", fg="red", bold=True)
+        click.secho(f"❌ {exc}", fg="red", err=True)
         sys.exit(1)
-
-    if final_state.get("error"):
-        click.secho(
-            f"❌ Pipeline terminated with error: {final_state['error']}",
-            fg="red",
-            bold=True,
-        )
-        sys.exit(1)
-
-    dr = final_state.get("debug_report")
-    attempts = final_state.get("fix_attempts")
-
-    click.echo("\n" + "=" * 50)
-    click.secho("🏁 PIPELINE COMPLETE", fg="green", bold=True)
-    click.echo("=" * 50)
-
-    if dr and dr.passed:
-        click.secho(
-            f"✔ SUCCESS: All tests passed on attempt {attempts}/3!",
-            fg="green",
-            bold=True,
-        )
-        if final_state.get("git_checkpoint_sha"):
-            click.secho(
-                f"📦 Git Checkpoint SHA: {final_state['git_checkpoint_sha'][:7]}",
-                fg="green",
-            )
-
-        # Display files created
-        artifact = final_state.get("artifact")
-        if artifact:
-            click.echo("\nFiles Created/Modified:")
-            for fp in artifact.files.keys():
-                click.secho(f"  • {fp}", fg="cyan")
-    else:
-        click.secho(
-            f"❌ FAILURE: Tests failed to pass after {attempts} cycles.",
-            fg="red",
-            bold=True,
-        )
-        click.secho(
-            "🔄 Git state has been rolled back to original clean HEAD commit.",
-            fg="yellow",
-        )
-
-    # Display Quota Tracker Status
-    router = get_router()
-    summary = router.quota.status_summary()
-    if summary:
-        click.echo("\nRemaining Quotas Today:")
-        for label, stats in summary.items():
-            click.echo(
-                f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}"
-            )
-
-
-@run.command(name="deep-research")
-@click.argument("topic")
-@click.option(
-    "--thread-id",
-    default=None,
-    help="Optional thread ID to resume a previous execution checkpoint.",
-)
-def run_deep_research(topic: str, thread_id: Optional[str]) -> None:
-    """Execute System B: Safety -> Context Compression -> Web Search -> Grounding -> Synthesizer."""
-    check_hy3_expiration()
-    validate_api_keys()
-
-    # Auto-generate a thread-id if none provided
-    tid = thread_id or f"research-{abs(hash(topic)) % 100000}"
-
     click.secho(
-        f"🚀 Launching System B (Deep Research) | Thread: {tid}", fg="green", bold=True
+        f"✔ {role_id} → {node['provider']}/{node['model']}", fg="green"
     )
-    click.secho(f"🔎 Topic: '{topic}'", fg="green")
 
-    graph = get_deep_research_graph()
-    config = {"configurable": {"thread_id": tid}}
 
-    initial_state = {
-        "query": topic,
-        "safety": None,
-        "trends": None,
-        "search_results": None,
-        "grounded_report": None,
-        "final_report": None,
-        "error": None,
-    }
+@config.command(name="reset")
+@click.confirmation_option(prompt="Restore factory defaults (System A/B stack)?")
+def config_reset() -> None:
+    """Overwrite model_router.yaml with factory defaults."""
+    from core.config_editor import reset_to_defaults
+
+    reset_to_defaults()
+    click.secho("✔ Restored defaults from config/defaults_model_router.yaml", fg="green")
+
+
+@main.group()
+def keys() -> None:
+    """Manage API keys in .env (values never printed in full)."""
+    pass
+
+
+@keys.command(name="status")
+def keys_status() -> None:
+    """Show which provider keys are set (masked)."""
+    from core.keys import get_key_status
+
+    for row in get_key_status():
+        color = "green" if row["status"] == "set" else "red"
+        click.secho(
+            f"  {row['provider']:12} {row['env']:22} {row['status']:8} {row['preview']}",
+            fg=color,
+        )
+
+
+@keys.command(name="set")
+@click.argument("provider")
+@click.option("--key", "api_key", default=None, help="API key (prompted if omitted).")
+def keys_set(provider: str, api_key: Optional[str]) -> None:
+    """Write a provider API key to .env."""
+    from core.keys import provider_env_map, set_api_key
+
+    valid = sorted(provider_env_map())
+    if provider.lower() not in valid:
+        click.secho(f"❌ Unknown provider. Valid: {valid}", fg="red", err=True)
+        sys.exit(2)
+    if not api_key:
+        api_key = click.prompt(f"{provider} API key", hide_input=True)
+    try:
+        preview = set_api_key(provider, api_key)
+    except Exception as exc:
+        click.secho(f"❌ {exc}", fg="red", err=True)
+        sys.exit(1)
+    click.secho(f"✔ Saved {provider} key (preview {preview})", fg="green")
+
+
+@main.command(name="providers")
+def providers_cmd() -> None:
+    """List free-tier-friendly providers, signup URLs, models, and key status."""
+    from core.clients import get_provider_meta, list_provider_names
+    from core.keys import get_key_status
+
+    status = {r["provider"]: r for r in get_key_status()}
+    click.secho("Free-tier API platforms available to System A / B / chat:\n", bold=True)
+    for name in list_provider_names():
+        try:
+            meta = get_provider_meta(name)
+        except Exception as exc:
+            click.echo(f"  {name}: (error: {exc})")
+            continue
+        st = status.get(name, {})
+        key_s = st.get("status", "?")
+        color = "green" if key_s == "set" else "yellow"
+        click.secho(f"▸ {name}", fg="blue", bold=True, nl=False)
+        click.secho(f"  key={key_s}  env={meta.get('env_key')}", fg=color)
+        if meta.get("base_url"):
+            click.echo(f"    base_url: {meta['base_url']}")
+        if meta.get("signup"):
+            click.echo(f"    signup:   {meta['signup']}")
+        if meta.get("notes"):
+            click.echo(f"    notes:    {meta['notes']}")
+        models = meta.get("models") or []
+        if models:
+            click.echo(f"    models:   {', '.join(models[:8])}")
+        click.echo()
+    click.echo(
+        "Assign models inside the TUI:\n"
+        "  /planner set gemini gemini-2.5-flash\n"
+        "  /config set vibe_coding.coder mistral codestral-latest\n"
+        "  /do research X then implement Y\n"
+    )
+
+
+@main.command(name="chat")
+def chat_cmd() -> None:
+    """Interactive TUI (pipelines via /do planner only here)."""
+    try:
+        from cli_app.tui import run_app
+    except ImportError as exc:
+        click.secho(
+            f"❌ Interactive TUI requires textual. Install with:\n"
+            f"   pip install textual\n({exc})",
+            fg="red",
+            err=True,
+        )
+        sys.exit(1)
+    run_app()
+
+
+@main.group()
+def skills() -> None:
+    """Integrate external SKILL.md packs (global enable/disable)."""
+    pass
+
+
+@skills.command(name="list")
+def skills_list() -> None:
+    """List registered skills (ON/off). Works from any directory."""
+    from core.skills import GLOBAL_SKILLS_FILE, list_skills
+
+    rows = list_skills()
+    click.echo(f"Registry: {GLOBAL_SKILLS_FILE}")
+    if not rows:
+        click.echo("  (none) — multiagent skills add /path/to/skill")
+        return
+    for s in rows:
+        color = "green" if s.enabled and s.valid else ("yellow" if s.enabled else "white")
+        click.secho(f"  {s.summary_line()}", fg=color)
+
+
+@skills.command(name="add")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--disabled", is_flag=True, help="Register but leave disabled.")
+def skills_add(path: str, disabled: bool) -> None:
+    """Register a skill folder (must contain valid SKILL.md)."""
+    from core.skills import add_skill
 
     try:
-        # If thread-id is provided, check if we should resume from savepoint by passing None inputs
-        # Otherwise, pass initial_state to start fresh
-        inputs = None if thread_id else initial_state
-        final_state = graph.invoke(inputs, config=config)
+        meta = add_skill(path, enabled=not disabled)
     except Exception as exc:
-        click.secho(f"❌ Execution failed: {exc}", fg="red", bold=True)
-        click.secho(
-            f"💡 You can resume this execution from the failure point by running:",
-            fg="yellow",
-        )
-        click.secho(
-            f'   python cli.py run deep-research "{topic}" --thread-id {tid}', fg="cyan"
-        )
+        click.secho(f"❌ {exc}", fg="red", err=True)
         sys.exit(1)
+    state = "enabled" if meta.enabled else "disabled"
+    click.secho(f"✔ Registered {meta.name!r} ({state}) → {meta.path}", fg="green")
 
-    if final_state.get("error"):
-        click.secho(
-            f"❌ Pipeline terminated with error: {final_state['error']}",
-            fg="red",
-            bold=True,
-        )
+
+@skills.command(name="enable")
+@click.argument("name")
+def skills_enable(name: str) -> None:
+    """Enable a registered skill globally."""
+    from core.skills import set_enabled
+
+    try:
+        meta = set_enabled(name, True)
+    except Exception as exc:
+        click.secho(f"❌ {exc}", fg="red", err=True)
         sys.exit(1)
+    click.secho(f"✔ {meta.name} enabled", fg="green")
 
-    safety = final_state.get("safety")
-    if safety and not safety.is_safe:
-        click.secho(
-            "⚠️ PIPELINE ABORTED: Topic classification is UNSAFE.", fg="red", bold=True
-        )
-        click.echo(f"Reasons: {', '.join(safety.reasons)}")
+
+@skills.command(name="disable")
+@click.argument("name")
+def skills_disable(name: str) -> None:
+    """Disable a skill globally (stays registered)."""
+    from core.skills import set_enabled
+
+    try:
+        meta = set_enabled(name, False)
+    except Exception as exc:
+        click.secho(f"❌ {exc}", fg="red", err=True)
         sys.exit(1)
+    click.secho(f"✔ {meta.name} disabled", fg="yellow")
 
-    click.echo("\n" + "=" * 50)
-    click.secho("🏁 EXECUTIVE SYNTHESIS REPORT", fg="green", bold=True)
-    click.echo("=" * 50)
 
-    report = final_state.get("final_report")
-    if report:
-        click.secho(report.content, fg="white")
-        click.echo("\nSources Cited:")
-        for idx, src in enumerate(report.sources, 1):
-            click.secho(f"  [{idx}] {src}", fg="cyan")
-    else:
-        click.secho("No report was generated.", fg="yellow")
+@skills.command(name="remove")
+@click.argument("name")
+def skills_remove(name: str) -> None:
+    """Unregister a skill (does not delete files)."""
+    from core.skills import remove_skill
 
-    # Display Quota Tracker Status
-    router = get_router()
-    summary = router.quota.status_summary()
-    if summary:
-        click.echo("\nRemaining Quotas Today:")
-        for label, stats in summary.items():
-            click.echo(
-                f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}"
-            )
+    if not remove_skill(name):
+        click.secho(f"❌ Skill {name!r} not found", fg="red", err=True)
+        sys.exit(1)
+    click.secho(f"✔ Unregistered {name!r}", fg="green")
+
+
+@skills.command(name="show")
+@click.argument("name")
+def skills_show(name: str) -> None:
+    """Show skill metadata and body preview."""
+    from core.skills import load_skill
+
+    try:
+        meta = load_skill(name)
+    except Exception as exc:
+        click.secho(f"❌ {exc}", fg="red", err=True)
+        sys.exit(1)
+    click.echo(f"name:        {meta.name}")
+    click.echo(f"enabled:     {meta.enabled}")
+    click.echo(f"valid:       {meta.valid} {meta.error or ''}")
+    click.echo(f"path:        {meta.path}")
+    click.echo(f"description: {meta.description}")
+    click.echo("\n--- body preview ---")
+    click.echo(meta.body[:1200] + ("…" if len(meta.body) > 1200 else ""))
 
 
 if __name__ == "__main__":

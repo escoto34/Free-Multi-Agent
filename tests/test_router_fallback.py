@@ -106,34 +106,39 @@ def test_router_fallback_on_http_error(router_with_tracker, monkeypatch):
         return_value=Response(429, content="Rate Limit")
     )
 
-    # 2. OpenRouter fallback succeeds
-    or_route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+    # 2. Cascade: groq → gemini (see model_router.yaml fallback_cascade)
+    gemini_route = respx.post(
+        url__startswith="https://generativelanguage.googleapis.com/"
+    ).mock(
         return_value=Response(
             200,
             json={
                 "choices": [
-                    {"message": {"content": "Hello from OpenRouter Fallback", "role": "assistant"}}
+                    {
+                        "message": {
+                            "content": "Hello from Gemini Fallback",
+                            "role": "assistant",
+                        }
+                    }
                 ]
-            }
+            },
         )
     )
 
-    # Let's perform a call to groq
-    # General cascade for groq should fall back to OpenRouter (cohere/north-mini-code:free)
     resp = router_with_tracker.call_agent(
         provider="groq",
         model="openai/gpt-oss-120b",
         messages=[{"role": "user", "content": "Hi"}],
-        max_retries=1,  # Speed up test
+        max_retries=1,
     )
 
-    assert resp.content == "Hello from OpenRouter Fallback"
-    assert resp.provider == "openrouter"
-    assert resp.model == "cohere/north-mini-code:free"
+    assert resp.content == "Hello from Gemini Fallback"
+    assert resp.provider == "gemini"
+    assert resp.model == "gemini-2.5-flash"
     assert resp.used_fallback is True
     assert "Rate Limit" in resp.fallback_reason or "retries exhausted" in resp.fallback_reason
     assert groq_route.called
-    assert or_route.called
+    assert gemini_route.called
 
 
 def test_router_fallback_on_quota_gate(router_with_tracker, monkeypatch):
@@ -142,21 +147,19 @@ def test_router_fallback_on_quota_gate(router_with_tracker, monkeypatch):
     for _ in range(28):
         tracker.record_call("cohere", "command-a-plus-05-2026")
 
-    # Mock OpenRouter (Cohere's fallback)
+    # Cascade: cohere → mistral (model_router.yaml)
     with respx.mock:
-        or_route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        mistral_route = respx.post("https://api.mistral.ai/v1/chat/completions").mock(
             return_value=Response(
                 200,
                 json={
                     "choices": [
                         {"message": {"content": "Fallback output", "role": "assistant"}}
                     ]
-                }
+                },
             )
         )
 
-        # Call cohere — it should immediately skip cohere due to quota gate
-        # and request the fallback on OpenRouter
         resp = router_with_tracker.call_agent(
             provider="cohere",
             model="command-a-plus-05-2026",
@@ -164,11 +167,11 @@ def test_router_fallback_on_quota_gate(router_with_tracker, monkeypatch):
         )
 
         assert resp.content == "Fallback output"
-        assert resp.provider == "openrouter"
-        assert resp.model == "tencent/hy3:free"
+        assert resp.provider == "mistral"
+        assert resp.model == "mistral-small-latest"
         assert resp.used_fallback is True
         assert "Quota exhausted" in resp.fallback_reason
-        assert or_route.called
+        assert mistral_route.called
 
 
 @respx.mock
@@ -315,8 +318,13 @@ def test_grounding_empty_search_validation():
     assert "Los resultados de búsqueda web están vacíos" in str(exc.value)
 
 
-def test_grounding_defensive_retry_on_json_error():
-    """Verify that run_grounding retries once if first response contains invalid/truncated JSON."""
+def test_grounding_builds_report_from_prose_not_json():
+    """run_grounding treats model output as plain cited prose (not JSON).
+
+    GroundedReport is assembled in Python: content = model text, sources =
+    citation extraction / URL scrape from search_results. There is no JSON
+    parse and no defensive retry path — that belonged to an older design.
+    """
     from agents.deep_research.grounding import run_grounding
     from core.router import LLMResponse
 
@@ -325,25 +333,23 @@ def test_grounding_defensive_retry_on_json_error():
     def mock_router(provider, model, messages, **kwargs):
         nonlocal call_count
         call_count += 1
-        if call_count == 1:
-            # First call returns truncated JSON
-            return LLMResponse(
-                content='{"content": "Truncated report...',
-                provider=provider,
-                model=model,
-            )
-        else:
-            # Second call (retry) returns valid JSON
-            return LLMResponse(
-                content='{"content": "Full valid report", "sources": ["http://quantum.org"]}',
-                provider=provider,
-                model=model,
-            )
+        return LLMResponse(
+            content=(
+                "According to available material, quantum computers encode "
+                "information in qubits rather than classical bits."
+            ),
+            provider=provider,
+            model=model,
+        )
 
-    result = run_grounding("Quantum Computers", "Search info here", router_instance=mock_router)
-    assert call_count == 2  # Proves the retry was executed
-    assert result.content == "Full valid report"
-    assert result.sources == ["http://quantum.org"]
+    search = "Background: see https://quantum.org/qubits for an overview."
+    result = run_grounding(
+        "Quantum Computers", search, router_instance=mock_router
+    )
+
+    assert call_count == 1  # single call, no JSON-retry loop
+    assert "qubits" in result.content
+    assert "https://quantum.org/qubits" in result.sources
 
 
 @respx.mock

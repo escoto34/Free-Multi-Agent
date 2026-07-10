@@ -25,11 +25,16 @@ from agents.deep_research.grounding import run_grounding
 from agents.deep_research.safety_filter import run_safety_filter
 from agents.deep_research.synthesizer import run_synthesizer
 from agents.deep_research.web_search import NoLiveSearchError, run_web_search
+from core.runs import get_run_history
 from schemas.deep_research import CondensedTrends, GroundedReport, SafetyClassification
+from schemas.requests import DeepResearchRequest
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CHECKPOINT_DB = "data/checkpoints.db"
+# Always under MultiAgent install root so /research works from any cwd.
+_DEFAULT_CHECKPOINT_DB = str(
+    Path(__file__).resolve().parent.parent / "data" / "checkpoints.db"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -228,3 +233,96 @@ def get_deep_research_graph(db_path: Optional[str] = None) -> Any:
     workflow.add_edge("synthesizer", END)
 
     return workflow.compile(checkpointer=checkpointer)
+
+
+def initial_deep_research_state(topic: str) -> DeepResearchState:
+    """Build a fresh graph state for System B."""
+    return {
+        "query": topic,
+        "safety": None,
+        "trends": None,
+        "search_results": None,
+        "grounded_report": None,
+        "final_report": None,
+        "error": None,
+    }
+
+
+def summarize_deep_research_state(final_state: dict[str, Any]) -> dict[str, Any]:
+    """JSON-serializable summary (full report content included for CLI display)."""
+    safety = final_state.get("safety")
+    report = final_state.get("final_report")
+    return {
+        "error": final_state.get("error"),
+        "is_safe": safety.is_safe if safety else None,
+        "safety_reasons": safety.reasons if safety else [],
+        "content": report.content if report else None,
+        "sources": report.sources if report else [],
+        "has_report": report is not None,
+    }
+
+
+def invoke_deep_research_pipeline(
+    topic: str,
+    *,
+    thread_id: Optional[str] = None,
+    db_path: Optional[str] = None,
+    graph=None,
+    record_history: bool = True,
+) -> dict[str, Any]:
+    """Validate input, run System B (optionally resume), record history.
+
+    Shared entrypoint for CLI (and future HTTP) so checkpoint resume stays consistent.
+    """
+    req = DeepResearchRequest(topic=topic, thread_id=thread_id)
+    tid = req.thread_id or f"research-{abs(hash(req.topic)) % 100000}"
+
+    history = get_run_history() if record_history else None
+    run_id = None
+    if history is not None:
+        run_id = history.start(
+            "deep_research",
+            req.topic,
+            meta={"thread_id": tid, "resume": bool(req.thread_id)},
+        )
+
+    compiled = graph if graph is not None else get_deep_research_graph(db_path=db_path)
+    config = {"configurable": {"thread_id": tid}}
+    inputs: Any = None if req.thread_id else initial_deep_research_state(req.topic)
+
+    try:
+        final_state = compiled.invoke(inputs, config=config)
+        summary = summarize_deep_research_state(final_state)
+        summary["thread_id"] = tid
+        if history is not None and run_id is not None:
+            if summary.get("error"):
+                status = "aborted"
+            elif summary.get("is_safe") is False:
+                status = "unsafe"
+            elif summary.get("has_report"):
+                status = "success"
+            else:
+                status = "failed"
+            history.finish(
+                run_id,
+                status=status,
+                result_summary=(summary.get("content") or status or "")[:500],
+                error=summary.get("error"),
+                meta={
+                    "thread_id": tid,
+                    "is_safe": summary.get("is_safe"),
+                    "source_count": len(summary.get("sources") or []),
+                },
+            )
+        if run_id is not None:
+            summary["run_id"] = run_id
+        return summary
+    except Exception as exc:
+        if history is not None and run_id is not None:
+            history.finish(
+                run_id,
+                status="error",
+                error=str(exc),
+                meta={"thread_id": tid},
+            )
+        raise

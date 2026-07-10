@@ -7,11 +7,15 @@ and SQLite checkpoint resumption for System B (Deep Research).
 from __future__ import annotations
 
 import os
-import shutil
-import pytest
 from pathlib import Path
-import git
 
+import git
+import pytest
+
+from graphs.deep_research_graph import get_deep_research_graph
+from graphs.vibe_coding_graph import get_vibe_coding_graph, initial_vibe_coding_state
+from schemas.deep_research import CondensedTrends, GroundedReport, SafetyClassification
+from schemas.vibe_coding import CodeArtifact, DebugReport, TechnicalSpec
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +58,7 @@ def test_vibe_coding_git_rollback_forced(temp_git_repo, monkeypatch):
     )
     monkeypatch.setattr(
         "graphs.vibe_coding_graph.run_architect",
-        lambda idea: spec
+        lambda idea: spec,
     )
 
     # Mock the Coder agent to write a buggy file
@@ -63,8 +67,8 @@ def test_vibe_coding_git_rollback_forced(temp_git_repo, monkeypatch):
         "graphs.vibe_coding_graph.run_coder",
         lambda *args, **kwargs: CodeArtifact(
             files={"src/main.py": buggy_code},
-            summary="Written buggy code"
-        )
+            summary="Written buggy code",
+        ),
     )
 
     # Mock Debugger agent to ALWAYS return passed=False
@@ -73,8 +77,8 @@ def test_vibe_coding_git_rollback_forced(temp_git_repo, monkeypatch):
         lambda *args, **kwargs: DebugReport(
             passed=False,
             issues=["Failing test 1"],
-            suggested_fix="Please fix the buggy return value."
-        )
+            suggested_fix="Please fix the buggy return value.",
+        ),
     )
 
     # Mock subprocess.run for pytest
@@ -85,20 +89,11 @@ def test_vibe_coding_git_rollback_forced(temp_git_repo, monkeypatch):
 
     monkeypatch.setattr(
         "subprocess.run",
-        lambda *args, **kwargs: MockCompletedProcess()
+        lambda *args, **kwargs: MockCompletedProcess(),
     )
 
-        "idea": "Build a hello function",
-        "spec": None,
-        "artifact": None,
-        "test_logs": None,
-        "debug_report": None,
-        "fix_attempts": 0,
-        "git_checkpoint_sha": None,
-        "error": None,
-    }
-
-    final_state = graph.invoke(initial_state)
+    graph = get_vibe_coding_graph()
+    final_state = graph.invoke(initial_vibe_coding_state("Build a hello function"))
 
     # 1. Assertions on State
     assert final_state["fix_attempts"] == 3
@@ -111,6 +106,137 @@ def test_vibe_coding_git_rollback_forced(temp_git_repo, monkeypatch):
     readme_file = repo_dir / "README.md"
     assert readme_file.exists()
     assert readme_file.read_text() == "# Initial Project Title\n"
+
+
+def test_vibe_coding_stops_when_debugger_always_raises(temp_git_repo, monkeypatch):
+    """Debugger LLM failures must still increment fix_attempts and end the graph.
+
+    Regression: exception path used to return only ``error`` without bumping
+    attempts → infinite coder→test→debugger loop → GRAPH_RECURSION_LIMIT.
+    """
+    repo, repo_dir = temp_git_repo
+
+    monkeypatch.setattr(
+        "graphs.vibe_coding_graph.run_architect",
+        lambda idea: TechnicalSpec(
+            architecture="Test architecture",
+            test_cases=["Test 1"],
+            files_to_create=["src/main.py"],
+        ),
+    )
+    monkeypatch.setattr(
+        "graphs.vibe_coding_graph.run_coder",
+        lambda *args, **kwargs: CodeArtifact(
+            files={"src/main.py": "def hello():\n    return 1\n"},
+            summary="ok",
+        ),
+    )
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("debugger LLM exploded")
+
+    monkeypatch.setattr("graphs.vibe_coding_graph.run_debugger", boom)
+
+    class MockCompletedProcess:
+        returncode = 1
+        stdout = "Test failed"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: MockCompletedProcess(),
+    )
+
+    graph = get_vibe_coding_graph()
+    final_state = graph.invoke(
+        initial_vibe_coding_state("Build a hello function"),
+        config={"recursion_limit": 40},
+    )
+
+    assert final_state["fix_attempts"] == 3
+    assert final_state["debug_report"] is not None
+    assert final_state["debug_report"].passed is False
+    assert not (repo_dir / "src" / "main.py").exists()
+
+
+def test_vibe_coding_architect_failure_does_not_loop(temp_git_repo, monkeypatch):
+    """Architect failure must go to rollback/end, not spin into coder forever."""
+    monkeypatch.setattr(
+        "graphs.vibe_coding_graph.run_architect",
+        lambda idea: (_ for _ in ()).throw(RuntimeError("architect down")),
+    )
+    coder_calls = {"n": 0}
+
+    def fake_coder(*a, **k):
+        coder_calls["n"] += 1
+        return CodeArtifact(files={"x.py": "x=1"}, summary="x")
+
+    monkeypatch.setattr("graphs.vibe_coding_graph.run_coder", fake_coder)
+
+    graph = get_vibe_coding_graph()
+    final_state = graph.invoke(
+        initial_vibe_coding_state("anything"),
+        config={"recursion_limit": 20},
+    )
+    assert coder_calls["n"] == 0
+    assert final_state.get("error")
+    assert "Architect" in (final_state.get("error") or "")
+
+
+def test_vibe_coding_preserves_preexisting_dirty_work(temp_git_repo, monkeypatch):
+    """Pre-existing uncommitted work must survive a 3-cycle git rollback.
+
+    architect_node stashes dirty state before snapshotting HEAD; rollback
+    restores that stash after reset --hard so MCP/CLI use in a dirty repo
+    does not silently destroy user WIP.
+    """
+    repo, repo_dir = temp_git_repo
+
+    wip_file = repo_dir / "my_wip_notes.txt"
+    wip_file.write_text("IMPORTANT USER WORK — do not destroy\n")
+
+    monkeypatch.setattr(
+        "graphs.vibe_coding_graph.run_architect",
+        lambda idea: TechnicalSpec(
+            architecture="Test architecture",
+            test_cases=["Test 1"],
+            files_to_create=["src/main.py"],
+        ),
+    )
+    monkeypatch.setattr(
+        "graphs.vibe_coding_graph.run_coder",
+        lambda *args, **kwargs: CodeArtifact(
+            files={"src/main.py": "def hello():\n    return 'buggy'\n"},
+            summary="Written buggy code",
+        ),
+    )
+    monkeypatch.setattr(
+        "graphs.vibe_coding_graph.run_debugger",
+        lambda *args, **kwargs: DebugReport(
+            passed=False,
+            issues=["Failing test 1"],
+            suggested_fix="Please fix.",
+        ),
+    )
+
+    class MockCompletedProcess:
+        returncode = 1
+        stdout = "Test failed"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: MockCompletedProcess(),
+    )
+
+    graph = get_vibe_coding_graph()
+    final_state = graph.invoke(initial_vibe_coding_state("Build a hello function"))
+
+    assert final_state["fix_attempts"] == 3
+    assert final_state["user_wip_stashed"] is True
+    assert not (repo_dir / "src" / "main.py").exists()
+    assert wip_file.exists(), "pre-existing WIP must be restored after rollback"
+    assert wip_file.read_text() == "IMPORTANT USER WORK — do not destroy\n"
 
 
 # ---------------------------------------------------------------------------
@@ -127,21 +253,30 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
         "compressor": 0,
         "web_search": 0,
         "grounding": 0,
-        "synthesizer": 0
+        "synthesizer": 0,
     }
 
     # 1. Setup agent mocks
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_safety_filter",
-        lambda query: (calls.update({"safety": calls["safety"] + 1}) or SafetyClassification(is_safe=True))
+        lambda query: (
+            calls.update({"safety": calls["safety"] + 1})
+            or SafetyClassification(is_safe=True)
+        ),
     )
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_context_compressor",
-        lambda query: (calls.update({"compressor": calls["compressor"] + 1}) or CondensedTrends(technologies=["AI"], rationale="test"))
+        lambda query: (
+            calls.update({"compressor": calls["compressor"] + 1})
+            or CondensedTrends(technologies=["AI"], rationale="test")
+        ),
     )
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_web_search",
-        lambda terms: (calls.update({"web_search": calls["web_search"] + 1}) or "Web search results compilation text.")
+        lambda terms: (
+            calls.update({"web_search": calls["web_search"] + 1})
+            or "Web search results compilation text."
+        ),
     )
 
     # Grounding will fail on the first run, and succeed on the second run
@@ -152,16 +287,25 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
         nonlocal fail_grounding
         if fail_grounding:
             raise ValueError("Cohere V2 rate limit 429 simulated failure")
-        return GroundedReport(content="Grounded summary of AI trends.", sources=["http://example.com"])
+        return GroundedReport(
+            content="Grounded summary of AI trends.",
+            sources=["http://example.com"],
+        )
 
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_grounding",
-        mock_grounding
+        mock_grounding,
     )
 
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_synthesizer",
-        lambda report, *args, **kwargs: (calls.update({"synthesizer": calls["synthesizer"] + 1}) or GroundedReport(content="Final synthesized executive report.", sources=["http://example.com"]))
+        lambda report, *args, **kwargs: (
+            calls.update({"synthesizer": calls["synthesizer"] + 1})
+            or GroundedReport(
+                content="Final synthesized executive report.",
+                sources=["http://example.com"],
+            )
+        ),
     )
 
     # 2. First Run (Fails at grounding node)

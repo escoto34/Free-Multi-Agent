@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Launcher: type `multiagent` or `MultiAgent` from any directory.
+# Defaults to interactive chat when called with no arguments (like `grok`).
+set -euo pipefail
+
+# Resolve real path even when this file is a symlink in ~/.local/bin
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
+PYTHON="$ROOT/venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON="$(command -v python3 || true)"
+fi
+if [ -z "${PYTHON:-}" ] || [ ! -x "$PYTHON" ]; then
+  echo "multiagent: no Python found. Create the venv first:" >&2
+  echo "  cd $ROOT && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt" >&2
+  exit 1
+fi
+
+# Keep the caller's cwd (System A / Git operate on wherever you are).
+# Project modules + .env are resolved via absolute paths / cli.py location.
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+if [ "$#" -eq 0 ]; then
+  exec "$PYTHON" "$ROOT/cli.py" chat
+fi
+exec "$PYTHON" "$ROOT/cli.py" "$@"

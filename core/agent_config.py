@@ -57,6 +57,11 @@ def reload_config() -> None:
     _cache = None
 
 
+def get_full_config(config_path: Optional[Path] = None) -> dict[str, Any]:
+    """Return the entire cached ``model_router.yaml`` document."""
+    return _load(config_path)
+
+
 def get_agent_config(*path: str, config_path: Optional[Path] = None) -> dict[str, Any]:
     """Fetch a nested agent role config by dot-path.
 
@@ -84,3 +89,17 @@ def get_agent_config(*path: str, config_path: Optional[Path] = None) -> dict[str
                 f"Revisa config/model_router.yaml."
             ) from exc
     return node
+
+
+def get_max_fix_cycles(config_path: Optional[Path] = None) -> int:
+    """Return System A max debugger fix cycles from YAML (default 3)."""
+    try:
+        vc = get_agent_config("vibe_coding", config_path=config_path)
+    except KeyError:
+        return 3
+    raw = vc.get("max_fix_cycles", 3)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return 3
+    return max(1, n)

@@ -47,6 +47,9 @@ from core.agent_config import get_agent_config
 GROQ_DAILY_LIMIT_PER_MODEL: int = 800  # 80 % of real ~1 000 RPD
 OPENROUTER_DAILY_LIMIT: int = 45  # 90 % of real ~50 RPD (shared)
 COHERE_DAILY_LIMIT: int = 28  # Conservative midpoint 25-30/day
+MISTRAL_DAILY_LIMIT: int = 200  # Free Experiment tier — conservative call cap
+GEMINI_DAILY_LIMIT: int = 400  # AI Studio free Flash-class (varies by model)
+CEREBRAS_DAILY_LIMIT: int = 500  # Free developer tier (approx.)
 
 # Maps provider -> the YAML key under providers.<provider>.* that holds its
 # daily limit. Each provider uses a differently-named key because the scope
@@ -55,9 +58,16 @@ _YAML_LIMIT_KEY = {
     "groq": "daily_limit_per_model",
     "openrouter": "daily_limit_shared",
     "cohere": "daily_limit",
+    "mistral": "daily_limit",
+    "gemini": "daily_limit",
+    "cerebras": "daily_limit",
 }
 
-_DEFAULT_DB_PATH = Path("data/quotas.db")
+# Providers that track quota per model name (vs shared account bucket).
+_PER_MODEL_PROVIDERS = frozenset({"groq"})
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "quotas.db"
 
 
 class QuotaTracker:
@@ -70,11 +80,14 @@ class QuotaTracker:
             # ... make the call ...
             tracker.record_call("groq", "openai/gpt-oss-120b")
 
-    The database file is created automatically on first use.
+    The database file is created automatically on first use, always under the
+    MultiAgent install tree (not the caller's cwd).
     """
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self._db_path = Path(db_path) if db_path else _DEFAULT_DB_PATH
+        if not self._db_path.is_absolute():
+            self._db_path = (_PROJECT_ROOT / self._db_path).resolve()
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._init_db()
@@ -111,14 +124,11 @@ class QuotaTracker:
     def _quota_key(provider: str, model: str) -> str:
         """Determine the tracking key for a (provider, model) pair.
 
-        * **Groq** — each model has its own independent daily budget, so the
-          key is the model name itself.
-        * **OpenRouter** — all ``:free`` models share a single daily budget,
-          so the key collapses to ``__shared__``.
-        * **Cohere** — all endpoints share a single daily budget, so the key
-          collapses to ``__shared__``.
+        * **Groq** — each model has its own independent daily budget.
+        * **Others** (OpenRouter free, Cohere, Mistral, Gemini, Cerebras) —
+          shared daily budget across models on that account.
         """
-        if provider == "groq":
+        if provider in _PER_MODEL_PROVIDERS:
             return model
         return "__shared__"
 
@@ -130,27 +140,36 @@ class QuotaTracker:
         first; falls back to the hardcoded module-level constants above if
         the YAML can't be loaded or doesn't define that provider's limit key
         (e.g. a stripped-down test fixture config).
-
-        For Groq the limit is *per model*; for the others it is *per
-        account* (shared).
         """
         fallback_limits = {
             "groq": GROQ_DAILY_LIMIT_PER_MODEL,
             "openrouter": OPENROUTER_DAILY_LIMIT,
             "cohere": COHERE_DAILY_LIMIT,
+            "mistral": MISTRAL_DAILY_LIMIT,
+            "gemini": GEMINI_DAILY_LIMIT,
+            "cerebras": CEREBRAS_DAILY_LIMIT,
         }
-        if provider not in fallback_limits:
-            raise ValueError(
-                f"Unknown provider: {provider!r}. Valid: {sorted(fallback_limits)}"
-            )
 
         try:
             provider_cfg = get_agent_config("providers", provider)
         except KeyError:
-            return fallback_limits[provider]
+            if provider in fallback_limits:
+                return fallback_limits[provider]
+            # Unknown provider: generous default so new YAML-only providers work
+            return 200
 
-        yaml_key = _YAML_LIMIT_KEY[provider]
-        return provider_cfg.get(yaml_key, fallback_limits[provider])
+        # Prefer the limit key declared for this provider, then any common key.
+        yaml_key = _YAML_LIMIT_KEY.get(provider)
+        if yaml_key and yaml_key in provider_cfg:
+            return int(provider_cfg[yaml_key])
+        for key in (
+            "daily_limit",
+            "daily_limit_shared",
+            "daily_limit_per_model",
+        ):
+            if key in provider_cfg:
+                return int(provider_cfg[key])
+        return int(fallback_limits.get(provider, 200))
 
     # ------------------------------------------------------------------
     # Public API

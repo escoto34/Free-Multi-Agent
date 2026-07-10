@@ -22,6 +22,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 os.environ.setdefault("GROQ_API_KEY", "test-groq-key-fake")
 os.environ.setdefault("OPENROUTER_API_KEY", "test-openrouter-key-fake")
 os.environ.setdefault("COHERE_API_KEY", "test-cohere-key-fake")
+os.environ.setdefault("MISTRAL_API_KEY", "test-mistral-key-fake")
+os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key-fake")
+os.environ.setdefault("CEREBRAS_API_KEY", "test-cerebras-key-fake")
 
 
 @pytest.fixture(autouse=True)

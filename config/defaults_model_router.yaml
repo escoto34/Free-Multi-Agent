@@ -149,8 +149,8 @@ cli:
       provider: gemini
       model: gemini-2.5-flash
   planner:
-    provider: cerebras
-    model: llama3.1-8b
+    provider: groq
+    model: openai/gpt-oss-120b
     fallback:
       provider: gemini
       model: gemini-2.5-flash

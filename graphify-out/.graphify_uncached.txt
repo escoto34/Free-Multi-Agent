@@ -1,6 +1,0 @@
-/home/escoto/Documentos/MultiAgent/.agents/rules/graphify.md
-/home/escoto/Documentos/MultiAgent/.agents/workflows/graphify.md
-/home/escoto/Documentos/MultiAgent/Implementation_plan.md
-/home/escoto/Documentos/MultiAgent/README.md
-/home/escoto/Documentos/MultiAgent/config/model_router.yaml
-/home/escoto/Documentos/MultiAgent/requirements.txt

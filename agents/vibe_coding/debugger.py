@@ -1,16 +1,17 @@
 """
-Debugger agent using PydanticAI definition.
-Responsible for reviewing test outputs and code, deciding if validation passed,
-listing issues, and proposing precise code-level fixes.
+Debugger agent for System A (Vibe Coding).
+
+Reviews test outputs and code. Provider/model/fallback from YAML.
+When tencent/hy3:free expires, edit model_router.yaml only.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Optional
-from pydantic_ai import Agent
-from schemas.vibe_coding import DebugReport, CodeArtifact
-from core.router import call_agent
+
+from core.agent_runtime import run_structured_agent
+from schemas.vibe_coding import CodeArtifact, DebugReport
 
 SYSTEM_PROMPT = """You are an expert debugger and QA engineer.
 Your task is to analyze the source code and the output of unit tests.
@@ -25,13 +26,6 @@ You MUST output your response strictly as a JSON object matching this schema:
 Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
 """
 
-# Official PydanticAI Agent definition
-debugger_agent = Agent(
-    "test",
-    output_type=DebugReport,
-    system_prompt=SYSTEM_PROMPT,
-)
-
 
 def run_debugger(
     artifact: CodeArtifact,
@@ -39,49 +33,20 @@ def run_debugger(
     router_instance=None,
     fallback_override: Optional[dict[str, str]] = None,
 ) -> DebugReport:
-    """Run the Debugger agent to review the code and test logs.
-
-    Uses OpenRouter tencent/hy3:free with fallback override options.
-    """
+    """Review code and test logs; return pass/fail + fix suggestion."""
     prompt_payload = (
         f"Source Code Files:\n{json.dumps(artifact.files, indent=2)}\n\n"
         f"Test execution logs/results:\n{test_logs}"
     )
-
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt_payload},
     ]
-
-    # In vibe_coding, the debugger uses openrouter tencent/hy3:free
-    # Role-specific fallback override: provider=groq, model=openai/gpt-oss-120b
-    # passed to call_agent.
-    fb = fallback_override or {
-        "provider": "groq",
-        "model": "openai/gpt-oss-120b",
-    }
-
-    caller = router_instance or call_agent
-    if hasattr(caller, "call_agent"):
-        resp = caller.call_agent(
-            provider="openrouter",
-            model="tencent/hy3:free",
-            messages=messages,
-            fallback=fb,
-        )
-    else:
-        resp = caller(
-            provider="openrouter",
-            model="tencent/hy3:free",
-            messages=messages,
-            fallback=fb,
-        )
-
-    content = resp.content.strip()
-    if content.startswith("```"):
-        content = content.split("\n", 1)[-1]
-        if content.endswith("```"):
-            content = content.rsplit("```", 1)[0]
-        content = content.strip()
-
-    return DebugReport.model_validate_json(content)
+    return run_structured_agent(
+        "vibe_coding",
+        "debugger",
+        messages=messages,
+        schema=DebugReport,
+        router_instance=router_instance,
+        fallback_override=fallback_override,
+    )
