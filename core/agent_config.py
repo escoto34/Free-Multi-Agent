@@ -52,9 +52,19 @@ def reload_config() -> None:
     Useful in tests, or if the config file is edited while the process is
     running (e.g. a long-lived server) and you want the change picked up
     without a restart.
+
+    Also clears the default :class:`~core.router.ModelRouter` so
+    ``fallback_cascade`` changes take effect without restarting the TUI.
     """
     global _cache
     _cache = None
+    try:
+        from core.router import reset_router
+
+        reset_router()
+    except Exception:
+        # Router may not be importable in minimal test contexts
+        pass
 
 
 def get_full_config(config_path: Optional[Path] = None) -> dict[str, Any]:

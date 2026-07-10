@@ -99,14 +99,14 @@ deep_research:
     model: openai/gpt-oss-safeguard-20b
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
   context_compressor:
     provider: openrouter
     model: tencent/hy3:free
     free_until: '2026-07-21'
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
   web_search:
     provider: groq
     model: groq/compound-mini
@@ -121,39 +121,36 @@ deep_research:
     model: command-r-plus-08-2024
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
 fallback_cascade:
   cohere_fallback:
     provider: mistral
     model: mistral-small-latest
   openrouter_fallback:
-    provider: groq
-    model: openai/gpt-oss-120b
+    provider: cerebras
+    model: llama-3.3-70b
   groq_fallback:
     provider: gemini
-    model: gemini-2.5-flash
+    model: gemini-2.0-flash
   mistral_fallback:
-    provider: groq
-    model: openai/gpt-oss-120b
+    provider: cerebras
+    model: llama-3.3-70b
   gemini_fallback:
     provider: openrouter
     model: meta-llama/llama-3.3-70b-instruct:free
-  cerebras_fallback:
-    provider: groq
-    model: openai/gpt-oss-120b
 cli:
   chat:
     provider: groq
     model: openai/gpt-oss-120b
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
   planner:
-    provider: cerebras
-    model: llama3.1-8b
+    provider: mistral
+    model: mistral-small-latest
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
   context_limit_tokens: 16000
   compact_keep_recent_messages: 4
   compact_target_ratio: 0.45

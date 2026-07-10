@@ -15,8 +15,9 @@ The router wraps all LLM calls and provides:
 
    Role-specific overrides (e.g. debugger's hy3 → gpt-oss-120b) can be
    passed via the ``fallback`` argument to ``call_agent``.
-4. **Cycle detection** — a ``_visited`` set prevents infinite loops when
-   the cascade circles back on itself.
+4. **Cycle / revisit handling** — a ``_visited`` set tracks tried
+   (provider, model) pairs. If the cascade points back to a visited hop,
+   the router skips ahead to the next unused hop instead of looping forever.
 5. **Empty-content guard** — a call that "succeeds" at the HTTP level but
    returns an empty/whitespace-only completion is treated as a failure and
    cascades to the next fallback, instead of silently returning empty
@@ -352,6 +353,34 @@ class ModelRouter:
             **kwargs,
         )
 
+    def _next_unvisited_fallback(
+        self,
+        provider: str,
+        model: str,
+        explicit: Optional[dict[str, str]],
+        visited: set[tuple[str, str]],
+    ) -> Optional[dict[str, str]]:
+        """Walk the cascade graph skipping already-tried (provider, model) pairs.
+
+        Prevents hard failure when the YAML cascade accidentally cycles
+        (e.g. groq→gemini→openrouter→groq): skip visited nodes and continue
+        until an unused hop or a leaf is found.
+        """
+        fb = self._resolve_fallback(provider, model, explicit)
+        walk_guard: set[tuple[str, str]] = set()
+        while fb is not None:
+            key = (fb["provider"], fb["model"])
+            if key in walk_guard:
+                # Cascade table itself is cyclic and every node on the ring
+                # was already visited for this request.
+                return None
+            walk_guard.add(key)
+            if key not in visited:
+                return fb
+            # Skip this hop; continue from its cascade entry (no explicit).
+            fb = self._resolve_fallback(fb["provider"], fb["model"], None)
+        return None
+
     def _cascade(
         self,
         original_provider: str,
@@ -365,11 +394,13 @@ class ModelRouter:
         _visited: set[tuple[str, str]],
         **kwargs: Any,
     ) -> LLMResponse:
-        fb = self._resolve_fallback(original_provider, original_model, fallback)
+        fb = self._next_unvisited_fallback(
+            original_provider, original_model, fallback, _visited
+        )
         if fb is None:
             raise QuotaExhaustedError(
-                f"No fallback configured for {original_provider}/{original_model}. "
-                f"Reason: {reason}"
+                f"No unused fallback for {original_provider}/{original_model}. "
+                f"Visited: {_visited}. Reason: {reason}"
             )
 
         fb_provider = fb["provider"]
@@ -412,6 +443,12 @@ def get_router(
             config_path=config_path, quota_tracker=quota_tracker
         )
     return _default_router
+
+
+def reset_router() -> None:
+    """Drop the cached default router (e.g. after editing model_router.yaml)."""
+    global _default_router
+    _default_router = None
 
 
 def call_agent(

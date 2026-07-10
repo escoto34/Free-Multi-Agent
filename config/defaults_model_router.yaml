@@ -99,14 +99,14 @@ deep_research:
     model: openai/gpt-oss-safeguard-20b
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
   context_compressor:
     provider: openrouter
     model: tencent/hy3:free
     free_until: '2026-07-21'
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
   web_search:
     provider: groq
     model: groq/compound-mini
@@ -121,39 +121,41 @@ deep_research:
     model: command-r-plus-08-2024
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
+# Ordered DAG (must not form cycles). Terminal leaf: cerebras.
+# Previous graph was cyclic: groq→gemini→openrouter→groq and raised
+# "Cycle detected in fallback chain" when Gemini 2.5 failed for new free users.
 fallback_cascade:
   cohere_fallback:
     provider: mistral
     model: mistral-small-latest
   openrouter_fallback:
-    provider: groq
-    model: openai/gpt-oss-120b
+    provider: cerebras
+    model: llama-3.3-70b
   groq_fallback:
     provider: gemini
-    model: gemini-2.5-flash
+    # 2.0-flash is more available on free tier for new AI Studio users than 2.5
+    model: gemini-2.0-flash
   mistral_fallback:
-    provider: groq
-    model: openai/gpt-oss-120b
+    provider: cerebras
+    model: llama-3.3-70b
   gemini_fallback:
     provider: openrouter
     model: meta-llama/llama-3.3-70b-instruct:free
-  cerebras_fallback:
-    provider: groq
-    model: openai/gpt-oss-120b
+  # cerebras is the cascade leaf — no cerebras_fallback (avoids loops back to groq)
 cli:
   chat:
     provider: groq
     model: openai/gpt-oss-120b
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
   planner:
     provider: groq
     model: openai/gpt-oss-120b
     fallback:
       provider: gemini
-      model: gemini-2.5-flash
+      model: gemini-2.0-flash
   context_limit_tokens: 16000
   compact_keep_recent_messages: 4
   compact_target_ratio: 0.45
