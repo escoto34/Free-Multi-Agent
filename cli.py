@@ -3,7 +3,7 @@ Command Line Interface for Free-Multi-Agent.
 
 Pipelines (vibe-coding / deep-research) run only inside the interactive CLI
 via /do (planner chooses steps). Outer commands are chat, config, keys,
-providers, skills, quota, history.
+providers, skills, tools, quota, history.
 """
 
 from __future__ import annotations
@@ -427,6 +427,89 @@ def skills_show(name: str) -> None:
     click.echo(f"description: {meta.description}")
     click.echo("\n--- body preview ---")
     click.echo(meta.body[:1200] + ("…" if len(meta.body) > 1200 else ""))
+
+
+@main.group()
+def tools() -> None:
+    """Curated terminal toolbox: doctor, suggest, search (see config/cli_toolbox.yaml)."""
+    pass
+
+
+@tools.command(name="doctor")
+@click.option(
+    "--profile",
+    "-p",
+    default="core",
+    show_default=True,
+    help="core|git|docker|k8s|disk|net|monitor|data|security|ai|modern-rust|all",
+)
+@click.option(
+    "--missing-only",
+    is_flag=True,
+    help="Only print missing tools (hide installed list).",
+)
+def tools_doctor(profile: str, missing_only: bool) -> None:
+    """Check which catalog tools are on PATH."""
+    from core.toolbox import doctor
+
+    click.echo(doctor(profile, show_installed=not missing_only), nl=False)
+
+
+@tools.command(name="suggest")
+@click.argument("task", nargs=-1, required=True)
+@click.option("--limit", default=8, show_default=True, help="Max recommendations.")
+def tools_suggest(task: tuple[str, ...], limit: int) -> None:
+    """Recommend tools for a free-form task description."""
+    from core.toolbox import suggest
+
+    click.echo(suggest(" ".join(task), limit=limit), nl=False)
+
+
+@tools.command(name="search")
+@click.argument("query", nargs=-1, required=True)
+def tools_search(query: tuple[str, ...]) -> None:
+    """Search the toolbox catalog by keyword."""
+    from core.toolbox import search
+
+    click.echo(search(" ".join(query)), nl=False)
+
+
+@tools.command(name="show")
+@click.argument("tool_id")
+def tools_show(tool_id: str) -> None:
+    """Show one tool: PATH status, tags, install hints."""
+    from core.toolbox import show_tool
+
+    click.echo(show_tool(tool_id), nl=False)
+
+
+@tools.command(name="list")
+@click.argument("category", required=False)
+@click.option("--check", "-c", is_flag=True, help="Mark installed (✔) vs missing (·).")
+def tools_list(category: Optional[str], check: bool) -> None:
+    """List catalog entries, optionally filtered by category."""
+    from core.toolbox import list_tools
+
+    click.echo(list_tools(category=category, check=check), nl=False)
+
+
+@tools.command(name="alt")
+@click.argument("classic")
+def tools_alt(classic: str) -> None:
+    """Modern alternatives to a classic command (ls, grep, cat, …)."""
+    from core.toolbox import alternatives
+
+    click.echo(alternatives(classic), nl=False)
+
+
+@tools.command(name="profiles")
+def tools_profiles() -> None:
+    """List doctor profiles."""
+    from core.toolbox import list_profiles
+
+    for r in list_profiles():
+        click.echo(f"  {r['name']:14} ({r['count']:3})  {r['description']}")
+    click.echo("  all            (all catalog entries)")
 
 
 if __name__ == "__main__":

@@ -64,12 +64,34 @@ def _seed_context(user_text: str) -> str:
         f = gather_file_context(user_text)
         if f:
             parts.append(f"=== PROJECT FILES ===\n{f}\n=== END FILES ===")
+        # If the user asks about modern tools / shell / PATH, seed doctor-ish brief
+        if re.search(
+            r"\b(eza|ripgrep|\brg\b|fd\b|bat\b|modern tool|toolbox|/tools|"
+            r"qué tool|que tool|which tool|instala|install cli)\b",
+            user_text or "",
+            re.I,
+        ):
+            brief = _modern_toolbox_block()
+            if brief:
+                parts.append(f"=== MODERN TOOLBOX ===\n{brief}\n=== END TOOLBOX ===")
     except Exception as exc:
         logger.debug("seed context failed: %s", exc)
     return "\n\n".join(parts)
 
 
+def _modern_toolbox_block() -> str:
+    """Installed catalog capabilities so the model prefers modern CLIs."""
+    try:
+        from core.toolbox import runtime_brief
+
+        return runtime_brief()
+    except Exception:
+        return ""
+
+
 def _system_prompt() -> str:
+    modern = _modern_toolbox_block()
+    modern_block = f"\n{modern}\n" if modern else ""
     return (
         "You are Free-Multi-Agent's local coding assistant for this repository.\n"
         "Layout:\n"
@@ -86,7 +108,11 @@ def _system_prompt() -> str:
         "each command one at a time.\n"
         "Python envs: use create_venv + pip_install.\n"
         "Heavy multi-pipeline work: suggest /do <task>.\n"
-        f"{chat_language_instruction()}\n\n"
+        "Directory listing / search / file view: use list_dir, grep, glob, read_file "
+        "(they auto-pick eza/rg/fd/bat when installed). Only use run_terminal for "
+        "commands host tools cannot cover; prefer modern CLI names from the toolbox.\n"
+        f"{chat_language_instruction()}\n"
+        f"{modern_block}\n"
         f"{tools_help_text()}"
     )
 

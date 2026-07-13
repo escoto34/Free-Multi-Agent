@@ -46,6 +46,8 @@ READ_TOOLS = frozenset(
         "grep",
         "glob",
         "webfetch",
+        "toolbox_query",
+        "toolbox",  # alias
     }
 )
 # Mutating / shell tools — need approval unless always_approve.
@@ -73,6 +75,8 @@ _TOOL_ALIASES = {
     "bash": "run_terminal",
     "shell": "run_terminal",
     "terminal": "run_terminal",
+    "toolbox": "toolbox_query",
+    "cli_tools": "toolbox_query",
 }
 
 _SKIP_DIR = {
@@ -176,6 +180,20 @@ needs approval (write/bash/pip). Read tools may be batched.
 ```tool
 {"name": "graphify_update", "args": {}}
 ```
+
+```tool
+{"name": "toolbox_query", "args": {"query": "search code fast", "mode": "suggest"}}
+```
+modes: suggest (default) | doctor | search | show | alt | runtime
+(alias: toolbox)
+
+Modern catalog (automatic):
+- list_dir → eza/tre when installed (else Python listing)
+- grep → rg (ripgrep)
+- glob → fd when installed (else pathlib)
+- read_file → bat -p when installed (else plain read)
+- run_terminal soft-upgrades ls/cat/grep/df/du/ps/… when modern bins exist
+Prefer host tools over inventing shell; for ad-hoc shell use modern names.
 
 Rules:
 - Use tools for real repo facts. Never invent tool output or shell results.
@@ -320,6 +338,7 @@ def _looks_like_pip_or_venv(cmd: str) -> bool:
 def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
     """Execute a single tool; never raises — returns ToolResult."""
     name = (name or "").strip().lower()
+    name = _TOOL_ALIASES.get(name, name)
     try:
         if name == "graphify_query":
             from cli_app.graph_rag import query_graph
@@ -330,6 +349,33 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
             budget = int(args.get("budget") or 1200)
             out = query_graph(q, budget=budget)
             return ToolResult(name, True, out or "(empty graph result)")
+
+        if name == "toolbox_query":
+            from core.toolbox import query_for_agent
+
+            q = str(
+                args.get("query")
+                or args.get("q")
+                or args.get("task")
+                or args.get("question")
+                or ""
+            ).strip()
+            mode = str(args.get("mode") or args.get("action") or "suggest").strip()
+            if not q and mode not in ("doctor", "status", "runtime", "available", "caps", "capabilities"):
+                return ToolResult(
+                    name,
+                    False,
+                    "query required (or mode=doctor/runtime)",
+                )
+            if not q and mode in ("doctor", "status"):
+                q = "core"
+            if not q and mode in ("runtime", "available", "caps", "capabilities"):
+                q = "runtime"
+            limit = int(args.get("limit") or 6)
+            out = query_for_agent(q, mode=mode, limit=limit)
+            if len(out) > 6000:
+                out = out[:6000] + "\n…[truncated]"
+            return ToolResult(name, True, out or "(empty)")
 
         if name == "graphify_update":
             proc = subprocess.run(
@@ -345,12 +391,32 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
 
         if name == "list_dir":
             from cli_app.context_tools import list_project_dir
+            from core.toolbox import modern_list_dir
 
             path = str(args.get("path") or args.get("dir") or ".").strip() or "."
+            tree = bool(args.get("tree") or args.get("recursive"))
+            p = _resolve_rel(path)
+            # Prefer modern catalog tools (eza / tre) when on PATH.
+            if p.is_dir():
+                modern = modern_list_dir(p, cwd=work_root(), tree=tree)
+                if modern:
+                    backend, body = modern
+                    try:
+                        rel = str(p.relative_to(work_root()))
+                    except ValueError:
+                        rel = str(p)
+                    # Cap output size for the model
+                    lines = body.splitlines()
+                    if len(lines) > 120:
+                        body = "\n".join(lines[:120]) + f"\n…[{len(lines) - 120} more lines]"
+                    return ToolResult(
+                        name,
+                        True,
+                        f"--- DIR: {rel}/  [via {backend}] ---\n{body}",
+                    )
             out = list_project_dir(path, root=work_root())
             if not out:
                 # try raw relative
-                p = _resolve_rel(path)
                 if p.is_dir():
                     lines = []
                     for item in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))[
@@ -364,12 +430,26 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
                         rel = str(p.relative_to(work_root()))
                     except ValueError:
                         rel = str(p)
-                    out = f"--- DIR: {rel}/ ---\n" + ("\n".join(lines) or "  (empty)")
+                    out = f"--- DIR: {rel}/  [via python] ---\n" + (
+                        "\n".join(lines) or "  (empty)"
+                    )
                 else:
                     out = f"(not a directory or not found: {path})"
+            elif "[via " not in out:
+                out = out.replace("--- DIR:", "--- DIR:", 1)
+                # annotate python path listing from context_tools if plain
+                if out.startswith("--- DIR:"):
+                    out = out.replace("--- DIR:", "--- DIR:", 1)
+                    # insert backend tag after first line header
+                    first, _, rest = out.partition("\n")
+                    if "[via " not in first:
+                        first = first.rstrip() + "  [via python]"
+                        out = first + ("\n" + rest if rest else "")
             return ToolResult(name, True, out)
 
         if name == "read_file":
+            from core.toolbox import modern_view_file
+
             path = str(args.get("path") or "").strip()
             if not path:
                 return ToolResult(name, False, "path required")
@@ -378,14 +458,20 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
                 return ToolResult(name, False, f"not a file: {path}")
             if p.stat().st_size > 200_000:
                 return ToolResult(name, False, "file too large (>200KB)")
-            text = p.read_text(encoding="utf-8", errors="replace")
-            if len(text) > 12000:
-                text = text[:12000] + "\n…[truncated]"
             try:
                 rel = str(p.relative_to(work_root()))
             except ValueError:
                 rel = str(p)
-            return ToolResult(name, True, f"--- FILE: {rel} ---\n{text}")
+            modern = modern_view_file(p, cwd=work_root(), max_chars=12000)
+            if modern:
+                backend, text = modern
+                return ToolResult(
+                    name, True, f"--- FILE: {rel}  [via {backend}] ---\n{text}"
+                )
+            text = p.read_text(encoding="utf-8", errors="replace")
+            if len(text) > 12000:
+                text = text[:12000] + "\n…[truncated]"
+            return ToolResult(name, True, f"--- FILE: {rel}  [via python] ---\n{text}")
 
         if name == "write_file":
             path = str(args.get("path") or "").strip()
@@ -550,6 +636,8 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
             return ToolResult(name, proc.returncode == 0, header + (body or "(no output)"))
 
         if name == "grep":
+            from core.toolbox import modern_search_text
+
             pattern = str(args.get("pattern") or args.get("regex") or args.get("q") or "")
             if not pattern:
                 return ToolResult(name, False, "pattern required")
@@ -557,61 +645,61 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
             base = _resolve_rel(path, allow_venv=False)
             gglob = str(args.get("glob") or args.get("include") or "").strip()
             max_hits = int(args.get("max_hits") or 40)
-            cmd = ["rg", "-n", "--no-heading", "-S", pattern]
-            if gglob:
-                cmd.extend(["-g", gglob])
-            cmd.append(str(base))
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    cwd=str(work_root()),
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-            except FileNotFoundError:
-                # fallback to python walk if rg missing
-                hits: list[str] = []
-                try:
-                    for p in base.rglob(gglob or "*") if base.is_dir() else [base]:
-                        if not p.is_file():
-                            continue
-                        if any(part in _SKIP_DIR for part in p.parts):
-                            continue
-                        try:
-                            text = p.read_text(encoding="utf-8", errors="replace")
-                        except OSError:
-                            continue
-                        for i, line in enumerate(text.splitlines(), 1):
-                            if re.search(pattern, line):
-                                try:
-                                    rel = p.relative_to(work_root())
-                                except ValueError:
-                                    rel = p
-                                hits.append(f"{rel}:{i}:{line[:200]}")
-                                if len(hits) >= max_hits:
-                                    break
-                        if len(hits) >= max_hits:
-                            break
-                except Exception as exc:
-                    return ToolResult(name, False, f"grep fallback failed: {exc}")
-                return ToolResult(name, True, "\n".join(hits) or "(no matches)")
-            out = (proc.stdout or "").strip()
-            lines = out.splitlines()[:max_hits]
-            return ToolResult(
-                name,
-                True,
-                "\n".join(lines) if lines else "(no matches)",
+            modern = modern_search_text(
+                pattern,
+                base,
+                glob=gglob,
+                max_hits=max_hits,
+                cwd=work_root(),
             )
+            if modern:
+                backend, body = modern
+                header = f"[via {backend}] "
+                return ToolResult(name, True, header + (body or "(no matches)"))
+            # fallback to python walk if rg missing
+            hits: list[str] = []
+            try:
+                for p in base.rglob(gglob or "*") if base.is_dir() else [base]:
+                    if not p.is_file():
+                        continue
+                    if any(part in _SKIP_DIR for part in p.parts):
+                        continue
+                    try:
+                        text = p.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    for i, line in enumerate(text.splitlines(), 1):
+                        if re.search(pattern, line):
+                            try:
+                                rel = p.relative_to(work_root())
+                            except ValueError:
+                                rel = p
+                            hits.append(f"{rel}:{i}:{line[:200]}")
+                            if len(hits) >= max_hits:
+                                break
+                    if len(hits) >= max_hits:
+                        break
+            except Exception as exc:
+                return ToolResult(name, False, f"grep fallback failed: {exc}")
+            body = "\n".join(hits) if hits else "(no matches)"
+            return ToolResult(name, True, f"[via python] {body}")
 
         if name == "glob":
+            from core.toolbox import modern_find_files
+
             pattern = str(args.get("pattern") or args.get("glob") or "**/*").strip()
             path = str(args.get("path") or ".").strip() or "."
             base = _resolve_rel(path, allow_venv=False)
             max_hits = int(args.get("max_hits") or 80)
+            root_base = base if base.is_dir() else base.parent
+            modern = modern_find_files(
+                pattern, root_base, cwd=work_root(), max_hits=max_hits
+            )
+            if modern:
+                backend, body = modern
+                return ToolResult(name, True, f"[via {backend}]\n{body}")
             matches: list[str] = []
             try:
-                root_base = base if base.is_dir() else base.parent
                 for p in sorted(root_base.glob(pattern)):
                     if any(part in _SKIP_DIR for part in p.parts):
                         continue
@@ -624,7 +712,8 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
                         break
             except Exception as exc:
                 return ToolResult(name, False, f"glob failed: {exc}")
-            return ToolResult(name, True, "\n".join(matches) or "(no matches)")
+            body = "\n".join(matches) if matches else "(no matches)"
+            return ToolResult(name, True, f"[via python]\n{body}")
 
         if name == "apply_patch":
             # Minimal support: *** Update File: path\n then -/+ lines (simple)
@@ -694,11 +783,18 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
                 return ToolResult(name, False, f"webfetch failed: {exc}")
 
         if name == "run_terminal":
+            from core.toolbox import soft_rewrite_shell_command
+
             cmd = str(args.get("command") or args.get("cmd") or "").strip()
             if not cmd:
                 return ToolResult(name, False, "command required")
             if _BLOCKED_CMD.search(cmd):
                 return ToolResult(name, False, f"blocked dangerous command: {cmd[:80]}")
+            # Soft-upgrade classic CLIs → modern catalog tools when on PATH.
+            # Skip if caller disables: args.no_upgrade / raw=true
+            upgrade_note = None
+            if not args.get("no_upgrade") and not args.get("raw"):
+                cmd, upgrade_note = soft_rewrite_shell_command(cmd)
             # Longer default for pip/venv style commands
             default_to = 300 if _looks_like_pip_or_venv(cmd) else 60
             timeout = int(args.get("timeout") or default_to)
@@ -720,6 +816,8 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
                 body = f"(exit {proc.returncode}, no output)"
             else:
                 body = f"(exit {proc.returncode})\n{body}"
+            if upgrade_note:
+                body = f"[{upgrade_note}]\n{body}"
             return ToolResult(name, proc.returncode == 0, body)
 
         return ToolResult(name, False, f"unknown tool: {name}")

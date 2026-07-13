@@ -87,6 +87,16 @@ Slash commands (F1 opens this panel · type /help anytime)
     /skills show <name>       Path + description + body preview
     /skills remove <name>     Unregister (files kept)
 
+  Terminal toolbox (catalog + PATH doctor)
+    /tools                    Overview + core doctor summary
+    /tools doctor [profile]   PATH check (core|git|docker|k8s|…|all)
+    /tools suggest <task>     Recommend tools for a task
+    /tools search <keyword>   Search catalog
+    /tools show <id>          Details + install hints
+    /tools list [category]    List catalog
+    /tools alt <classic>      Modern alternatives (ls, grep, cat, …)
+    /tools profiles           List doctor profiles
+
   Project
     /quota                    Today's free-tier usage
     /history [N]              Recent pipeline runs
@@ -728,6 +738,73 @@ def _providers(_args: list[str], _session: ConversationSession) -> CommandResult
     return CommandResult(ok=True, text="\n".join(lines))
 
 
+def _tools(args: list[str], _session: ConversationSession) -> CommandResult:
+    """Terminal toolbox: doctor / suggest / search over the curated catalog."""
+    from core.toolbox import (
+        alternatives,
+        doctor,
+        help_text,
+        list_profiles,
+        list_tools,
+        search,
+        show_tool,
+        suggest,
+    )
+
+    if not args:
+        # Compact overview: help + core doctor (missing only)
+        body = help_text().rstrip() + "\n\n" + doctor("core", show_installed=False)
+        return CommandResult(ok=True, text=body)
+
+    sub = args[0].lower()
+    rest = args[1:]
+
+    if sub in ("help", "h", "?"):
+        return CommandResult(ok=True, text=help_text())
+
+    if sub in ("doctor", "doc", "check"):
+        profile = rest[0] if rest else "core"
+        return CommandResult(ok=True, text=doctor(profile, show_installed=True))
+
+    if sub in ("suggest", "rec", "recommend", "for"):
+        task = " ".join(rest).strip()
+        return CommandResult(ok=True, text=suggest(task))
+
+    if sub in ("search", "find", "q"):
+        q = " ".join(rest).strip()
+        return CommandResult(ok=True, text=search(q))
+
+    if sub in ("show", "info", "get"):
+        if not rest:
+            return CommandResult(ok=False, text="Usage: /tools show <id>")
+        return CommandResult(ok=True, text=show_tool(rest[0]))
+
+    if sub in ("list", "ls", "catalog"):
+        category = rest[0] if rest else None
+        check = "--check" in rest or "-c" in rest
+        if category and category.startswith("-"):
+            category = None
+        return CommandResult(ok=True, text=list_tools(category=category, check=check))
+
+    if sub in ("alt", "alternative", "alternatives", "replace", "vs"):
+        classic = rest[0] if rest else ""
+        return CommandResult(ok=True, text=alternatives(classic))
+
+    if sub in ("profiles", "profile"):
+        rows = list_profiles()
+        lines = ["Doctor profiles:\n"]
+        for r in rows:
+            lines.append(f"  {r['name']:14} ({r['count']:3} tools)  {r['description']}")
+        lines.append("\n  also: all  (every catalog entry)")
+        lines.append("  /tools doctor <profile>")
+        return CommandResult(ok=True, text="\n".join(lines))
+
+    # Bare keyword → search; multi-word → suggest
+    if len(args) == 1:
+        return CommandResult(ok=True, text=search(args[0]))
+    return CommandResult(ok=True, text=suggest(" ".join(args)))
+
+
 def _approve_cmd(args: list[str], session: ConversationSession) -> CommandResult:
     """Toggle always-approve for write/terminal tools."""
     if not args:
@@ -772,6 +849,9 @@ COMMANDS: dict[str, CommandHandler] = {
     "provider": _providers,
     "skills": _skills,
     "skill": _skills,
+    "tools": _tools,
+    "toolbox": _tools,
+    "tool": _tools,
     "quota": _quota,
     "history": _history,
     "do": _do,

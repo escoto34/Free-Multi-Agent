@@ -11,17 +11,22 @@ __pycache__/
 dist/
 build/
 *.egg
+.Python
+pip-wheel-metadata/
 
 # Virtual environments
 venv/
 .venv/
 env/
+ENV/
 
-# IDE
+# IDE / editor
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
 
 # SQLite databases (quota tracking, checkpoints, run history)
 *.db
@@ -31,13 +36,19 @@ data/
 
 # OS
 .DS_Store
+.DS_Store?
 Thumbs.db
+desktop.ini
 
 # Test & coverage
 .pytest_cache/
+.cache/
 htmlcov/
 .coverage
 .coverage.*
+coverage.xml
+*.cover
+.hypothesis/
 
 # Tooling caches
 .mypy_cache/
@@ -45,15 +56,39 @@ htmlcov/
 .pytype/
 .tox/
 .nox/
+.pyre/
+.dmypy.json
+dmypy.json
 
 # Logs & local junk
 *.log
 *.bak
 *.orig
 *~
+*.tmp
+*.temp
 
-# Generated knowledge graph (local tooling; not source)
+# Generated knowledge graph (local graphify tooling; not product source)
+# Includes graph.json, graph.html, GRAPH_REPORT.md, cache/, cost.json, manifests
 graphify-out/
 
-# Ad-hoc local scratch scripts (not part of the product)
+# Graphify / agent sidecars if ever written outside graphify-out/
+.graphify_python
+.graphify_root
+.graphify_detect.json
+.graphify_extract.json
+.graphify_ast.json
+.graphify_semantic.json
+.graphify_analysis.json
+.graphify_labels.json
+.graphify_chunk_*.json
+.needs_update
+
+# Ad-hoc local scratch (not part of the product)
 scratch/
+tmp/
+temp/
+
+# Local overrides (optional user copies — never commit live secrets)
+config/model_router.local.yaml
+config/cli_toolbox.local.yaml

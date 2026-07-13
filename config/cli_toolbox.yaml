@@ -1,0 +1,1113 @@
+# Terminal toolbox catalog for MultiAgent (/tools, multiagent tools, toolbox_query).
+# id: stable key · bin: PATH binary (or first of bins) · category · tags · replaces · install hints
+version: 1
+
+profiles:
+  core:
+    description: Modern shell essentials (high ROI for almost every dev)
+    tools:
+      - eza
+      - bat
+      - ripgrep
+      - fd
+      - fzf
+      - zoxide
+      - starship
+      - atuin
+      - git-delta
+      - mise
+      - jq
+      - rip2
+      - tldr
+  git:
+    description: Git UX, forges, and secret hygiene
+    tools:
+      - lazygit
+      - git-delta
+      - gh
+      - glab
+      - difftastic
+      - gitleaks
+      - git-absorb
+  docker:
+    description: Containers and image hygiene
+    tools:
+      - lazydocker
+      - dive
+      - trivy
+      - ctop
+  k8s:
+    description: Kubernetes day-to-day
+    tools:
+      - k9s
+      - kdash
+      - stern
+      - kubectx
+      - helm
+  disk:
+    description: Disk space and cleanup
+    tools:
+      - dust
+      - dua-cli
+      - duf
+      - fdupes
+  net:
+    description: Network diagnostics and HTTP
+    tools:
+      - httpie
+      - dog
+      - bandwhich
+      - gping
+      - trippy
+  monitor:
+    description: System / process monitors
+    tools:
+      - btop
+      - bottom
+      - procs
+      - glances
+  data:
+    description: Structured data on the CLI
+    tools:
+      - jq
+      - yq
+      - miller
+      - jless
+      - dasel
+  security:
+    description: Secrets, scanners, script quality
+    tools:
+      - age
+      - sops
+      - gitleaks
+      - shellcheck
+      - trivy
+  ai:
+    description: LLM / agent CLIs (pairs with MultiAgent)
+    tools:
+      - llm
+      - ollama
+      - mods
+      - aichat
+      - aider
+  modern-rust:
+    description: 2025–2026 Rust-ish stack
+    tools:
+      - atuin
+      - starship
+      - zellij
+      - yazi
+      - fd
+      - dust
+      - bottom
+      - mise
+      - git-delta
+      - ripgrep
+      - eza
+      - bat
+
+tools:
+  # ── Utilidades generales ──────────────────────────────────────────
+  - id: eza
+    name: eza
+    bin: eza
+    category: general
+    tags: [ls, files, tree, git, listing]
+    replaces: [ls]
+    description: Modern ls with colors, icons, git status, and tree view.
+    install: { brew: eza, cargo: eza, apt: eza }
+
+  - id: thefuck
+    name: thefuck
+    bin: thefuck
+    category: general
+    tags: [shell, typos, fix]
+    replaces: []
+    description: Auto-corrects the previous mistyped shell command.
+    install: { brew: thefuck, pip: thefuck }
+
+  - id: rip2
+    name: rip2
+    bin: rip
+    category: general
+    tags: [rm, trash, safety, undo]
+    replaces: [rm]
+    description: Safe rm — moves files to a trash with undo instead of hard delete.
+    install: { cargo: "rip2 --bin rip", brew: rm-improved }
+
+  - id: ripgrep
+    name: ripgrep
+    bin: rg
+    category: general
+    tags: [search, grep, code]
+    replaces: [grep]
+    description: Ultra-fast recursive text search (default MultiAgent grep backend).
+    install: { brew: ripgrep, cargo: ripgrep, apt: ripgrep }
+
+  - id: fzf
+    name: fzf
+    bin: fzf
+    category: general
+    tags: [fuzzy, filter, interactive]
+    replaces: []
+    description: General-purpose interactive fuzzy finder for any list.
+    install: { brew: fzf, cargo: fzf, apt: fzf }
+
+  - id: zoxide
+    name: zoxide
+    bin: zoxide
+    category: general
+    tags: [cd, navigation, directories]
+    replaces: [cd]
+    description: Smart cd that learns your most-used directories.
+    install: { brew: zoxide, cargo: zoxide, apt: zoxide }
+
+  - id: bat
+    name: bat
+    bin: bat
+    category: general
+    tags: [cat, view, syntax, git]
+    replaces: [cat]
+    description: cat clone with syntax highlight, line numbers, and git integration.
+    install: { brew: bat, cargo: bat, apt: bat }
+
+  - id: jq
+    name: jq
+    bin: jq
+    category: general
+    tags: [json, data, filter]
+    replaces: []
+    description: Command-line JSON processor (parse, filter, transform).
+    install: { brew: jq, apt: jq }
+
+  - id: hyperfine
+    name: hyperfine
+    bin: hyperfine
+    category: general
+    tags: [benchmark, performance]
+    replaces: [time]
+    description: Benchmarking tool to measure and compare command runtimes.
+    install: { brew: hyperfine, cargo: hyperfine, apt: hyperfine }
+
+  - id: just
+    name: just
+    bin: just
+    category: general
+    tags: [tasks, makefile, build]
+    replaces: [make]
+    description: Simple command runner / task file alternative to Makefiles.
+    install: { brew: just, cargo: just }
+
+  - id: sd
+    name: sd
+    bin: sd
+    category: general
+    tags: [sed, replace, edit]
+    replaces: [sed]
+    description: Intuitive find-and-replace CLI (friendlier than sed).
+    install: { brew: sd, cargo: sd }
+
+  - id: fdupes
+    name: fdupes
+    bin: fdupes
+    category: general
+    tags: [duplicates, disk, cleanup]
+    replaces: []
+    description: Find and remove duplicate files.
+    install: { brew: fdupes, apt: fdupes }
+
+  - id: entr
+    name: entr
+    bin: entr
+    category: general
+    tags: [watch, reload, files]
+    replaces: []
+    description: Run commands when files change (simple file watcher).
+    install: { brew: entr, apt: entr }
+
+  - id: exiftool
+    name: exiftool
+    bin: exiftool
+    category: general
+    tags: [metadata, images, media]
+    replaces: []
+    description: Read/write metadata for images, video, and documents.
+    install: { brew: exiftool, apt: libimage-exiftool-perl }
+
+  - id: rsync
+    name: rsync
+    bin: rsync
+    category: general
+    tags: [sync, copy, remote, backup]
+    replaces: [cp]
+    description: Incremental local/remote file sync and transfer.
+    install: { brew: rsync, apt: rsync }
+
+  - id: xsel
+    name: xsel
+    bin: xsel
+    category: general
+    tags: [clipboard, x11]
+    replaces: []
+    description: X11 clipboard/selection CLI interface.
+    install: { apt: xsel, brew: xsel }
+
+  - id: duf
+    name: duf
+    bin: duf
+    category: general
+    tags: [df, disk, mounts]
+    replaces: [df]
+    description: Friendlier disk-usage overview than df.
+    install: { brew: duf, cargo: duf, apt: duf }
+
+  - id: tldr
+    name: tldr
+    bin: tldr
+    category: general
+    tags: [man, help, examples]
+    replaces: [man]
+    description: Simplified man pages with practical examples.
+    install: { brew: tldr, npm: tldr, cargo: tealdeer }
+
+  - id: scc
+    name: scc
+    bin: scc
+    category: general
+    tags: [loc, complexity, code-stats]
+    replaces: [cloc]
+    description: Lines-of-code counter with complexity and cost estimates.
+    install: { brew: scc, go: github.com/boyter/scc/v3@latest }
+
+  - id: most
+    name: most
+    bin: most
+    category: general
+    tags: [pager, less]
+    replaces: [less, more]
+    description: Pager similar to less/more with multi-window support.
+    install: { apt: most, brew: most }
+
+  - id: procs
+    name: procs
+    bin: procs
+    category: general
+    tags: [ps, processes]
+    replaces: [ps]
+    description: Modern colored ps replacement.
+    install: { brew: procs, cargo: procs }
+
+  - id: tre
+    name: tre
+    bin: tre
+    category: general
+    tags: [tree, directories]
+    replaces: [tree]
+    description: Fast tree-like directory listing with better defaults.
+    install: { brew: tre-command, cargo: tre-command }
+
+  - id: aria2
+    name: aria2
+    bin: aria2c
+    category: general
+    tags: [download, http, torrent]
+    replaces: [wget, curl]
+    description: Multi-protocol download utility (HTTP/FTP/BitTorrent/Metalink).
+    install: { brew: aria2, apt: aria2 }
+
+  # ── Monitorización ────────────────────────────────────────────────
+  - id: btop
+    name: btop
+    bin: btop
+    category: monitor
+    tags: [cpu, memory, network, top]
+    replaces: [top, htop]
+    description: Fast resource monitor (CPU/mem/disk/net) with a polished TUI.
+    install: { brew: btop, apt: btop }
+
+  - id: bandwhich
+    name: bandwhich
+    bin: bandwhich
+    category: monitor
+    tags: [bandwidth, network, processes]
+    replaces: []
+    description: Live bandwidth usage by process and connection.
+    install: { brew: bandwhich, cargo: bandwhich }
+
+  - id: ctop
+    name: ctop
+    bin: ctop
+    category: monitor
+    tags: [docker, containers, top]
+    replaces: []
+    description: Top-like UI for live container metrics.
+    install: { brew: ctop }
+
+  - id: glances
+    name: glances
+    bin: glances
+    category: monitor
+    tags: [dashboard, system, multiplatform]
+    replaces: []
+    description: All-in-one cross-platform system monitoring dashboard.
+    install: { brew: glances, pip: glances }
+
+  - id: gping
+    name: gping
+    bin: gping
+    category: monitor
+    tags: [ping, latency, network]
+    replaces: [ping]
+    description: Ping with a live latency graph.
+    install: { brew: gping, cargo: gping }
+
+  - id: dua-cli
+    name: dua-cli
+    bin: dua
+    category: monitor
+    tags: [du, disk, interactive]
+    replaces: [du]
+    description: Interactive disk usage analyzer.
+    install: { brew: dua-cli, cargo: dua-cli }
+
+  - id: speedtest-cli
+    name: speedtest-cli
+    bin: speedtest-cli
+    category: monitor
+    tags: [internet, bandwidth, speed]
+    replaces: []
+    description: Internet speed test via Speedtest.net.
+    install: { brew: speedtest-cli, pip: speedtest-cli }
+
+  - id: dog
+    name: dog
+    bin: dog
+    category: monitor
+    tags: [dns, dig, network]
+    replaces: [dig, nslookup]
+    description: Modern DNS lookup CLI (dig alternative).
+    install: { brew: dog, cargo: dog }
+
+  # ── Productividad ─────────────────────────────────────────────────
+  - id: browsh
+    name: browsh
+    bin: browsh
+    category: productivity
+    tags: [browser, web]
+    replaces: []
+    description: Full JS/CSS web browser rendered in the terminal.
+    install: { brew: browsh }
+
+  - id: buku
+    name: buku
+    bin: buku
+    category: productivity
+    tags: [bookmarks]
+    replaces: []
+    description: Command-line bookmark manager.
+    install: { brew: buku, pip: buku }
+
+  - id: cmus
+    name: cmus
+    bin: cmus
+    category: productivity
+    tags: [music, audio]
+    replaces: []
+    description: Small, fast terminal music player.
+    install: { brew: cmus, apt: cmus }
+
+  - id: cointop
+    name: cointop
+    bin: cointop
+    category: productivity
+    tags: [crypto, prices]
+    replaces: []
+    description: Terminal dashboard for cryptocurrency prices.
+    install: { brew: cointop }
+
+  - id: ddgr
+    name: ddgr
+    bin: ddgr
+    category: productivity
+    tags: [search, duckduckgo, web]
+    replaces: []
+    description: DuckDuckGo search from the terminal.
+    install: { brew: ddgr, pip: ddgr }
+
+  - id: micro
+    name: micro
+    bin: micro
+    category: productivity
+    tags: [editor, text]
+    replaces: [nano]
+    description: Modern, easy terminal text editor.
+    install: { brew: micro, apt: micro }
+
+  - id: khal
+    name: khal
+    bin: khal
+    category: productivity
+    tags: [calendar, caldav]
+    replaces: []
+    description: Terminal calendar with CalDAV support.
+    install: { brew: khal, pip: khal }
+
+  - id: mutt
+    name: mutt
+    bin: mutt
+    category: productivity
+    tags: [email, mail]
+    replaces: []
+    description: Classic terminal email client.
+    install: { brew: mutt, apt: mutt }
+
+  - id: newsboat
+    name: newsboat
+    bin: newsboat
+    category: productivity
+    tags: [rss, feeds]
+    replaces: []
+    description: RSS/Atom feed reader for the terminal.
+    install: { brew: newsboat, apt: newsboat }
+
+  - id: rclone
+    name: rclone
+    bin: rclone
+    category: productivity
+    tags: [cloud, sync, storage]
+    replaces: []
+    description: Sync and manage files across cloud storage providers.
+    install: { brew: rclone, apt: rclone }
+
+  - id: taskwarrior
+    name: taskwarrior
+    bin: task
+    category: productivity
+    tags: [tasks, todo]
+    replaces: []
+    description: CLI task manager with tags, priorities, and reports.
+    install: { brew: task, apt: taskwarrior }
+
+  - id: tuir
+    name: tuir
+    bin: tuir
+    category: productivity
+    tags: [reddit]
+    replaces: []
+    description: Reddit client for the terminal.
+    install: { pip: tuir }
+
+  # ── Dev / servicios externos ──────────────────────────────────────
+  - id: httpie
+    name: httpie
+    bin: http
+    category: dev
+    tags: [http, api, rest]
+    replaces: [curl]
+    description: Human-friendly HTTP client for API testing.
+    install: { brew: httpie, pip: httpie, apt: httpie }
+
+  - id: lazydocker
+    name: lazydocker
+    bin: lazydocker
+    category: dev
+    tags: [docker, containers, tui]
+    replaces: []
+    description: Terminal UI for Docker containers and images.
+    install: { brew: lazydocker }
+
+  - id: lazygit
+    name: lazygit
+    bin: lazygit
+    category: dev
+    tags: [git, tui, staging]
+    replaces: []
+    description: Terminal UI for git (stage, commit, branches).
+    install: { brew: lazygit, go: github.com/jesseduffield/lazygit@latest }
+
+  - id: kdash
+    name: kdash
+    bin: kdash
+    category: dev
+    tags: [kubernetes, k8s, dashboard]
+    replaces: []
+    description: Terminal dashboard for Kubernetes clusters.
+    install: { brew: kdash, cargo: kdash }
+
+  - id: ngrok
+    name: ngrok
+    bin: ngrok
+    category: dev
+    tags: [tunnel, expose, webhook]
+    replaces: []
+    description: Secure tunnels to expose local servers to the internet.
+    install: { brew: ngrok }
+
+  - id: tmate
+    name: tmate
+    bin: tmate
+    category: dev
+    tags: [tmux, share, pair]
+    replaces: []
+    description: tmux fork for real-time shared terminal sessions.
+    install: { brew: tmate, apt: tmate }
+
+  - id: asciinema
+    name: asciinema
+    bin: asciinema
+    category: dev
+    tags: [record, demo, terminal]
+    replaces: []
+    description: Record and share terminal sessions as replayable casts.
+    install: { brew: asciinema, pip: asciinema, apt: asciinema }
+
+  - id: navi
+    name: navi
+    bin: navi
+    category: dev
+    tags: [cheatsheet, help, commands]
+    replaces: []
+    description: Interactive cheatsheet for terminal commands.
+    install: { brew: navi, cargo: navi }
+
+  - id: surge
+    name: surge
+    bin: surge
+    category: dev
+    tags: [static, deploy, hosting]
+    replaces: []
+    description: Instant static site deploy from the CLI.
+    install: { npm: surge }
+
+  # ── Stack moderno Rust 2025–2026 ──────────────────────────────────
+  - id: atuin
+    name: atuin
+    bin: atuin
+    category: modern
+    tags: [history, shell, sqlite, sync]
+    replaces: []
+    description: SQLite-backed searchable shell history with optional encrypted sync.
+    install: { brew: atuin, cargo: atuin }
+
+  - id: starship
+    name: starship
+    bin: starship
+    category: modern
+    tags: [prompt, shell]
+    replaces: []
+    description: Fast, customizable multi-shell prompt (de-facto modern default).
+    install: { brew: starship, cargo: starship, apt: starship }
+
+  - id: zellij
+    name: zellij
+    bin: zellij
+    category: modern
+    tags: [tmux, multiplexer, layouts]
+    replaces: [tmux]
+    description: Modern terminal multiplexer with predefined layouts.
+    install: { brew: zellij, cargo: zellij }
+
+  - id: yazi
+    name: yazi
+    bin: yazi
+    category: modern
+    tags: [files, manager, preview]
+    replaces: [ranger, nnn]
+    description: Terminal file manager with image preview and async I/O.
+    install: { brew: yazi, cargo: yazi-fm }
+
+  - id: fd
+    name: fd
+    bin: fd
+    category: modern
+    tags: [find, search, files]
+    replaces: [find]
+    description: Fast, user-friendly find replacement.
+    install: { brew: fd, cargo: fd-find, apt: fd-find }
+
+  - id: dust
+    name: dust
+    bin: dust
+    category: modern
+    tags: [du, disk]
+    replaces: [du]
+    description: Intuitive disk usage analyzer (du alternative).
+    install: { brew: dust, cargo: du-dust }
+
+  - id: bottom
+    name: bottom
+    bin: btm
+    category: modern
+    tags: [top, monitor, processes]
+    replaces: [top, htop]
+    description: Graphical cross-platform system/process monitor.
+    install: { brew: bottom, cargo: bottom }
+
+  - id: mise
+    name: mise
+    bin: mise
+    category: modern
+    tags: [versions, runtime, asdf, nvm, pyenv]
+    replaces: [asdf, nvm, pyenv, rbenv]
+    description: Polyglot language/runtime version manager (asdf/nvm/pyenv replacement).
+    install: { brew: mise, cargo: mise, apt: mise }
+
+  - id: git-delta
+    name: delta
+    bin: delta
+    category: modern
+    tags: [git, diff, pager]
+    replaces: []
+    description: Syntax-highlighted git diff pager (current de-facto standard).
+    install: { brew: git-delta, cargo: git-delta, apt: git-delta }
+
+  # ── Ampliación no redundante ──────────────────────────────────────
+  - id: direnv
+    name: direnv
+    bin: direnv
+    category: shell
+    tags: [env, dotenv, project]
+    replaces: []
+    description: Load/unload environment variables when entering/leaving directories.
+    install: { brew: direnv, apt: direnv }
+
+  - id: carapace
+    name: carapace
+    bin: carapace
+    category: shell
+    tags: [completions, shell]
+    replaces: []
+    description: Unified multi-shell argument completions.
+    install: { brew: carapace, go: github.com/carapace-sh/carapace-bin@latest }
+
+  - id: gum
+    name: gum
+    bin: gum
+    category: shell
+    tags: [scripts, prompts, ux, charm]
+    replaces: []
+    description: Pretty prompts/confirmations/spinners for shell scripts (Charm).
+    install: { brew: gum, go: github.com/charmbracelet/gum@latest }
+
+  - id: glow
+    name: glow
+    bin: glow
+    category: shell
+    tags: [markdown, docs, readme]
+    replaces: []
+    description: Render Markdown (README, docs) beautifully in the terminal.
+    install: { brew: glow, go: github.com/charmbracelet/glow@latest }
+
+  - id: vhs
+    name: vhs
+    bin: vhs
+    category: shell
+    tags: [demo, gif, record, charm]
+    replaces: []
+    description: Scripted terminal demos to GIF/video (complements asciinema).
+    install: { brew: vhs, go: github.com/charmbracelet/vhs@latest }
+
+  - id: yq
+    name: yq
+    bin: yq
+    category: data
+    tags: [yaml, json, toml, xml]
+    replaces: []
+    description: jq-like processor for YAML/TOML/XML (configs, K8s manifests).
+    install: { brew: yq, go: github.com/mikefarah/yq/v4@latest, apt: yq }
+
+  - id: dasel
+    name: dasel
+    bin: dasel
+    category: data
+    tags: [json, yaml, toml, csv, query]
+    replaces: []
+    description: Query/update JSON/YAML/TOML/XML/CSV with one syntax.
+    install: { brew: dasel, go: github.com/tomwright/dasel/v2/cmd/dasel@latest }
+
+  - id: jless
+    name: jless
+    bin: jless
+    category: data
+    tags: [json, pager, interactive]
+    replaces: []
+    description: Interactive pager for large JSON documents.
+    install: { brew: jless, cargo: jless }
+
+  - id: miller
+    name: miller
+    bin: mlr
+    category: data
+    tags: [csv, tsv, json, tables]
+    replaces: [awk, csvkit]
+    description: CSV/TSV/JSON as tables — filter, join, stats on the CLI.
+    install: { brew: miller, apt: miller }
+
+  - id: gron
+    name: gron
+    bin: gron
+    category: data
+    tags: [json, grep]
+    replaces: []
+    description: Flatten JSON to greppable assignments.
+    install: { brew: gron, go: github.com/tomnomnom/gron@latest }
+
+  - id: htmlq
+    name: htmlq
+    bin: htmlq
+    category: data
+    tags: [html, css, scrape]
+    replaces: []
+    description: CSS selectors over HTML (lightweight scraping).
+    install: { brew: htmlq, cargo: htmlq }
+
+  - id: ast-grep
+    name: ast-grep
+    bin: sg
+    category: data
+    tags: [ast, code-search, refactor]
+    replaces: []
+    description: Structural code search/rewrite via AST (not plain text).
+    install: { brew: ast-grep, cargo: ast-grep, npm: "@ast-grep/cli" }
+
+  - id: gh
+    name: gh
+    bin: gh
+    category: git
+    tags: [github, pr, issues, actions]
+    replaces: []
+    description: Official GitHub CLI (PRs, issues, Actions, releases).
+    install: { brew: gh, apt: gh }
+
+  - id: glab
+    name: glab
+    bin: glab
+    category: git
+    tags: [gitlab, pr, mr]
+    replaces: []
+    description: GitLab CLI (MRs, issues, pipelines).
+    install: { brew: glab }
+
+  - id: difftastic
+    name: difftastic
+    bin: difft
+    category: git
+    tags: [diff, structural, git]
+    replaces: []
+    description: Structural, language-aware diffs (not only line-based).
+    install: { brew: difftastic, cargo: difftastic }
+
+  - id: git-absorb
+    name: git-absorb
+    bin: git-absorb
+    category: git
+    tags: [git, fixup, rebase]
+    replaces: []
+    description: Auto-fixup commits during iterative code review.
+    install: { brew: git-absorb, cargo: git-absorb }
+
+  - id: gitleaks
+    name: gitleaks
+    bin: gitleaks
+    category: security
+    tags: [secrets, git, scan]
+    replaces: []
+    description: Scan repos and history for leaked secrets.
+    install: { brew: gitleaks, go: github.com/gitleaks/gitleaks/v8@latest }
+
+  - id: helix
+    name: helix
+    bin: hx
+    category: editor
+    tags: [editor, lsp]
+    replaces: [vim, nano]
+    description: Modern modal editor with LSP out of the box.
+    install: { brew: helix, cargo: helix-term, apt: helix }
+
+  - id: xh
+    name: xh
+    bin: xh
+    category: dev
+    tags: [http, api, rust]
+    replaces: [curl]
+    description: Fast Rust HTTP client with HTTPie-like UX.
+    install: { brew: xh, cargo: xh }
+
+  - id: grpcurl
+    name: grpcurl
+    bin: grpcurl
+    category: dev
+    tags: [grpc, api]
+    replaces: []
+    description: curl for gRPC services.
+    install: { brew: grpcurl, go: github.com/fullstorydev/grpcurl/cmd/grpcurl@latest }
+
+  - id: websocat
+    name: websocat
+    bin: websocat
+    category: dev
+    tags: [websocket, network]
+    replaces: []
+    description: WebSocket client/server for the CLI.
+    install: { brew: websocat, cargo: websocat }
+
+  - id: mitmproxy
+    name: mitmproxy
+    bin: mitmproxy
+    category: dev
+    tags: [proxy, http, debug]
+    replaces: []
+    description: Interactive HTTPS-intercepting proxy for debugging.
+    install: { brew: mitmproxy, pip: mitmproxy }
+
+  - id: trippy
+    name: trippy
+    bin: trip
+    category: net
+    tags: [traceroute, ping, network]
+    replaces: [traceroute, mtr]
+    description: Combined traceroute + ping with a polished TUI.
+    install: { brew: trippy, cargo: trippy }
+
+  - id: dive
+    name: dive
+    bin: dive
+    category: docker
+    tags: [docker, images, layers]
+    replaces: []
+    description: Explore Docker image layers and wasted space.
+    install: { brew: dive }
+
+  - id: k9s
+    name: k9s
+    bin: k9s
+    category: k8s
+    tags: [kubernetes, tui]
+    replaces: []
+    description: Full-featured Kubernetes TUI.
+    install: { brew: k9s }
+
+  - id: stern
+    name: stern
+    bin: stern
+    category: k8s
+    tags: [kubernetes, logs]
+    replaces: []
+    description: Multi-pod log tailing with filters.
+    install: { brew: stern }
+
+  - id: kubectx
+    name: kubectx
+    bin: kubectx
+    category: k8s
+    tags: [kubernetes, context]
+    replaces: []
+    description: Fast Kubernetes context switching (pair with kubens).
+    install: { brew: kubectx }
+
+  - id: helm
+    name: helm
+    bin: helm
+    category: k8s
+    tags: [kubernetes, charts, packages]
+    replaces: []
+    description: Kubernetes package manager (charts).
+    install: { brew: helm, apt: helm }
+
+  - id: trivy
+    name: trivy
+    bin: trivy
+    category: security
+    tags: [vulns, docker, scan, sbom]
+    replaces: []
+    description: Vulnerability scanner for images, FS, and configs.
+    install: { brew: trivy }
+
+  - id: age
+    name: age
+    bin: age
+    category: security
+    tags: [encrypt, secrets]
+    replaces: [gpg]
+    description: Simple modern file encryption (practical GPG alternative for many cases).
+    install: { brew: age, apt: age }
+
+  - id: sops
+    name: sops
+    bin: sops
+    category: security
+    tags: [secrets, yaml, gitops]
+    replaces: []
+    description: Encrypt secrets inside YAML/JSON/env (GitOps-friendly).
+    install: { brew: sops }
+
+  - id: shellcheck
+    name: shellcheck
+    bin: shellcheck
+    category: security
+    tags: [bash, lint, scripts]
+    replaces: []
+    description: Static analysis / linter for shell scripts.
+    install: { brew: shellcheck, apt: shellcheck }
+
+  - id: shfmt
+    name: shfmt
+    bin: shfmt
+    category: security
+    tags: [bash, format, scripts]
+    replaces: []
+    description: Shell script formatter.
+    install: { brew: shfmt, go: mvdan.cc/sh/v3/cmd/shfmt@latest, apt: shfmt }
+
+  - id: duckdb
+    name: duckdb
+    bin: duckdb
+    category: data
+    tags: [sql, analytics, csv, parquet]
+    replaces: []
+    description: In-process analytics SQL engine over CSV/Parquet.
+    install: { brew: duckdb }
+
+  - id: litecli
+    name: litecli
+    bin: litecli
+    category: data
+    tags: [sqlite, sql]
+    replaces: [sqlite3]
+    description: SQLite CLI with autocomplete and colors.
+    install: { pip: litecli, brew: litecli }
+
+  - id: ouch
+    name: ouch
+    bin: ouch
+    category: general
+    tags: [archive, zip, tar, compress]
+    replaces: [tar, unzip]
+    description: Universal compress/decompress with simple UX.
+    install: { brew: ouch, cargo: ouch }
+
+  - id: restic
+    name: restic
+    bin: restic
+    category: general
+    tags: [backup, encrypt]
+    replaces: []
+    description: Deduplicated encrypted backups.
+    install: { brew: restic, apt: restic }
+
+  - id: ffmpeg
+    name: ffmpeg
+    bin: ffmpeg
+    category: media
+    tags: [video, audio, convert]
+    replaces: []
+    description: Swiss-army knife for audio/video conversion.
+    install: { brew: ffmpeg, apt: ffmpeg }
+
+  - id: yt-dlp
+    name: yt-dlp
+    bin: yt-dlp
+    category: media
+    tags: [download, video]
+    replaces: [youtube-dl]
+    description: Download video/audio from many sites.
+    install: { brew: yt-dlp, pip: yt-dlp }
+
+  - id: chafa
+    name: chafa
+    bin: chafa
+    category: media
+    tags: [images, preview, terminal]
+    replaces: []
+    description: Render images in the terminal (great with yazi/scripts).
+    install: { brew: chafa, apt: chafa }
+
+  - id: uv
+    name: uv
+    bin: uv
+    category: modern
+    tags: [python, venv, packaging]
+    replaces: [pip, pip-tools, virtualenv]
+    description: Extremely fast Python packaging and venvs (pairs well with mise).
+    install: { brew: uv, cargo: uv, pip: uv }
+
+  - id: ruff
+    name: ruff
+    bin: ruff
+    category: modern
+    tags: [python, lint, format]
+    replaces: [flake8, black, isort]
+    description: All-in-one Python linter and formatter.
+    install: { brew: ruff, pip: ruff, cargo: ruff }
+
+  - id: chezmoi
+    name: chezmoi
+    bin: chezmoi
+    category: shell
+    tags: [dotfiles, multi-machine]
+    replaces: []
+    description: Manage dotfiles across machines safely.
+    install: { brew: chezmoi, go: github.com/twpayne/chezmoi@latest }
+
+  - id: llm
+    name: llm
+    bin: llm
+    category: ai
+    tags: [llm, prompts, plugins]
+    replaces: []
+    description: Plugin-based LLM CLI for prompts, templates, and logs.
+    install: { pip: llm, brew: llm }
+
+  - id: ollama
+    name: ollama
+    bin: ollama
+    category: ai
+    tags: [llm, local, models]
+    replaces: []
+    description: Run local LLMs via CLI/API.
+    install: { brew: ollama }
+
+  - id: mods
+    name: mods
+    bin: mods
+    category: ai
+    tags: [llm, pipe, charm]
+    replaces: []
+    description: Unix-pipe friendly LLM frontend (e.g. rg … | mods "explain").
+    install: { brew: mods, go: github.com/charmbracelet/mods@latest }
+
+  - id: aichat
+    name: aichat
+    bin: aichat
+    category: ai
+    tags: [llm, chat, multi-provider]
+    replaces: []
+    description: Multi-provider AI chat and shell REPL.
+    install: { cargo: aichat, brew: aichat }
+
+  - id: aider
+    name: aider
+    bin: aider
+    category: ai
+    tags: [llm, coding, pair, git]
+    replaces: []
+    description: Git-aware pair-programming agent over a repo.
+    install: { pip: aider-chat }
+
+  - id: watchexec
+    name: watchexec
+    bin: watchexec
+    category: general
+    tags: [watch, reload]
+    replaces: [entr]
+    description: Execute commands on file change (richer alternative to entr).
+    install: { brew: watchexec, cargo: watchexec-cli }
+
+  - id: tokei
+    name: tokei
+    bin: tokei
+    category: general
+    tags: [loc, code-stats]
+    replaces: [cloc]
+    description: Fast code statistics (optional second opinion vs scc).
+    install: { brew: tokei, cargo: tokei }
