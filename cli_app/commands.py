@@ -66,8 +66,8 @@ Slash commands (F1 opens this panel · type /help anytime)
 
   API keys & free platforms
     /keys                     Show which keys are set (masked)
-    /keys set <provider> <key>  groq|openrouter|cohere|mistral|gemini|cerebras
-    /providers                Free-tier platforms, models, signup links
+    /keys set <provider> <key>  … + ollama (optional) | agnes
+    /providers                Free-tier + local (ollama) + agnes, models, signup
 
   Session / context
     /compact                  Compact context (ctrl+k)
@@ -732,9 +732,12 @@ def _providers(_args: list[str], _session: ConversationSession) -> CommandResult
         if models:
             lines.append(f"             models: {models}")
     lines.append(
-        "\nWire into a role: /config set vibe_coding.coder mistral codestral-latest"
+        "\nWire into a role:\n"
+        "  /config set vibe_coding.coder mistral codestral-latest\n"
+        "  /config set cli.chat ollama llama3.2\n"
+        "  /config set cli.chat agnes agnes-2.0-flash"
     )
-    lines.append("Add key:         /keys set mistral <api_key>")
+    lines.append("Add key:         /keys set agnes <api_key>   (ollama needs no key)")
     return CommandResult(ok=True, text="\n".join(lines))
 
 

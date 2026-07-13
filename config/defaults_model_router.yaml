@@ -67,6 +67,27 @@ providers:
     - llama-3.3-70b
     - llama3.1-8b
     - qwen-3-32b
+  ollama:
+    base_url: http://localhost:11434/v1
+    env_key: OLLAMA_API_KEY
+    signup: https://ollama.com/download
+    notes: >-
+      Local OpenAI-compatible server. No API key required.
+      Model list is ONLY what `ollama list` reports (daemon /api/tags) — not a static catalog.
+      Override host: OLLAMA_BASE_URL or OLLAMA_HOST. Pull: ollama pull <name>.
+    daily_limit: 100000
+    models: []   # populated at runtime from `ollama list` only
+  agnes:
+    base_url: https://apihub.agnes-ai.com/v1
+    env_key: AGNES_API_KEY
+    signup: https://platform.agnes-ai.com
+    notes: >-
+      Agnes AI free multimodal OpenAI-compatible gateway (text/image/video).
+      For MultiAgent chat/pipelines use the text model agnes-2.0-flash.
+      Get a free key at platform.agnes-ai.com — no payment card required.
+    daily_limit: 2000
+    models:
+    - agnes-2.0-flash
 deprecated:
 - llama-3.1-8b-instant
 - llama-3.3-70b-versatile

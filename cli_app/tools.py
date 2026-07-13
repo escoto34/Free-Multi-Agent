@@ -695,9 +695,12 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
             modern = modern_find_files(
                 pattern, root_base, cwd=work_root(), max_hits=max_hits
             )
+            # Prefer fd hits; if fd finds nothing, fall back to pathlib (fd and
+            # pathlib-style globs like agents/**/*.py are not always equivalent).
             if modern:
                 backend, body = modern
-                return ToolResult(name, True, f"[via {backend}]\n{body}")
+                if body and body.strip() and body.strip() != "(no matches)":
+                    return ToolResult(name, True, f"[via {backend}]\n{body}")
             matches: list[str] = []
             try:
                 for p in sorted(root_base.glob(pattern)):

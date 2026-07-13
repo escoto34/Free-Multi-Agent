@@ -51,10 +51,17 @@ def validate_api_keys() -> None:
     """Validate keys only for providers actually used in model_router.yaml roles."""
     from core.keys import provider_env_map
 
+    try:
+        from core.clients import NO_KEY_PROVIDERS
+    except Exception:
+        NO_KEY_PROVIDERS = frozenset({"ollama"})
+
     env_map = provider_env_map()
     needed = _providers_used_by_config()
     missing: list[str] = []
     for prov in sorted(needed):
+        if prov in NO_KEY_PROVIDERS:
+            continue  # e.g. ollama — local, no secret required
         env_name = env_map.get(prov)
         if not env_name:
             continue
@@ -65,8 +72,9 @@ def validate_api_keys() -> None:
         click.secho(
             "❌ Missing API keys for providers used by current roles:\n"
             + "\n".join(missing)
-            + "\n\nOptional providers (mistral/gemini/cerebras) only needed if "
-            "assigned in /config or as fallbacks.",
+            + "\n\nOptional: mistral/gemini/cerebras/ollama/agnes only needed if "
+            "assigned in /config or as fallbacks. Ollama needs no key "
+            "(install + ollama serve + ollama pull <model>).",
             fg="red",
             bold=True,
             err=True,
@@ -312,6 +320,8 @@ def providers_cmd() -> None:
         "Assign models inside the TUI:\n"
         "  /planner set gemini gemini-2.5-flash\n"
         "  /config set vibe_coding.coder mistral codestral-latest\n"
+        "  /config set cli.chat ollama llama3.2\n"
+        "  /config set cli.chat agnes agnes-2.0-flash\n"
         "  /do research X then implement Y\n"
     )
 

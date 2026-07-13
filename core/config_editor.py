@@ -42,6 +42,8 @@ KNOWN_PROVIDERS = (
     "mistral",
     "gemini",
     "cerebras",
+    "ollama",
+    "agnes",
 )
 
 

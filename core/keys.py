@@ -26,6 +26,8 @@ _BUILTIN_ENV: dict[str, str] = {
     "mistral": "MISTRAL_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "cerebras": "CEREBRAS_API_KEY",
+    "ollama": "OLLAMA_API_KEY",  # optional; dummy value is fine
+    "agnes": "AGNES_API_KEY",
 }
 
 _KEY_LINE = re.compile(
@@ -81,10 +83,29 @@ def get_key_status(env_file: Optional[Path] = None) -> list[dict[str, str]]:
     """Status of each provider key (never includes raw secret)."""
     path = env_file or _ENV_PATH
     file_vals = _parse_env_file(path) if path.exists() else {}
+    no_key: set[str] = set()
+    try:
+        from core.clients import NO_KEY_PROVIDERS
+
+        no_key = set(NO_KEY_PROVIDERS)
+    except Exception:
+        no_key = {"ollama"}
+
     rows: list[dict[str, str]] = []
     for alias, env_name in sorted(provider_env_map().items()):
         raw = os.environ.get(env_name) or file_vals.get(env_name, "")
         set_ok = not _is_placeholder(raw)
+        if alias in no_key and not set_ok:
+            # Local / keyless providers are usable without a real secret.
+            rows.append(
+                {
+                    "provider": alias,
+                    "env": env_name,
+                    "status": "local",
+                    "preview": "(no key required)",
+                }
+            )
+            continue
         rows.append(
             {
                 "provider": alias,
@@ -129,7 +150,11 @@ def set_api_key(
             f"Unknown provider {provider!r}. Valid: {sorted(env_map)}"
         )
     key = api_key.strip()
-    if not key or _is_placeholder(key):
+    # Ollama accepts any non-empty string (or skip keys entirely — status=local).
+    if alias == "ollama":
+        if not key:
+            key = "ollama"
+    elif not key or _is_placeholder(key):
         raise ValueError("API key looks empty or like a placeholder")
 
     env_name = env_map[alias]

@@ -50,6 +50,8 @@ COHERE_DAILY_LIMIT: int = 28  # Conservative midpoint 25-30/day
 MISTRAL_DAILY_LIMIT: int = 200  # Free Experiment tier — conservative call cap
 GEMINI_DAILY_LIMIT: int = 400  # AI Studio free Flash-class (varies by model)
 CEREBRAS_DAILY_LIMIT: int = 500  # Free developer tier (approx.)
+OLLAMA_DAILY_LIMIT: int = 100_000  # Local — effectively unlimited for tracking
+AGNES_DAILY_LIMIT: int = 2000  # Free multimodal gateway — soft local cap
 
 # Maps provider -> the YAML key under providers.<provider>.* that holds its
 # daily limit. Each provider uses a differently-named key because the scope
@@ -61,6 +63,8 @@ _YAML_LIMIT_KEY = {
     "mistral": "daily_limit",
     "gemini": "daily_limit",
     "cerebras": "daily_limit",
+    "ollama": "daily_limit",
+    "agnes": "daily_limit",
 }
 
 # Providers that track quota per model name (vs shared account bucket).
@@ -148,6 +152,8 @@ class QuotaTracker:
             "mistral": MISTRAL_DAILY_LIMIT,
             "gemini": GEMINI_DAILY_LIMIT,
             "cerebras": CEREBRAS_DAILY_LIMIT,
+            "ollama": OLLAMA_DAILY_LIMIT,
+            "agnes": AGNES_DAILY_LIMIT,
         }
 
         try:

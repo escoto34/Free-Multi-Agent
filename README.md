@@ -226,11 +226,23 @@ User-chosen model (`cli.planner` or `/planner set`). Non-English tasks can be tr
 | Mistral | `MISTRAL_API_KEY` | Studio free / codestral |
 | Gemini | `GEMINI_API_KEY` | AI Studio OpenAI-compat endpoint |
 | Cerebras | `CEREBRAS_API_KEY` | Fast free developer models |
+| **Ollama** | *(none / optional `OLLAMA_API_KEY`)* | Local `http://localhost:11434/v1`; models = only `ollama list` (no static catalog); `OLLAMA_BASE_URL` / `OLLAMA_HOST` override host |
+| **Agnes AI** | `AGNES_API_KEY` | Free OpenAI-compat gateway; text model `agnes-2.0-flash` |
 
 ```bash
 multiagent providers
 multiagent keys set mistral
+multiagent keys set agnes               # free key from platform.agnes-ai.com
 multiagent config set vibe_coding.coder mistral codestral-latest
+
+# Local Ollama (no key) — install ollama, then:
+ollama pull llama3.2
+multiagent config set cli.chat ollama llama3.2
+# or in TUI: /config set cli.chat ollama llama3.2
+
+# Agnes text chat
+multiagent config set cli.chat agnes agnes-2.0-flash
+# or: /config set cli.planner agnes agnes-2.0-flash
 ```
 
 Live roles/models: **`config/model_router.yaml`**. Safe daily limits: `core/quotas.py` (must stay aligned with YAML comments).
