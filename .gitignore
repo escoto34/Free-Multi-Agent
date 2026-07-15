@@ -92,3 +92,16 @@ temp/
 # Local overrides (optional user copies — never commit live secrets)
 config/model_router.local.yaml
 config/cli_toolbox.local.yaml
+
+# Packaging / build artifacts (pip install -e .)
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Docker (optional local override)
+.env.docker
+
+# Editor / OS noise
+*.swp
+.DS_Store

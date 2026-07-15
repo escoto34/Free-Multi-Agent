@@ -128,6 +128,7 @@ Direct `/vibe` and `/research` were removed; use **`/do`** so the planner picks 
 
 ```bash
 multiagent config show|set|reset|…
+multiagent config doctor        # validate model_router.yaml consistency
 multiagent keys set|status
 multiagent providers
 multiagent skills list|add|enable|…
@@ -141,6 +142,72 @@ multiagent tools profiles
 multiagent quota
 multiagent history --limit 20
 ```
+
+### Batch pipelines (no TUI)
+
+The heavy pipelines can also run head-less from the shell (useful in CI or
+scripts):
+
+```bash
+multiagent vibe "add a CLI flag parser to cli.py" --json
+multiagent research "latest free LLM APIs 2026"
+multiagent do "research X then implement Y" --planner mistral/mistral-small-latest
+multiagent serve --port 8777     # local HTTP API (see below)
+```
+
+#### Local HTTP API (`multiagent serve`)
+
+A zero-dependency (stdlib) HTTP server exposes the pipelines for integration:
+
+```bash
+multiagent serve --host 127.0.0.1 --port 8777
+```
+
+| Method | Path | Body | Returns |
+|--------|------|------|---------|
+| GET | `/health` | — | `{"status":"ok"}` |
+| POST | `/vibe` | `{"idea":"..."}` | System A summary (JSON) |
+| POST | `/research` | `{"topic":"..."}` | System B summary (JSON) |
+| POST | `/do` | `{"task":"...","planner":"prov/model"}` | planner + execute (JSON) |
+
+Bind to localhost only; put it behind a reverse proxy + auth for remote access.
+
+#### Python client (`core.client`)
+
+Drive the pipelines from your own code — in-process (no server) or over HTTP:
+
+```python
+from core.client import MultiAgentClient
+
+# In-process (same machine, no server)
+client = MultiAgentClient()
+r = client.vibe("add a CLI flag parser to cli.py")
+print(r.passed, r.files_written)
+
+report = client.research("latest free LLM APIs 2026")
+print(report.content, report.sources)
+
+# Remote (talks to `multiagent serve`)
+remote = MultiAgentClient(base_url="http://127.0.0.1:8777")
+print(remote.health())
+```
+
+Both modes return the same typed results (`VibeResult` / `ResearchResult`).
+
+#### Container deployment
+
+A `Dockerfile` + `docker-compose.yml` run the HTTP API as a service (Ollama is
+intentionally excluded — the container uses remote free-tier providers via
+`.env` keys):
+
+```bash
+docker build -t multiagent .
+docker compose up -d          # serves on 127.0.0.1:8777
+curl -s http://127.0.0.1:8777/health
+```
+
+For production, front port 8777 with a reverse proxy (Caddy/Nginx) adding TLS
+and authentication; do not expose it directly to the internet.
 
 ---
 
@@ -257,6 +324,33 @@ Hy3 free window (if still used as debugger): check `free_until` in YAML; CLI war
 - GitPython · Cohere SDK v2 · OpenAI SDK (Groq/OpenRouter/compat)  
 - Click + Textual + Rich (TUI) · PyYAML · python-dotenv  
 - Optional host CLIs from the toolbox (eza, ripgrep, fd, bat, …) — not Python deps  
+- Rotating file logging under `data/logs/` (see `core/logging_setup.py`)  
+- Packaged via `pyproject.toml` (`pip install -e .` exposes the `multiagent` command)  
+- Optional HTTP API + Docker image for head-less / remote use
+
+---
+
+## Production hardening
+
+The project is built to run unattended on free-tier APIs without burning quota
+or corrupting the user’s repo:
+
+- **Quota gating + cascading fallback** (`core/router.py`) — refuses calls past
+a provider’s daily limit and walks the configured fallback chain.
+- **Empty-completion guard** — an HTTP 200 with empty content is treated as a
+  failure and cascades instead of crashing downstream Pydantic validation.
+- **System A safety rails** — path-traversal blocked, atomic temp-file writes,
+  pre-run WIP stash + git rollback so failed runs never destroy user work.
+- **System B safety rails** — unsafe queries terminate; a search step that
+  admits it did *not* perform a live search hard-aborts before grounding.
+- **Rotating logs** — `core/logging_setup.py` writes `data/logs/multiagent.log`
+  (gitignored) for audit; never logs keys or message contents.
+- **Tool sandbox** — `run_terminal` blocks destructive/classic-dangerous
+  commands and soft-upgrades `ls`→`eza`, `cat`→`bat`, `grep`→`rg`, etc. when the
+  modern CLI is on PATH.
+- **KeyboardInterrupt-safe** — the TUI and pipelines exit cleanly on Ctrl-C.
+- **Config validator** — `multiagent config doctor` catches dangling
+  provider/model/fallback references before a run wastes free-tier quota.
 
 ---
 
@@ -265,12 +359,18 @@ Hy3 free window (if still used as debugger): check `free_until` in YAML; CLI war
 ```text
 MultiAgent/
 ├── cli.py                 # Click entry (chat default, config, keys, skills, tools, …)
+├── pyproject.toml         # packaging + `multiagent` console script
+├── MANIFEST.in           # includes config/bin/.env.example in the wheel
+├── Makefile              # setup / test / lint shortcuts
+├── Dockerfile            # container image for `multiagent serve`
+├── docker-compose.yml    # service stack (binds 127.0.0.1:8777)
+├── .env.example          # template for API keys
 ├── bin/multiagent         # PATH launcher (preserves caller cwd)
 ├── config/
 │   ├── model_router.yaml              # live provider/model roles
 │   ├── defaults_model_router.yaml     # factory reset snapshot
 │   └── cli_toolbox.yaml               # modern terminal tool catalog
-├── cli_app/               # TUI + slash commands + agent tools
+├── cli_app/               # TUI + slash commands + agent tools + HTTP client
 │   ├── tui.py
 │   ├── commands.py        # /do, /tools, /skills, /config, …
 │   ├── agent_chat.py      # tool loop + approvals + toolbox brief
@@ -280,11 +380,15 @@ MultiAgent/
 ├── core/
 │   ├── toolbox.py         # catalog load, doctor, suggest, runtime resolve
 │   ├── router.py, quotas.py, clients.py, keys.py, skills.py, …
+│   ├── logging_setup.py   # rotating file logging
+│   ├── http_api.py        # stdlib HTTP server for the pipelines
+│   ├── client.py          # programmatic MultiAgentClient (in-process + HTTP)
+│   └── config_validator.py# `config doctor` consistency checks
 ├── agents/                # vibe_coding + deep_research agents
 ├── graphs/                # LangGraph pipelines
 ├── schemas/
 ├── skills/README.md       # SKILL.md format for global skills
-├── data/                  # local SQLite (quotas, runs, checkpoints) — gitignored
+├── data/                  # local SQLite (quotas, runs, checkpoints, logs) — gitignored
 ├── graphify-out/          # knowledge graph artifacts — gitignored
 └── tests/                 # mocked HTTP + toolbox unit tests
 ```
@@ -302,6 +406,12 @@ User-global state (not in this repo):
 pytest tests/ -v
 # toolbox only:
 pytest tests/test_toolbox.py -v
+# production-readiness (logging, executor, packaging):
+pytest tests/test_production_readiness.py -v
+# HTTP API + config validator + batch CLI:
+pytest tests/test_http_and_config.py tests/test_cli_batch.py -v
+# Python client (in-process + HTTP):
+pytest tests/test_client.py -v
 ```
 
 All network-facing tests mock HTTP; no real API usage. Toolbox tests probe the real `PATH` for optional binaries and skip/soft-assert when a tool is missing.

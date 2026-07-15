@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "free-multi-agent"
+version = "1.0.0"
+description = "Local multi-agent tooling on free/trial LLM APIs (vibe-coding + deep-research + chat TUI)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Free-Multi-Agent contributors" }]
+keywords = ["agents", "llm", "multi-agent", "langgraph", "free-tier", "coding", "research"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Code Generators",
+]
+
+dependencies = [
+    "langgraph>=0.4.0",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "openai>=1.30.0",
+    "cohere>=5.0.0",
+    "pydantic>=2.7.0",
+    "gitpython>=3.1.0",
+    "python-dotenv>=1.0.0",
+    "mcp>=1.0.0",
+    "pyyaml>=6.0.0",
+    "click>=8.1.0",
+    "textual>=0.80.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "respx>=0.22.0",
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+multiagent = "cli:main"
+
+[project.urls]
+Homepage = "https://github.com/local/MultiAgent"
+Repository = "https://github.com/local/MultiAgent"
+
+[tool.setuptools]
+py-modules = ["cli"]
+
+[tool.setuptools.packages.find]
+include = ["agents*", "cli_app*", "core*", "graphs*", "schemas*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Packaging metadata for Free-Multi-Agent (entry point: multiagent = cli:main)
