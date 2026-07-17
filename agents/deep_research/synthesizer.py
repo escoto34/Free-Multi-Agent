@@ -23,7 +23,11 @@ from agents.deep_research.research_types import (
 )
 from core.agent_config import get_agent_config
 from core.agent_runtime import invoke_router, strip_fences
-from core.search_guards import scrub_ungrounded_claims, source_url_is_verified
+from core.search_guards import (
+    extract_urls,
+    scrub_ungrounded_claims,
+    source_url_is_verified,
+)
 from schemas.deep_research import GroundedReport
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,9 @@ STRICT RULES:
 - Keep BOTH official-site findings and third-party web findings when present.
 - Prefer official domain for brand/contact when it conflicts with weak directories,
   but do not drop third-party evidence that is clearly the same entity.
+- WhatsApp phones decoded from wa.me buttons and social handles found on the
+  official page are valid contact/presence evidence — keep them.
+- Include social profile/post findings when LINKED PRESENCE or live dump has them.
 - Preserve depth: addresses, phones, service lists, review stats, and gaps already verified.
 - Prefer structured Markdown with clear headings over a short blurb.
 - Flag uncertain associations (e.g. social accounts not clearly the same brand).
@@ -58,16 +65,52 @@ Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
 """
 
 
-def extract_urls(text: str) -> set[str]:
-    """Compatibility wrapper."""
-    from core.search_guards import extract_url_set
+def clean_and_parse_synthesizer_report(
+    content: str,
+    *,
+    fallback_sources: Optional[list[str]] = None,
+) -> GroundedReport:
+    """Clean markdown code blocks and parse content as GroundedReport.
 
-    return extract_url_set(text)
+    Free-tier models often return ``{"content": "..."}`` without ``sources``.
+    Recover rather than failing the polish step: pull URLs from content or
+    use *fallback_sources* (grounded draft).
+    """
+    cleaned = strip_fences(content or "").strip()
+    if not cleaned:
+        raise ValueError("Synthesizer returned empty content")
 
+    data: dict | None = None
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            data = parsed
+    except (json.JSONDecodeError, TypeError, ValueError):
+        data = None
 
-def clean_and_parse_synthesizer_report(content: str) -> GroundedReport:
-    """Clean markdown code blocks and parse content as GroundedReport."""
-    return GroundedReport.model_validate_json(strip_fences(content))
+    if data is None:
+        # Model returned prose instead of JSON — accept as content body
+        sources = list(fallback_sources or []) or extract_urls(cleaned)
+        return GroundedReport(content=cleaned, sources=sources)
+
+    body = data.get("content")
+    if body is None and isinstance(data.get("report"), str):
+        body = data["report"]
+    if not isinstance(body, str) or not body.strip():
+        # Last resort: whole JSON as non-report failure
+        raise ValueError("Synthesizer JSON missing non-empty 'content' field")
+
+    sources_raw = data.get("sources")
+    sources: list[str] = []
+    if isinstance(sources_raw, list):
+        sources = [str(s).strip() for s in sources_raw if str(s).strip()]
+    elif isinstance(sources_raw, str) and sources_raw.strip():
+        sources = [sources_raw.strip()]
+
+    if not sources:
+        sources = extract_urls(body) or list(fallback_sources or [])
+
+    return GroundedReport(content=body, sources=sources)
 
 
 def run_synthesizer(
@@ -111,19 +154,25 @@ def run_synthesizer(
             fallback=cfg.get("fallback"),
             max_tokens=8192,
         )
-        return clean_and_parse_synthesizer_report(resp.content)
+        return clean_and_parse_synthesizer_report(
+            resp.content,
+            fallback_sources=list(grounded_report.sources or []),
+        )
 
     try:
         final_report = _call(messages)
     except Exception as exc:
-        if isinstance(exc, (json.JSONDecodeError, ValidationError, ValueError)):
+        if isinstance(exc, (json.JSONDecodeError, ValidationError, ValueError, TypeError)):
             retry_messages = messages + [
                 {
                     "role": "user",
                     "content": (
                         "Tu respuesta anterior no era un JSON válido o estaba incompleta/truncada. "
-                        "Por favor, responde ÚNICAMENTE con un objeto JSON válido que cumpla exactamente "
-                        "con el esquema Pydantic requerido, sin texto conversacional ni bloques de código de markdown."
+                        "Responde ÚNICAMENTE con un objeto JSON válido con las claves "
+                        '"content" (string markdown) y "sources" (array de URLs). '
+                        "Si no tienes URLs nuevas, usa las del borrador: "
+                        f"{list(grounded_report.sources or [])[:12]}. "
+                        "Sin texto conversacional ni bloques de código markdown."
                     ),
                 }
             ]

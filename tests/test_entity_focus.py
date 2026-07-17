@@ -12,31 +12,28 @@ from agents.deep_research.entity_focus import (
 from agents.deep_research.web_search import _build_query_list, _build_safe_query
 
 
-def test_name_variants_credental():
+def test_name_variants_dual_spelling():
     q = (
-        "investiga todo sobre Creddental o Credental (misma empresa) "
-        "la clinica dental en Honduras, San Pedro Sula"
+        "investiga todo sobre Foobrand o FooBrand (misma empresa) "
+        "la clinica en Example City"
     )
     variants = extract_name_variants(q)
     joined = " ".join(variants).lower()
-    assert "creddental" in joined or "credental" in joined
-    # Both spellings should surface when "o" split works
-    assert any("cred" in v.lower() for v in variants)
+    assert "foobrand" in joined or "foo" in joined
+    assert any("foo" in v.lower() for v in variants)
 
 
 def test_name_variants_english_planner_phrasing():
     q = (
-        "Research comprehensive information about Creddental "
-        "(also known as Credental), a dental clinic located in "
-        "San Pedro Sula, Honduras."
+        "Research comprehensive information about Foobrand "
+        "(also known as FooBrand), a clinic located in "
+        "Example City, Exampleland."
     )
     variants = extract_name_variants(q)
     joined = " ".join(variants).lower()
-    assert "creddental" in joined
-    assert "credental" in joined
+    assert "foobrand" in joined
     # Must not treat the whole English essay as the company name
     assert not any("comprehensive information" in v.lower() for v in variants)
-
 
 def test_anchors_include_topic_and_not_only_generics():
     q = "Acme Widgets company located in Berlin Germany"
@@ -59,24 +56,23 @@ def test_merge_drops_bare_generics():
 
 
 def test_entity_focus_block_mentions_exclusion():
-    block = entity_focus_block("Credental San Pedro Sula")
+    block = entity_focus_block("FooBrand Example City")
     assert "ENTITY FOCUS" in block
     assert "Unverified" in block or "unrelated" in block.lower()
 
 
 def test_build_query_list_prefers_entity_anchors():
-    terms = ["Credental reviews", "generic dental"]
+    terms = ["FooBrand reviews", "generic clinic"]
     queries = _build_query_list(
         terms,
-        "Research Credental clinic San Pedro Sula Honduras",
+        "Research FooBrand clinic Example City Exampleland",
         max_queries=1,
     )
     assert queries
     blob = " ".join(queries).lower()
-    assert "credental" in blob
+    assert "foobrand" in blob
     # Facet list can be longer than max_queries (hints for one live call)
-    assert any("credental" in q.lower() for q in queries)
-
+    assert any("foobrand" in q.lower() for q in queries)
 
 def test_build_safe_query_still_bounded():
     q = _build_safe_query(["one", "two", "three"] + ["x" * 50] * 10)

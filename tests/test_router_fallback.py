@@ -533,9 +533,11 @@ def test_synthesizer_cross_reference_citations():
 
     final_report = run_synthesizer(raw_report, search_results=raw_search, router_instance=mock_router)
 
-    # http://nasa.gov/shuttle should NOT be marked (it was in raw search results)
-    # http://unverified-source.com MUST be marked with warning
+    # Verified citation stays; invented source is dropped from sources[]
+    # and called out in the verification audit (not silently kept).
     assert "http://nasa.gov/shuttle" in final_report.content
-    assert "http://nasa.gov/shuttle (⚠️" not in final_report.content
-    assert "http://unverified-source.com (⚠️ fuente no verificada en esta ejecución — revisar manualmente)" in final_report.content
+    assert "http://nasa.gov/shuttle" in final_report.sources
+    assert "http://unverified-source.com" not in final_report.sources
+    assert "unverified-source.com" in final_report.content  # audit trail
+    assert "Dropped source" in final_report.content or "not present" in final_report.content
 

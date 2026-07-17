@@ -29,9 +29,14 @@ from agents.deep_research.research_types import (
     search_facet_hints,
 )
 from agents.deep_research.source_fetch import (
+    collect_outbound_from_sources,
     extract_user_domains,
+    fetch_outbound_presence_pages,
     fetch_user_primary_sources,
+    format_linked_presence_fetch_block,
+    format_outbound_presence_block,
     format_primary_source_block,
+    outbound_presence_search_facets,
 )
 from core.agent_runtime import run_role_raw
 from core.search_guards import NoLiveSearchError, raise_if_no_live_search
@@ -46,8 +51,13 @@ You MUST use live web search tools (not training memory alone).
 IMPORTANT CONTEXT:
 - The host app ALREADY HTTP-fetched any official site the user named.
   That content will be attached as PRIMARY SOURCES for grounding.
+- The host may also list OUTBOUND PRESENCE channels discovered as real
+  buttons/links on that site (WhatsApp wa.me phones, Instagram/Facebook/
+  LinkedIn/TikTok/YouTube/X profile URLs, mailto, tel).
+- The host may attach LINKED PRESENCE FETCHES of those social profile pages.
 - Your job is NOT only the official page. You MUST also search the open web
-  for related, third-party evidence about the SAME subject.
+  for related, third-party evidence about the SAME subject, AND for public
+  content/posts on any social profile URLs the host discovered on the site.
 
 In THIS single response, run MULTIPLE distinct live searches (several tool
 calls) covering different facets, then merge the findings.
@@ -56,30 +66,38 @@ Required coverage (same subject only) — adapt facets to the topic:
 A) Official digital presence (site:domain, bare domain) when a domain is known
 B) Third-party listings / maps / business profiles / directories when relevant
 C) Social or professional profiles clearly matching the subject
-D) Reviews / ratings / reputation when relevant
-E) News, press, or professional mentions
-F) Named people or related entities only if the user mentioned them
-G) Brand / visual assets only if the user asked and real pages show them
+D) When OUTBOUND PRESENCE lists Instagram/Facebook/etc. URLs or handles:
+   live-search those EXACT profile URLs and recent public posts / reels /
+   about-bio content for the SAME handle (do not swap a different account)
+E) Reviews / ratings / reputation when relevant
+F) News, press, or professional mentions
+G) Named people or related entities only if the user mentioned them
+H) Brand / visual assets only if the user asked and real pages show them
 
 Rules:
 1. Search the EXACT subject the user named. Do not substitute a different
    organization, person, or brand with a similar name or the same place.
 2. Do NOT stop after the official website. Always attempt open-web queries.
-3. For every fact, include the source URL that actually returned it.
-4. NEVER invent:
+3. Phone numbers encoded in WhatsApp (wa.me / api.whatsapp.com) links on the
+   official page ARE valid contact evidence — report them as WhatsApp numbers.
+4. For every fact, include the source URL that actually returned it.
+5. NEVER invent:
    - archive.org / Wayback snapshots or historical existence claims
    - emails, phone numbers, messaging handles, or coordinates
    - brand colors (#hex), font names, logo descriptions
+   - social posts, captions, or follower counts you did not retrieve
    - any URL you did not actually retrieve via search tools
-   unless a live result or the PRIMARY SOURCES block contains them.
-5. If a result is a DIFFERENT entity, mark it as:
+   unless a live result or the PRIMARY/OUTBOUND/LINKED blocks contain them.
+6. If a result is a DIFFERENT entity, mark it as:
    EXCLUDED (unrelated): <name> — <why> — <url>
    and do NOT fold its details into the main subject.
-6. Return a structured dump with sections:
+7. Return a structured dump with sections:
    - Official website (live notes; host may also attach a fetch)
+   - Contact from official buttons (WhatsApp phones, mailto, tel)
+   - Social profiles & posts (handles found on site + what live search returned)
    - Third-party web findings (with URLs)
    - Confirmed facts (with URLs)
-   - Contact & locations (only strings present in sources)
+   - Locations (only strings present in sources)
    - Brand / visual identity (only if evidenced and relevant)
    - Offerings / products / services (if relevant)
    - Reputation / reviews (if any)
@@ -91,7 +109,7 @@ Rules:
 MAX_SEARCH_TERMS: int = 8
 MAX_QUERY_CHARS: int = 150
 MAX_LIVE_QUERIES: int = 1
-MAX_FACET_HINTS: int = 16
+MAX_FACET_HINTS: int = 22
 
 __all__ = [
     "NoLiveSearchError",
@@ -252,6 +270,34 @@ def run_web_search(
     if progress:
         progress(f"primary sources: {ok_count} ok / {fail_count} failed")
 
+    # Follow WhatsApp / Instagram / other channels linked from the official site
+    outbound = collect_outbound_from_sources(primary)
+    outbound_block = format_outbound_presence_block(outbound)
+    social_facets = outbound_presence_search_facets(outbound, max_facets=10)
+    if social_facets:
+        # Prepend so live search prioritizes exact profile URLs / posts
+        facets = list(dict.fromkeys([*social_facets, *facets]))[:MAX_FACET_HINTS]
+        facet_block = "\n".join(f"- {f}" for f in facets) if facets else facet_block
+
+    if progress and outbound:
+        kinds = sorted({o.kind for o in outbound})
+        progress(f"outbound channels on official page: {', '.join(kinds)}")
+
+    if progress and any(o.kind not in ("whatsapp", "email", "phone", "maps") for o in outbound):
+        progress("fetching linked social profile page(s)…")
+    linked = fetch_outbound_presence_pages(outbound, max_fetch=4)
+    linked_block = format_linked_presence_fetch_block(linked)
+    linked_ok = sum(1 for L in linked if L.ok)
+    if linked:
+        logger.info(
+            "Linked presence fetches: %d ok / %d total; outbound=%d",
+            linked_ok,
+            len(linked),
+            len(outbound),
+        )
+        if progress:
+            progress(f"linked social fetches: {linked_ok}/{len(linked)} ok")
+
     if progress:
         progress("web search (live, multi-facet)… this can take 30–90s")
     logger.info("Web search: 1 live call, %d facet hints", len(facets))
@@ -271,6 +317,22 @@ def run_web_search(
             "\nNo official domain was named — rely fully on multi-facet live search.\n"
         )
 
+    if outbound:
+        social_hint = (
+            "\nOUTBOUND PRESENCE discovered on the official page (buttons/schema):\n"
+            + "\n".join(
+                f"- {o.kind}: {o.url}"
+                + (f" handle=@{o.handle}" if o.handle else "")
+                + (f" phone_digits={o.phone_digits}" if o.phone_digits else "")
+                for o in outbound[:12]
+            )
+            + "\nYou MUST live-search each social profile URL/handle above and "
+            "report public posts/bio only when tools return them. "
+            "WhatsApp phone digits from wa.me links are already valid contact evidence.\n"
+        )
+    else:
+        social_hint = ""
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -280,16 +342,19 @@ def run_web_search(
                 f"{profile_block}\n"
                 f"Full research topic:\n"
                 f"{original_query or (facets[0] if facets else '')}\n"
-                f"{domain_hint}\n"
+                f"{domain_hint}"
+                f"{social_hint}\n"
                 f"Run several live searches for these facets (same subject only).\n"
                 f"Bias coverage toward the active research profile "
                 f"({profile.label()}).\n"
-                f"Include BOTH official-site (if any) and third-party / open-web facets:\n"
+                f"Include official-site (if any), outbound social profiles/posts, "
+                f"and third-party / open-web facets:\n"
                 f"{facet_block}\n\n"
-                "Merge into one structured dump with a dedicated "
-                "'Third-party web findings' section and real source URLs. "
+                "Merge into one structured dump with dedicated sections for "
+                "'Contact from official buttons', 'Social profiles & posts', and "
+                "'Third-party web findings', with real source URLs. "
                 "List unrelated hits under EXCLUDED. "
-                "If you cannot verify contact or other claimed details, list them under "
+                "If you cannot verify contact or posts, list them under "
                 "Gaps — do not invent. Never invent URLs you did not retrieve."
             ),
         },
@@ -309,8 +374,16 @@ def run_web_search(
     if progress:
         progress(f"web search done ({len(body)} chars)")
 
+    extras = []
+    if outbound_block:
+        extras.append(outbound_block)
+    if linked_block:
+        extras.append(linked_block)
+    extras_joined = ("\n\n".join(extras) + "\n\n") if extras else ""
+
     merged = (
         f"{primary_block}\n\n"
+        f"{extras_joined}"
         "=== LIVE WEB SEARCH DUMP (third-party + open web; must be used) ===\n"
         f"{body}\n"
         "=== END LIVE DUMP ==="

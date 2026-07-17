@@ -217,7 +217,10 @@ Heuristics + compressor JSON fields feed a `ResearchProfile` used by search face
 3. Live multi-facet search is **domain-agnostic**: official site *plus* open-web facets from the query and from the research profile.
 4. Grounding report structure: official website findings **and** third-party web findings when available; outline adapts to typology.
 5. Prompts forbid inventing archive years, phones, emails, brand hex/fonts, or citation URLs unless verbatim in documents.
-6. `source_url_is_verified` + `scrub_ungrounded_claims` drop invented sources and strip ungrounded contacts.
+6. Primary HTML fetch extracts a **STRUCTURED EXTRACTS** block (JSON-LD, meta/og, CSS hex colors, wa.me/social hrefs, logo image URLs) so brand-rebuild research is not limited to visible body text after script/style stripping.
+7. **Outbound presence follow-up (domain-agnostic):** buttons/schema on the official page that point to WhatsApp (`wa.me` / `api.whatsapp.com`), Instagram, Facebook, LinkedIn, TikTok, YouTube, X, mailto, or tel are decoded into an **OUTBOUND PRESENCE** corpus block (phone digits from WhatsApp links are valid contact evidence). Social profile URLs are HTTP-fetched when possible (**LINKED PRESENCE FETCHES**) and injected as live-search facets (profile URL + posts/handle queries). No industry- or brand-specific hardcoding.
+8. Synthesizer recovers when free models return JSON with only `content` (missing `sources`) or bare prose, using content URLs / grounded fallback instead of failing polish.
+9. `source_url_is_verified` + `scrub_ungrounded_claims` drop invented sources and strip ungrounded contacts.
 
 
 ---

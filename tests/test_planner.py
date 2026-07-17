@@ -88,18 +88,18 @@ def test_summarize_research():
 def test_execute_plan_shows_full_research_report(monkeypatch):
     """User-facing /do text must include the whole research body, not a 400-char stub."""
     long_body = (
-        "Verified Report: Credental Dental Clinic, San Pedro Sula, Honduras\n"
-        "This report summarizes Credental based on public sources.\n"
+        "Verified Report: AcmeBrand Clinic, Example City, Exampleland\n"
+        "This report summarizes AcmeBrand based on public sources.\n"
         "Company Background\n"
-        "Credental's founding date is not readily available. "
-        "The clinic's website, credentalhn.com, positions the brand as a "
-        "modern dental practice in San Pedro Sula with implants and aesthetics.\n"
+        "AcmeBrand's founding date is not readily available. "
+        "The clinic's website, acmebrand.test.com, positions the brand as a "
+        "modern dental practice in Example City with implants and aesthetics.\n"
     ) + ("Detail paragraph about services and locations. " * 40)
 
     def fake_research(prompt: str):
         return {
             "content": long_body,
-            "sources": ["https://credentalhn.com", "https://example.com/reviews"],
+            "sources": ["https://acmebrand.test.com", "https://example.com/reviews"],
             "is_safe": True,
             "error": None,
         }
@@ -107,11 +107,11 @@ def test_execute_plan_shows_full_research_report(monkeypatch):
     monkeypatch.setattr("cli_app.orchestrate._run_research", fake_research)
 
     plan = PipelinePlan(
-        summary="Research Credental",
+        summary="Research AcmeBrand",
         steps=[
             PipelineStep(
                 action="research",
-                prompt="Credental San Pedro Sula",
+                prompt="AcmeBrand Example City",
                 uses_prior=False,
             ),
         ],
@@ -119,23 +119,23 @@ def test_execute_plan_shows_full_research_report(monkeypatch):
     result = execute_plan(plan)
     assert result["ok"] is True
     text = result["text"]
-    assert "credentalhn.com" in text
+    assert "acmebrand.test.com" in text
     assert "implants and aesthetics" in text
     assert long_body in text or long_body.strip() in text
-    assert "https://credentalhn.com" in text
+    assert "https://acmebrand.test.com" in text
     # Must not stop after the old ~400-char step summary cut.
     assert len(text) > 800
 
 
 def test_execute_plan_research_then_vibe_with_long_prior(monkeypatch):
     """Prior research context must reach vibe without schema max_length failure."""
-    long_body = "Research findings on Credental. " * 200  # >4k when wrapped
+    long_body = "Research findings on AcmeBrand. " * 200  # >4k when wrapped
     vibe_prompts: list[str] = []
 
     def fake_research(prompt: str):
         return {
             "content": long_body,
-            "sources": ["https://www.credentalhn.com"],
+            "sources": ["https://www.acmebrand.test.com"],
             "is_safe": True,
             "error": None,
         }
@@ -145,7 +145,7 @@ def test_execute_plan_research_then_vibe_with_long_prior(monkeypatch):
         return {
             "passed": True,
             "fix_attempts": 1,
-            "files_written": [{"path": "reports/credental.md", "lines": 40}],
+            "files_written": [{"path": "reports/acmebrand.md", "lines": 40}],
             "summary": "wrote report",
             "error": None,
         }
@@ -156,7 +156,7 @@ def test_execute_plan_research_then_vibe_with_long_prior(monkeypatch):
     plan = PipelinePlan(
         summary="Research then report",
         steps=[
-            PipelineStep(action="research", prompt="Research Credental", uses_prior=False),
+            PipelineStep(action="research", prompt="Research AcmeBrand", uses_prior=False),
             PipelineStep(
                 action="vibe",
                 prompt="Compile a Markdown research report file from the prior findings.",
@@ -168,5 +168,5 @@ def test_execute_plan_research_then_vibe_with_long_prior(monkeypatch):
     assert result["ok"] is True
     assert len(vibe_prompts) == 1
     assert "Context from prior pipeline steps" in vibe_prompts[0]
-    assert "Credental" in vibe_prompts[0]
+    assert "AcmeBrand" in vibe_prompts[0]
     assert len(vibe_prompts[0]) > 4000
