@@ -95,7 +95,12 @@ def web_search_node(state: DeepResearchState) -> dict[str, Any]:
         return {"error": "Missing trends for search."}
 
     try:
-        results = run_web_search(trends.technologies)
+        # Keep the full user topic so search stays entity-anchored (not only
+        # compressed keywords that mix similar businesses).
+        results = run_web_search(
+            trends.technologies,
+            original_query=state.get("query") or "",
+        )
         return {"search_results": results, "error": None}
     except NoLiveSearchError as exc:
         logger.error(
@@ -140,7 +145,9 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
 
     try:
         final_report = run_synthesizer(
-            grounded_report, search_results=state.get("search_results", "")
+            grounded_report,
+            search_results=state.get("search_results", ""),
+            query=state.get("query") or "",
         )
         return {"final_report": final_report, "error": None}
     except Exception as exc:

@@ -273,7 +273,7 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_web_search",
-        lambda terms: (
+        lambda terms, *args, **kwargs: (
             calls.update({"web_search": calls["web_search"] + 1})
             or "Web search results compilation text."
         ),
