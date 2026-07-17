@@ -91,6 +91,54 @@ def extract_url_set(text: str) -> set[str]:
     return {u.lower().strip("/") for u in extract_urls(text)}
 
 
+def normalize_source_url(url: str) -> str:
+    """Lowercase, strip trailing slash/punctuation for comparison."""
+    u = (url or "").strip()
+    while u and u[-1] in ".,);]'\"»":
+        u = u[:-1]
+    return u.lower().rstrip("/")
+
+
+def source_url_is_verified(source: str, corpus: str) -> bool:
+    """True only if *source* matches a URL that actually appears in *corpus*.
+
+    Prevents invented citations. Does **not** accept host-only or scheme-only
+    matches (e.g. ``https:`` appearing in every corpus).
+    """
+    s = normalize_source_url(source)
+    if not s or "://" not in s:
+        # Bare domain as a "source" only if it appears as a URL host in corpus
+        if not s or "." not in s:
+            return False
+        hosts = set()
+        for u in extract_urls(corpus or ""):
+            m = re.match(r"https?://([^/]+)", u.lower())
+            if m:
+                h = m.group(1)
+                if h.startswith("www."):
+                    h = h[4:]
+                hosts.add(h)
+        return s.lstrip("www.") in hosts or s in hosts
+
+    corpus_urls = extract_url_set(corpus or "")
+    if s in corpus_urls:
+        return True
+    # Allow trailing-path variants only when a corpus URL is a prefix of source
+    # or source is a prefix of a corpus URL (same resource family).
+    for u in corpus_urls:
+        if s == u:
+            return True
+        # same origin + one is prefix of the other
+        if s.startswith(u + "/") or u.startswith(s + "/"):
+            return True
+        # strip www.
+        s2 = s.replace("://www.", "://", 1)
+        u2 = u.replace("://www.", "://", 1)
+        if s2 == u2 or s2.startswith(u2 + "/") or u2.startswith(s2 + "/"):
+            return True
+    return False
+
+
 # Contact / brand tokens that must appear literally in verified corpus
 _EMAIL_RE = re.compile(
     r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"
@@ -200,17 +248,14 @@ def scrub_ungrounded_claims(
             notes.append(f"Removed unverified hex color: {color}")
             text = text.replace(color, "[color not found in verified sources]")
 
-    # Drop source list entries that never appeared in the live/primary corpus
+    # Drop source list entries that never appeared as real URLs in the corpus
     new_sources: list[str] = []
     if sources is not None:
         for src in sources:
             s = (src or "").strip()
             if not s:
                 continue
-            if _corpus_contains(s, corpus_l) or any(
-                s.lower().rstrip("/") in u or u in s.lower()
-                for u in extract_url_set(corpus)
-            ):
+            if source_url_is_verified(s, corpus):
                 new_sources.append(s)
             else:
                 notes.append(f"Dropped source not present in search/primary dump: {s}")

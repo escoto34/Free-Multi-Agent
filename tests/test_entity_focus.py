@@ -5,6 +5,7 @@ from __future__ import annotations
 from agents.deep_research.entity_focus import (
     entity_focus_block,
     extract_entity_anchors,
+    extract_location_phrases,
     extract_name_variants,
     merge_search_terms,
 )
@@ -38,22 +39,23 @@ def test_name_variants_english_planner_phrasing():
 
 
 def test_anchors_include_topic_and_not_only_generics():
-    q = "Credental dental clinic San Pedro Sula Honduras"
+    q = "Acme Widgets company located in Berlin Germany"
     anchors = extract_entity_anchors(q)
     assert anchors
     blob = " ".join(anchors).lower()
-    assert "credental" in blob
-    assert "san pedro" in blob or "honduras" in blob
+    assert "acme" in blob or "widgets" in blob
+    assert "berlin" in blob or "germany" in blob
 
 
 def test_merge_drops_bare_generics():
     merged = merge_search_terms(
-        ["Credental San Pedro Sula"],
-        ["dental", "clinic", "Credental reviews"],
+        ["Acme Widgets Berlin"],
+        ["reviews", "website", "Acme Widgets reviews"],
         max_terms=8,
     )
-    assert "dental" not in [m.lower() for m in merged]
-    assert any("credental" in m.lower() for m in merged)
+    assert "reviews" not in [m.lower() for m in merged]
+    assert "website" not in [m.lower() for m in merged]
+    assert any("acme" in m.lower() for m in merged)
 
 
 def test_entity_focus_block_mentions_exclusion():
@@ -79,3 +81,11 @@ def test_build_query_list_prefers_entity_anchors():
 def test_build_safe_query_still_bounded():
     q = _build_safe_query(["one", "two", "three"] + ["x" * 50] * 10)
     assert len(q) <= 150
+
+
+def test_location_phrases_from_prepositions():
+    locs = extract_location_phrases(
+        "Research FooBar Inc located in Austin Texas, USA"
+    )
+    blob = " ".join(locs).lower()
+    assert "austin" in blob or "texas" in blob or "usa" in blob

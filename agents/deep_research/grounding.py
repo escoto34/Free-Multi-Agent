@@ -7,9 +7,15 @@ Provider/model from config/model_router.yaml.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from agents.deep_research.entity_focus import entity_focus_block
+from agents.deep_research.research_types import (
+    ResearchProfile,
+    classify_research,
+    report_outline_hints,
+    research_profile_block,
+)
 from core.agent_runtime import run_role_raw
 from core.search_guards import (
     extract_urls,
@@ -22,31 +28,34 @@ SYSTEM_PROMPT = """You are a precision grounding and verification assistant.
 Your job is to read the provided search documents and write a DETAILED,
 well-organized report that answers the user's query.
 
-Documents may include a "PRIMARY SOURCES" block (HTTP-fetched official pages
-named by the user). Those are highest-trust evidence.
+Documents usually have TWO parts:
+1) PRIMARY SOURCES — HTTP-fetched official pages the user named (highest trust).
+2) LIVE WEB SEARCH DUMP — open-web / third-party results (Maps, social, directories,
+   news, reviews). You MUST integrate both; do not write a report that only
+   paraphrases the official homepage if the live dump has additional findings.
 
-Depth requirements (use Markdown headings):
-1. Identity — official/trade names, spelling variants, what is confirmed vs uncertain
-2. Locations & contact — ONLY addresses/phones/emails that appear VERBATIM in documents
-3. Online presence — website and social profiles ONLY if clearly the same entity
-4. Brand / visual identity — logo, colors, fonts ONLY if present in documents (e.g. CSS,
-   page text, asset URLs). Never invent teal palettes or Montserrat/Open Sans.
-5. Services & specialty — specific treatments if mentioned
-6. Reputation — review scores only if present
-7. People & history — staff names if present; founding years ONLY if dated in sources
-8. Unverified or unrelated hits — anything that might be a different business
-9. Information gaps — what was asked but NOT found (including failed primary fetches)
+Depth requirements (use Markdown headings; skip sections that do not apply):
+1. Identity — names, spelling variants, confirmed vs uncertain
+2. Official website findings — from PRIMARY SOURCES (+ live notes about the domain)
+3. Third-party web findings — listings, maps, social, news, reviews (with URLs)
+4. Locations & contact — ONLY strings that appear VERBATIM in documents
+5. Brand / visual identity — only if present in documents and relevant to the query
+6. Offerings / products / services — if mentioned
+7. Reputation — scores only if present
+8. People & history — only if present; years ONLY if dated in sources
+9. Unverified or unrelated hits
+10. Information gaps — including "no third-party listings found" when true
 
 STRICT RULES:
-- Cite sources with URLs that appear in the documents.
-- Do NOT invent facts. Prefer "not found in verified sources" over guesses.
-- Do NOT invent web.archive.org / Wayback links or claim the site existed in 2022/2023
-  unless an archive URL is present in the documents with that year.
-- Do NOT invent email, phone, WhatsApp, or GPS coordinates.
-- Do NOT invent brand colors (#hex), typography, or logo geometry.
-- Do NOT merge unrelated clinics or social accounts into the main profile.
-- If PRIMARY FETCH FAILED for the official domain, state that clearly.
-- Keep maximum useful detail for redesigning a website, but only evidenced detail.
+- Cite only URLs that appear in the documents (copy them exactly).
+- Do NOT invent facts, emails, phones, archive years, hex colors, fonts, logos,
+  or citation URLs.
+- Do NOT invent web.archive.org links.
+- Do NOT merge unrelated entities or social accounts into the main subject.
+- If PRIMARY FETCH FAILED, state that clearly.
+- If LIVE DUMP is thin, say what open-web facets were missing — do not invent hits.
+- Keep maximum useful detail, but only evidenced detail.
+- Adapt emphasis to the RESEARCH PROFILE (purpose/depth/data/design) without inventing.
 """
 
 
@@ -78,6 +87,8 @@ def run_grounding(
     query: str,
     search_results: str,
     router_instance=None,
+    *,
+    research_profile: Optional[ResearchProfile] = None,
 ) -> GroundedReport:
     """Ground the query against search_results; return prose + sources."""
     if not search_results or not search_results.strip():
@@ -93,17 +104,27 @@ def run_grounding(
             "abortando para evitar generar un reporte no fundamentado"
         )
 
+    profile = research_profile or classify_research(query)
     focus = entity_focus_block(query)
+    profile_block = research_profile_block(profile)
+    outline = report_outline_hints(profile)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
                 f"{focus}\n"
+                f"{profile_block}\n"
+                f"{outline}\n"
                 f"Write a verified, detailed, well-cited report answering:\n{query}\n\n"
-                "Use ONLY the search documents (PRIMARY SOURCES + live dump). "
-                "Separate unrelated businesses clearly. "
-                "Any contact or brand detail not literally in the documents goes under Gaps."
+                "Use ONLY the search documents. Cover BOTH when present:\n"
+                "- PRIMARY SOURCES (official site fetch)\n"
+                "- LIVE WEB SEARCH DUMP (third-party / open web)\n"
+                "Structure the report for the active research profile "
+                f"({profile.label()}). "
+                "Separate unrelated entities clearly. "
+                "Any contact detail or citation URL not literally in the "
+                "documents goes under Gaps / is omitted."
             ),
         },
     ]

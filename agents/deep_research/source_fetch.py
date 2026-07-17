@@ -1,7 +1,7 @@
 """
 Fetch user-provided primary URLs for System B (Deep Research).
 
-When a topic names an official website (e.g. credentalhn.com), MultiAgent
+When a topic names an official website (bare domain or URL), MultiAgent
 fetches it *before* grounding so models cannot invent archive pages or
 contact data that never appeared in live sources.
 """
@@ -168,7 +168,7 @@ def extract_user_urls(text: str, *, max_urls: int = 8) -> list[str]:
     for m in _EXPLICIT_URL_RE.finditer(text):
         _add(m.group(0))
 
-    # Bare domains (credentalhn.com) — require a known TLD shape
+    # Bare domains (example.com) — require a known TLD shape
     for m in _URL_RE.finditer(text):
         full = m.group(0)
         host = m.group(1)
@@ -304,9 +304,11 @@ def format_primary_source_block(sources: Iterable[FetchedSource]) -> str:
     """Markdown/text block injected at the top of search_results."""
     parts: list[str] = [
         "=== PRIMARY SOURCES (fetched by MultiAgent from URLs/domains in the user topic) ===",
-        "These are the ONLY allowed grounds for claims about the official website.",
-        "Do NOT invent Wayback/archive snapshots, emails, phones, colors, or logos "
-        "that do not appear in these bodies or in the live search dump below.",
+        "Highest-trust evidence for the OFFICIAL website only.",
+        "Also use the LIVE WEB SEARCH DUMP below for third-party / open-web findings",
+        "(Maps, directories, social, news, reviews) about the same entity.",
+        "Do NOT invent Wayback/archive snapshots, emails, phones, colors, logos, or",
+        "citation URLs that do not appear in these bodies or in the live search dump.",
         "",
     ]
     any_src = False

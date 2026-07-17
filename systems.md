@@ -197,13 +197,27 @@ Safety → Context compressor → Web search (+ primary URL fetch) → Grounding
 
 **Entity focus / multi-facet search** (application logic, not a separate model role) keeps queries anchored so compressors do not blend similar business names.
 
-**Anti-hallucination (System B code path):**
+**Research typology (System B — domain-agnostic):**
 
-1. Extract bare domains / URLs from the user topic (`credentalhn.com`).
-2. `fetch_user_primary_sources` → inject `=== PRIMARY SOURCES ===` above the live search dump.
-3. Facets always include `site:domain` first.
-4. Prompts forbid inventing Wayback years, phones, emails, brand hex/fonts unless verbatim in documents.
-5. `scrub_ungrounded_claims` post-processes grounding + synthesizer output and appends a verification audit.
+Before/with compression, the topic is classified into:
+
+| Dimension | Options |
+|-----------|---------|
+| Purpose | `basic` (theory) · `applied` (practical problem) |
+| Depth | `exploratory` · `descriptive` · `explanatory` |
+| Data approach | `quantitative` · `qualitative` · `mixed` |
+| Design | `experimental` · `non_experimental` |
+
+Heuristics + compressor JSON fields feed a `ResearchProfile` used by search facets, grounding outline, and synthesizer framing. Choosing the profile defines whether the run expands theory, supports a practical decision, describes vs explains, and emphasizes numbers vs meanings — without hardcoding any industry.
+
+**Anti-hallucination + multi-source (System B code path):**
+
+1. Extract bare domains / URLs from the user topic (if any).
+2. `fetch_user_primary_sources` → inject `=== PRIMARY SOURCES ===` (highest trust for named official sites).
+3. Live multi-facet search is **domain-agnostic**: official site *plus* open-web facets from the query and from the research profile.
+4. Grounding report structure: official website findings **and** third-party web findings when available; outline adapts to typology.
+5. Prompts forbid inventing archive years, phones, emails, brand hex/fonts, or citation URLs unless verbatim in documents.
+6. `source_url_is_verified` + `scrub_ungrounded_claims` drop invented sources and strip ungrounded contacts.
 
 
 ---

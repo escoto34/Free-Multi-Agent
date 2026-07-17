@@ -6,7 +6,7 @@ Local multi-agent tooling on **free/trial LLM APIs**. One install, one `.env`, n
 |-------|----------------|
 | **Interactive TUI** (`multiagent`) | Chat with host tools, graphify context, model/keys config |
 | **System A — Vibe Coding** | Architect → Coder → tests → Debugger + Git checkpoint/rollback |
-| **System B — Deep Research** | Safety → compress → web search → ground → synthesize (+ SQLite resume) |
+| **System B — Deep Research** | Safety → compress (+ research typology) → web search → ground → synthesize |
 | **Planner** (`/do`) | Splits a task into ordered vibe and/or research steps |
 | **Terminal toolbox** | Curated modern CLI catalog: doctor, suggest, runtime backends (`eza`/`rg`/`fd`/…) |
 
@@ -219,14 +219,17 @@ Safeguards (`graphs/vibe_coding_graph.py`):
 
 ### System B — Deep Research
 
-**Safety → Context compress → Web search → Grounding → Synthesis** (+ SQLite checkpoints).
+**Safety → Context compress (+ research typology) → Web search → Grounding → Synthesis** (+ SQLite checkpoints).
+
+Each topic is classified by **purpose** (basic/applied), **depth** (exploratory/descriptive/explanatory), **data approach** (quant/qual/mixed), and **design** (experimental/non-experimental). Search facets and report structure adapt to that profile (see **[systems.md](systems.md)**).
 
 Safeguards:
 
 - Query size limits; abort if search admits “no live search”  
-- Citation URLs checked against that run’s search hits  
+- Primary URL fetch when the user names a domain + multi-facet open-web search  
+- Citation URLs verified against that run’s search/primary corpus  
 - Router treats empty HTTP 200 as failure and cascades fallbacks  
-- Entity-focused multi-facet search to reduce brand/entity bleed  
+- Entity-focused multi-facet search to reduce subject bleed  
 
 ### Planner (`/do`)
 

@@ -2,6 +2,10 @@
 Context Compressor agent for System B (Deep Research).
 
 Provider/model/fallback from config/model_router.yaml.
+
+Produces:
+  - entity-anchored search terms
+  - research typology profile (purpose / depth / data / design)
 """
 
 from __future__ import annotations
@@ -9,32 +13,60 @@ from __future__ import annotations
 from typing import Optional
 
 from agents.deep_research.entity_focus import extract_entity_anchors, merge_search_terms
+from agents.deep_research.research_types import (
+    classify_research,
+    merge_profiles,
+    profile_from_mapping,
+)
 from core.agent_runtime import run_structured_agent
 from schemas.deep_research import CondensedTrends
 
-SYSTEM_PROMPT = """You are an expert information synthesis and context compression agent.
-Identify the core entities, name variants, and focused search queries for the research topic.
-Generate a structured query list to guide search engines.
+SYSTEM_PROMPT = """You are an expert research-design and context compression agent.
+From the user's topic you must:
+1) Produce focused search-engine phrases.
+2) Classify the research using a standard typology (not industry-specific).
 
-CRITICAL CONSTRAINTS on the "technologies" field (search terms):
+## Research typology (choose the best fit)
+
+### Purpose
+- basic: expand theory/knowledge without an immediate practical deliverable.
+- applied: use knowledge to solve or support a practical problem/decision.
+
+### Depth
+- exploratory: little-known topic; map terrain; prepare future hypotheses.
+- descriptive: characterize who/what/where/when/how-it-is (not forced why).
+- explanatory: seek causes, mechanisms, consequences between variables.
+
+### Data approach
+- quantitative: numbers, rates, surveys, statistics (when the topic asks for them).
+- qualitative: meanings, discourses, practices, perceptions (sourced only).
+- mixed: both when appropriate.
+
+### Design
+- experimental: controlled manipulation / trials / A/B if the topic is about that.
+- non_experimental: observe phenomena as they appear (most open-web research).
+
+## CRITICAL CONSTRAINTS on "technologies" (search terms)
 - Return AT MOST 8 items.
-- For company / clinic / person research, EACH term MUST include the exact
-  entity name (or a clear spelling variant) plus one facet, e.g.:
-  "Credental San Pedro Sula", "Credentalhn.com", "Credental orthodontics reviews".
-- Prefer precise queries over generic ones. NEVER emit bare generics like
-  "dental clinic", "Honduras dentists", or "patient reviews" alone — those
-  mix unrelated businesses.
+- EACH term MUST include the exact subject name (or a clear spelling variant)
+  plus one facet when possible.
+- Prefer precise queries over bare generics. NEVER emit generic-only phrases
+  like "reviews", "companies", or "news" alone.
 - Each item should be a search-engine style phrase (about 2–8 words).
-  Proper names may stay together even if slightly longer.
-- Cover facets when relevant: official website, address, phone, services,
-  ownership/history, Google/Facebook reviews, accreditations, news.
+- Cover facets suited to the chosen typology (e.g. theory/literature for basic;
+  practical case/contact for applied descriptive; causes/impact for explanatory).
 
 You MUST output your response strictly as a JSON object matching this schema:
 {
-  "technologies": ["Search term 1", "Search term 2", "Search term 3"],
-  "rationale": "Brief explanation of why these search terms were prioritized."
+  "technologies": ["Search term 1", "Search term 2"],
+  "rationale": "Why these search terms were prioritized.",
+  "purpose": "basic|applied",
+  "depth": "exploratory|descriptive|explanatory",
+  "data_approach": "quantitative|qualitative|mixed",
+  "design": "experimental|non_experimental",
+  "profile_rationale": "Why this research profile fits the user topic."
 }
-Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
+Only return raw JSON. Do not wrap in markdown code blocks.
 """
 
 
@@ -43,10 +75,18 @@ def run_context_compressor(
     router_instance=None,
     fallback_override: Optional[dict[str, str]] = None,
 ) -> CondensedTrends:
-    """Extract short search terms from the research query, entity-anchored."""
+    """Extract search terms + research profile from the research query."""
+    heuristic = classify_research(query)
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Extract search targets for: {query}"},
+        {
+            "role": "user",
+            "content": (
+                f"Classify the research profile and extract search targets for:\n{query}\n\n"
+                f"Heuristic draft (you may refine): {heuristic.label()}"
+            ),
+        },
     ]
     trends = run_structured_agent(
         "deep_research",
@@ -72,4 +112,23 @@ def run_context_compressor(
         trends.technologies = anchors[:4] or [query[:150]]
     if not (trends.rationale or "").strip():
         trends.rationale = "Entity-anchored search terms from the research topic."
+
+    llm_profile = profile_from_mapping(
+        {
+            "purpose": trends.purpose,
+            "depth": trends.depth,
+            "data_approach": trends.data_approach,
+            "design": trends.design,
+            "profile_rationale": trends.profile_rationale or trends.rationale,
+        }
+    )
+    # Prefer valid LLM labels; fall back to heuristic rationale when empty
+    final = merge_profiles(heuristic, llm_profile)
+    trends.purpose = final.purpose
+    trends.depth = final.depth
+    trends.data_approach = final.data_approach
+    trends.design = final.design
+    trends.profile_rationale = (
+        (final.rationale or heuristic.rationale or trends.profile_rationale or "").strip()
+    )
     return trends

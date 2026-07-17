@@ -12,10 +12,18 @@ import logging
 
 from pydantic import ValidationError
 
+from typing import Optional
+
 from agents.deep_research.entity_focus import entity_focus_block
+from agents.deep_research.research_types import (
+    ResearchProfile,
+    classify_research,
+    report_outline_hints,
+    research_profile_block,
+)
 from core.agent_config import get_agent_config
 from core.agent_runtime import invoke_router, strip_fences
-from core.search_guards import extract_url_set, scrub_ungrounded_claims
+from core.search_guards import scrub_ungrounded_claims, source_url_is_verified
 from schemas.deep_research import GroundedReport
 
 logger = logging.getLogger(__name__)
@@ -27,13 +35,18 @@ You must maintain citations and URLs from the sources.
 STRICT RULES:
 - Stay on the named subject only. Drop or quarantine facts about other companies.
 - Do NOT invent contact data, social handles, reviews, archive years, hex colors,
-  fonts, or logos. If missing, keep the gap explicit.
-- Do NOT add web.archive.org links that were not already in the notes.
-- Prefer user-provided official domain findings over directories.
-- Preserve depth: keep addresses, phones, service lists, review stats, and gaps
-  that were already verified.
+  fonts, logos, or source URLs. If missing, keep the gap explicit.
+- Do NOT add web.archive.org or directory links that were not already in the notes.
+- Keep BOTH official-site findings and third-party web findings when present.
+- Prefer official domain for brand/contact when it conflicts with weak directories,
+  but do not drop third-party evidence that is clearly the same entity.
+- Preserve depth: addresses, phones, service lists, review stats, and gaps already verified.
 - Prefer structured Markdown with clear headings over a short blurb.
 - Flag uncertain associations (e.g. social accounts not clearly the same brand).
+- sources[] may only list URLs that already appear in the notes/content.
+- Open with a short "Research framing" line stating purpose/depth/data/design used.
+- Shape the report to that profile (basic vs applied; exploratory/descriptive/explanatory;
+  quant/qual emphasis; experimental vs observational limits).
 
 You MUST output your response strictly as a JSON object matching this schema:
 {
@@ -46,7 +59,9 @@ Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
 
 
 def extract_urls(text: str) -> set[str]:
-    """Compatibility wrapper — prefers shared ``extract_url_set``."""
+    """Compatibility wrapper."""
+    from core.search_guards import extract_url_set
+
     return extract_url_set(text)
 
 
@@ -61,17 +76,24 @@ def run_synthesizer(
     router_instance=None,
     *,
     query: str = "",
+    research_profile: Optional[ResearchProfile] = None,
 ) -> GroundedReport:
     """Compile the final publication-grade document; cross-check citations."""
     focus = entity_focus_block(query) if query else ""
+    profile = research_profile or classify_research(query or "")
+    profile_block = research_profile_block(profile)
+    outline = report_outline_hints(profile)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
                 f"{focus}\n"
-                f"Research topic: {query or '(see content)'}\n\n"
-                f"Synthesize this report without inventing contact/brand facts:\n\n"
+                f"{profile_block}\n"
+                f"{outline}\n"
+                f"Research topic: {query or '(see content)'}\n"
+                f"Active profile: {profile.label()}\n\n"
+                f"Synthesize this report without inventing ungrounded facts:\n\n"
                 f"Content:\n{grounded_report.content}\n\n"
                 f"Sources:\n{grounded_report.sources}"
             ),
@@ -109,15 +131,9 @@ def run_synthesizer(
         else:
             raise
 
-    # Corpus for scrubbing: only primary fetch + live dump + grounded notes
-    # (do NOT include synthesizer's own output — that would "verify" invents).
-    corpus = "\n".join(
-        [
-            search_results or "",
-            grounded_report.content or "",
-            "\n".join(grounded_report.sources or []),
-        ]
-    )
+    # Corpus for scrubbing: primary fetch + live dump only (not model rewrites).
+    # Including grounded prose can re-introduce invented URLs; prefer raw search.
+    corpus = search_results or (grounded_report.content or "")
 
     content, sources, _notes = scrub_ungrounded_claims(
         final_report.content or "",
@@ -125,21 +141,7 @@ def run_synthesizer(
         sources=list(final_report.sources or []) or list(grounded_report.sources or []),
     )
 
-    # Drop any remaining sources that are not in the live/primary URL set
-    if search_results:
-        search_urls = extract_url_set(search_results)
-        kept: list[str] = []
-        for source in sources:
-            source_clean = source.lower().strip("/")
-            if any(
-                source_clean in s_url or s_url in source_clean for s_url in search_urls
-            ):
-                kept.append(source)
-            elif "web.archive.org" in source_clean:
-                continue
-            # Keep non-archive sources that survived scrub if host appears in corpus
-            elif source_clean.split("/")[0] in corpus.lower():
-                kept.append(source)
-        sources = kept
+    # Strict: every listed source must appear as a URL in the search corpus
+    sources = [s for s in sources if source_url_is_verified(s, corpus)]
 
     return GroundedReport(content=content, sources=sources)

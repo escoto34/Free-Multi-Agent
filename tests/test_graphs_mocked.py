@@ -282,7 +282,7 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
     # Grounding will fail on the first run, and succeed on the second run
     fail_grounding = True
 
-    def mock_grounding(query, search_results):
+    def mock_grounding(query, search_results, **kwargs):
         calls["grounding"] += 1
         nonlocal fail_grounding
         if fail_grounding:

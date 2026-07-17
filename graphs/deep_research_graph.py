@@ -22,6 +22,7 @@ from langgraph.graph import END, StateGraph
 
 from agents.deep_research.context_compressor import run_context_compressor
 from agents.deep_research.grounding import run_grounding
+from agents.deep_research.research_types import profile_from_mapping
 from agents.deep_research.safety_filter import run_safety_filter
 from agents.deep_research.synthesizer import run_synthesizer
 from agents.deep_research.web_search import NoLiveSearchError, run_web_search
@@ -96,10 +97,21 @@ def web_search_node(state: DeepResearchState) -> dict[str, Any]:
 
     try:
         # Keep the full user topic so search stays entity-anchored (not only
-        # compressed keywords that mix similar businesses).
+        # compressed keywords that mix similar subjects).
+        profile = profile_from_mapping(
+            {
+                "purpose": getattr(trends, "purpose", None),
+                "depth": getattr(trends, "depth", None),
+                "data_approach": getattr(trends, "data_approach", None),
+                "design": getattr(trends, "design", None),
+                "profile_rationale": getattr(trends, "profile_rationale", None),
+            }
+        )
+        logger.info("Research profile: %s", profile.label())
         results = run_web_search(
             trends.technologies,
             original_query=state.get("query") or "",
+            research_profile=profile,
         )
         return {"search_results": results, "error": None}
     except NoLiveSearchError as exc:
@@ -129,7 +141,23 @@ def grounding_node(state: DeepResearchState) -> dict[str, Any]:
         return {"error": state.get("error") or "No search results to ground against."}
 
     try:
-        grounded = run_grounding(state["query"], search_results)
+        trends = state.get("trends")
+        profile = profile_from_mapping(
+            {
+                "purpose": getattr(trends, "purpose", None) if trends else None,
+                "depth": getattr(trends, "depth", None) if trends else None,
+                "data_approach": getattr(trends, "data_approach", None) if trends else None,
+                "design": getattr(trends, "design", None) if trends else None,
+                "profile_rationale": getattr(trends, "profile_rationale", None)
+                if trends
+                else None,
+            }
+        )
+        grounded = run_grounding(
+            state["query"],
+            search_results,
+            research_profile=profile,
+        )
         return {"grounded_report": grounded, "error": None}
     except Exception as exc:
         logger.error("Grounding node failed: %s", exc)
@@ -148,10 +176,23 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
         return {"error": state.get("error") or "No grounded report to synthesize."}
 
     try:
+        trends = state.get("trends")
+        profile = profile_from_mapping(
+            {
+                "purpose": getattr(trends, "purpose", None) if trends else None,
+                "depth": getattr(trends, "depth", None) if trends else None,
+                "data_approach": getattr(trends, "data_approach", None) if trends else None,
+                "design": getattr(trends, "design", None) if trends else None,
+                "profile_rationale": getattr(trends, "profile_rationale", None)
+                if trends
+                else None,
+            }
+        )
         final_report = run_synthesizer(
             grounded_report,
             search_results=state.get("search_results", ""),
             query=state.get("query") or "",
+            research_profile=profile,
         )
         return {"final_report": final_report, "error": None}
     except Exception as exc:

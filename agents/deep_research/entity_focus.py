@@ -1,25 +1,27 @@
 """
 Entity anchoring helpers for System B (Deep Research).
 
-Keeps company/place research tied to the named subject so search and
-synthesis do not merge unrelated businesses with similar names.
+Keeps research tied to the named subject so search and synthesis do not merge
+unrelated entities with similar names. Domain-agnostic (any topic / industry).
 """
 
 from __future__ import annotations
 
 import re
 
-# "Creddental or Credental", "Foo / Bar", "Foo aka Bar"
+# "Foo or Bar", "Foo / Bar", "Foo aka Bar"
 _VARIANT_SPLIT = re.compile(
     r"\s+(?:o|or|/|aka|también\s+conocid[oa]\s+como|also\s+known\s+as)\s+",
     re.IGNORECASE,
 )
-_LOCATION_HINTS = re.compile(
-    r"\b(honduras|san\s+pedro\s+sula|tegucigalpa|cl[ií]nica|dental|"
-    r"hospital|empresa|company|clinic)\b",
+# Place phrases after common location prepositions (no fixed city list)
+_LOC_AFTER_PREP = re.compile(
+    r"\b(?:in|en|at|near|from|de|del|desde|located\s+in|based\s+in|"
+    r"ubicad[oa]\s+en|situad[oa]\s+en)\s+"
+    r"([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9][\wÁÉÍÓÚÜÑáéíóúüñ\s.\-]{1,50})",
     re.IGNORECASE,
 )
-# "about Creddental", "sobre Credental", "information about X"
+# "about Foo", "sobre Bar", "information about X"
 # Word boundaries required — bare "on" must not match inside "information".
 _ABOUT_NAME = re.compile(
     r"\b(?:about|sobre|on)\b\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9][\w\-.]{1,40})"
@@ -38,21 +40,18 @@ _FILLER_PREFIX = re.compile(
     r"use\s+the\s+deep-research\s+pipeline\s+to\s+gather.*?about)\s+",
     re.IGNORECASE | re.DOTALL,
 )
+# Generic fillers that should not become the "entity name"
 _STOP_NAMES = frozenset(
     {
         "research",
         "information",
         "comprehensive",
-        "clinic",
-        "dental",
-        "clínica",
-        "clinica",
         "company",
         "empresa",
-        "honduras",
-        "san",
-        "pedro",
-        "sula",
+        "business",
+        "negocio",
+        "organization",
+        "organización",
         "the",
         "and",
         "with",
@@ -65,19 +64,71 @@ _STOP_NAMES = frozenset(
         "sobre",
         "todo",
         "misma",
+        "same",
+        "official",
+        "website",
+        "pagina",
+        "página",
+        "web",
+        "reviews",
+        "news",
     }
 )
 
 
+def extract_location_phrases(query: str, *, max_phrases: int = 3) -> list[str]:
+    """Location-like phrases taken from the query text (no fixed place catalog)."""
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _push(raw: str) -> None:
+        chunk = " ".join((raw or "").split()).strip(" \t,.;:-")
+        if not chunk or len(chunk) < 2:
+            return
+        # Cap length; keep first ~5 tokens of a place phrase
+        toks = chunk.split()
+        if len(toks) > 5:
+            chunk = " ".join(toks[:5])
+        key = chunk.casefold()
+        if key in seen or key in _STOP_NAMES:
+            return
+        seen.add(key)
+        out.append(chunk)
+
+    for m in _LOC_AFTER_PREP.finditer(q):
+        _push(m.group(1))
+
+    # Comma-separated place tail: "…, City, Country"
+    parts = [p.strip() for p in q.split(",") if p.strip()]
+    if len(parts) >= 2:
+        for p in parts[1:]:
+            # Skip pure instructions / long clauses
+            if len(p) > 60 or len(p.split()) > 6:
+                continue
+            if re.search(
+                r"\b(investiga|research|website|pagina|página|brand|marca|logo)\b",
+                p,
+                re.I,
+            ):
+                continue
+            _push(p)
+
+    return out[:max_phrases]
+
+
 def extract_name_variants(query: str) -> list[str]:
-    """Pull likely official-name variants from a free-text research topic."""
+    """Pull likely subject-name variants from a free-text research topic."""
     q = (query or "").strip()
     if not q:
         return []
 
     variants: list[str] = []
 
-    # Parenthetical aka: (also known as Credental)
+    # Parenthetical aka: (also known as Foo)
     for m in _AKA_PAREN.finditer(q):
         chunk = m.group(1).strip(" \t\"'")
         for part in _VARIANT_SPLIT.split(chunk):
@@ -92,10 +143,9 @@ def extract_name_variants(query: str) -> list[str]:
         if m.group(2):
             variants.append(m.group(2).strip())
 
-    # Prefer the first clause before commas for the brand block.
+    # Prefer the first clause before commas for the subject block.
     head = re.split(r"[,;(]", q, maxsplit=1)[0].strip()
     head = _FILLER_PREFIX.sub("", head).strip()
-    # Drop leading fluff words left over
     head = re.sub(
         r"^(?:comprehensive|factual|detailed)?\s*(?:information|info)?\s*"
         r"(?:about|on|sobre)?\s*",
@@ -108,13 +158,13 @@ def extract_name_variants(query: str) -> list[str]:
     for p in parts:
         p = re.sub(
             r"\s+(?:la|el|the|misma\s+empresa|same\s+company|"
-            r"a\s+dental.*|dental\s+clinic.*).*$",
+            r"a\s+\w+.*|located\s+in.*|ubicad[oa]\s+en.*).*$",
             "",
             p,
             flags=re.IGNORECASE,
         ).strip()
         # If still a long sentence, take first 1–3 tokens that look like a name
-        if len(p) > 40 or " " in p and p.lower().split()[0] in _STOP_NAMES:
+        if len(p) > 40 or (" " in p and p.lower().split()[0] in _STOP_NAMES):
             tokens = p.split()
             name_toks: list[str] = []
             for t in tokens[:4]:
@@ -128,15 +178,15 @@ def extract_name_variants(query: str) -> list[str]:
         if 2 <= len(p) <= 80 and p.lower() not in _STOP_NAMES:
             variants.append(p)
 
-    # Brand-like tokens in the full query (Creddental, CREDental, CredentalHN)
+    # Capitalized / brand-like tokens (proper names)
     for tok in re.findall(
-        r"\b([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]{3,})\b", q
+        r"\b([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]{2,})\b", q
     ):
         if tok.lower() in _STOP_NAMES:
             continue
         variants.append(tok)
 
-    # Deduplicate case-insensitively, preserve order; drop pure stopwords
+    # Deduplicate case-insensitively, preserve order
     seen: set[str] = set()
     out: list[str] = []
     for v in variants:
@@ -159,8 +209,8 @@ def extract_entity_anchors(query: str, *, max_anchors: int = 6) -> list[str]:
 
     anchors: list[str] = []
     variants = extract_name_variants(q)
-    loc_bits = _LOCATION_HINTS.findall(q)
-    loc = " ".join(dict.fromkeys(b.lower() for b in loc_bits))
+    locs = extract_location_phrases(q)
+    loc = " ".join(locs[:2])
 
     # User-named websites first (site: and bare domain)
     try:
@@ -174,7 +224,6 @@ def extract_entity_anchors(query: str, *, max_anchors: int = 6) -> list[str]:
     except Exception:
         pass
 
-    # Prefer short entity+location anchors over the whole planner essay
     for name in variants:
         anchors.append(name)
         if loc:
@@ -183,12 +232,20 @@ def extract_entity_anchors(query: str, *, max_anchors: int = 6) -> list[str]:
 
     if variants:
         main = variants[0]
+        # Generic open-web facets (any industry)
         anchors.append(f"{main} official website")
-        anchors.append(f"{main} Google reviews")
-        anchors.append(f"{main} Facebook")
-        # Brand assets when the user is redesigning a site
-        if re.search(r"\b(marca|brand|logo|identidad|imagen\s+de\s+marca)\b", q, re.I):
-            anchors.append(f"{main} logo brand colors")
+        anchors.append(f"{main} reviews OR ratings")
+        anchors.append(f"{main} news OR press")
+        if loc:
+            anchors.append(f"{main} {loc} contact")
+        # Brand / visual only when the user asked for it
+        if re.search(
+            r"\b(marca|brand|logo|identidad|visual\s+identity|"
+            r"imagen\s+de\s+marca|branding)\b",
+            q,
+            re.I,
+        ):
+            anchors.append(f"{main} logo brand identity")
 
     if not anchors:
         primary = " ".join(q.split())
@@ -221,6 +278,17 @@ def merge_search_terms(
     """Prefer entity anchors, then LLM keywords (deduped)."""
     merged: list[str] = []
     seen: set[str] = set()
+    bare_generics = {
+        "reviews",
+        "website",
+        "news",
+        "contact",
+        "company",
+        "business",
+        "empresa",
+        "information",
+        "research",
+    }
     for term in list(anchors) + list(llm_terms or []):
         t = " ".join((term or "").split()).strip()
         if not t:
@@ -228,16 +296,7 @@ def merge_search_terms(
         key = t.casefold()
         if key in seen:
             continue
-        if key in {
-            "dental",
-            "clinic",
-            "clínica",
-            "clinica",
-            "dentist",
-            "honduras",
-            "reviews",
-            "website",
-        }:
+        if key in bare_generics:
             continue
         seen.add(key)
         merged.append(t[:150])
@@ -250,6 +309,13 @@ def entity_focus_block(query: str) -> str:
     """Instruction block injected into search / grounding / synthesis prompts."""
     variants = extract_name_variants(query)
     names = ", ".join(f'"{v}"' for v in variants) if variants else f'"{query[:80]}"'
+    locs = extract_location_phrases(query)
+    loc_line = (
+        f"- Location hints from the topic (use only if they appear in the query): "
+        f'{", ".join(repr(x) for x in locs)}\n'
+        if locs
+        else ""
+    )
     official_lines = ""
     try:
         from agents.deep_research.source_fetch import extract_user_domains, extract_user_urls
@@ -258,19 +324,21 @@ def entity_focus_block(query: str) -> str:
         domains = extract_user_domains(query)
         if urls or domains:
             official_lines = (
-                "- USER-PROVIDED OFFICIAL WEB PRESENCE (mandatory primary):\n"
+                "- USER-PROVIDED OFFICIAL WEB PRESENCE (highest trust when present):\n"
                 + "".join(f"  · {u}\n" for u in urls)
                 + (
                     "  Domains: " + ", ".join(domains) + "\n"
                     if domains
                     else ""
                 )
-                + "  You MUST prioritize these domains (site: queries, content from the "
-                "PRIMARY SOURCES fetch block). Do not ignore them.\n"
-                "  Do NOT invent Wayback Machine / archive.org snapshots, years the site "
-                "existed, emails, phones, hex colors, fonts, or logos unless they appear "
-                "verbatim in PRIMARY SOURCES or the live search dump.\n"
-                "  If a primary fetch failed, say so — never fabricate the page content.\n"
+                + "  Treat these as primary official sources (PRIMARY SOURCES block "
+                "+ site: searches). Do not ignore them.\n"
+                "  They are NOT the only evidence: also use the LIVE WEB SEARCH DUMP "
+                "for third-party / open-web findings about the same subject.\n"
+                "  Do NOT invent archive snapshots, contact data, brand details, or "
+                "citation URLs unless they appear verbatim in PRIMARY SOURCES or the "
+                "live search dump.\n"
+                "  If a primary fetch failed, say so — never fabricate page content.\n"
             )
     except Exception:
         official_lines = ""
@@ -278,17 +346,18 @@ def entity_focus_block(query: str) -> str:
     return (
         "ENTITY FOCUS (strict):\n"
         f"- Primary subject variants: {names}\n"
+        f"{loc_line}"
         f"{official_lines}"
-        "- Only report facts that clearly refer to THIS subject (same brand/legal "
-        "entity / same physical business the user named).\n"
-        "- Do NOT merge unrelated businesses, clinics, hospitals, or social accounts "
-        "just because they are dental, in the same city, or have a similar name.\n"
-        "- If a social handle, website, phone, or address is not clearly tied to the "
-        "named entity (e.g. Instagram of another clinic), put it under "
-        "'Unverified / possibly unrelated' and do not present it as fact.\n"
-        "- Contact data (phone, email, WhatsApp): only if the exact string appears in "
+        "- Only report facts that clearly refer to THIS subject (same organization, "
+        "person, product, or place the user named).\n"
+        "- Do NOT merge unrelated entities that merely share a sector, city, or "
+        "similar name.\n"
+        "- If a social profile, website, phone, or address is not clearly tied to the "
+        "named subject, put it under 'Unverified / possibly unrelated'.\n"
+        "- Contact data (phone, email, messaging): only if the exact string appears in "
         "sources. Otherwise write 'not found in verified sources'.\n"
+        "- Citation sources[] must be URLs that appear in the documents; never invent "
+        "links.\n"
         "- When sources conflict or only look similar, say so explicitly.\n"
-        "- Prefer official domain, Google Business, government registries, and pages "
-        "that print the exact name + location.\n"
+        "- Use BOTH official-site content (when available) and third-party web findings.\n"
     )

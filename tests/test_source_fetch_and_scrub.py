@@ -63,6 +63,23 @@ def test_query_list_prioritizes_domain():
     assert "site:credentalhn.com" in blob
 
 
+def test_query_list_includes_third_party_facets():
+    qs = _build_query_list(
+        [],
+        "Acme Widgets acmewidgets.example.com located in Berlin Germany brand logo",
+        max_queries=1,
+    )
+    blob = " ".join(qs).lower()
+    # Official + open web, not site-only; no industry-specific hardcodes
+    assert "site:acmewidgets.example.com" in blob or "acmewidgets.example.com" in blob
+    assert "reviews" in blob or "news" in blob or "linkedin" in blob or "facebook" in blob
+    assert "berlin" in blob or "germany" in blob
+    assert "logo" in blob or "brand" in blob
+    assert len(qs) >= 6
+    # Must not inject unrelated profession/city catalogs
+    assert "odontólogo" not in blob and "dentista" not in blob
+
+
 def test_html_to_text_strips_scripts():
     html = "<html><script>evil()</script><style>.x{}</style><h1>Credental</h1><p>Tel</p></html>"
     text = html_to_text(html)
@@ -114,3 +131,33 @@ def test_scrub_keeps_email_present_in_corpus():
 
 def test_extract_emails():
     assert "a@b.com" in extract_emails("mail a@b.com please")
+
+
+def test_scrub_drops_invented_source_url():
+    """Regression: host-only / 'https:' must not keep invented citations."""
+    from core.search_guards import source_url_is_verified
+
+    corpus = (
+        "=== PRIMARY ===\n"
+        "URL: https://credentalhn.com\n"
+        "Clinic text https://credentalhn.com\n"
+        "=== LIVE DUMP ===\n"
+        "Found https://www.facebook.com/credentalhn real page\n"
+    )
+    # Invented directory never appeared in dump
+    fake = "https://paginasamarillas.hn/dentistas/credental-hn-san-pedro-sula"
+    assert not source_url_is_verified(fake, corpus)
+    cleaned, sources, notes = scrub_ungrounded_claims(
+        "See directories.",
+        corpus,
+        sources=[fake, "https://credentalhn.com", "https://www.facebook.com/credentalhn"],
+    )
+    assert fake not in sources
+    assert "https://credentalhn.com" in sources
+    assert any("facebook.com/credentalhn" in s for s in sources)
+    assert any("Dropped source" in n for n in notes)
+
+
+def test_entity_focus_requires_third_party_use():
+    block = entity_focus_block("Credental credentalhn.com brand research")
+    assert "LIVE WEB SEARCH" in block or "third-party" in block.lower()

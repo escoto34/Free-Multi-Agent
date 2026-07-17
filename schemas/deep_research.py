@@ -28,16 +28,38 @@ class SafetyClassification(BaseModel):
 class CondensedTrends(BaseModel):
     """Output schema for the Context Compressor agent.
 
-    Represents key entities, trends, or summarized points to guide the web search query.
+    Search terms plus an optional research typology profile so downstream
+    agents adapt depth/purpose/data/design without domain hardcoding.
     """
 
     technologies: list[str] = Field(
         ...,
-        description="List of core technologies, trends, or search terms extracted from the prompt."
+        description="List of core search terms extracted from the prompt.",
     )
     rationale: str = Field(
         ...,
-        description="Brief analysis explaining why these search terms were prioritized."
+        description="Brief analysis explaining why these search terms were prioritized.",
+    )
+    # Research typology (optional on wire; defaults keep old callers working)
+    purpose: str = Field(
+        default="applied",
+        description="basic | applied — theoretical expansion vs practical problem-solving.",
+    )
+    depth: str = Field(
+        default="descriptive",
+        description="exploratory | descriptive | explanatory",
+    )
+    data_approach: str = Field(
+        default="mixed",
+        description="quantitative | qualitative | mixed",
+    )
+    design: str = Field(
+        default="non_experimental",
+        description="experimental | non_experimental",
+    )
+    profile_rationale: str = Field(
+        default="",
+        description="Why this research profile was chosen for the topic.",
     )
 
 
