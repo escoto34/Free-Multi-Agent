@@ -13,6 +13,7 @@ import logging
 import re
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Iterable, Optional
@@ -69,6 +70,142 @@ _SKIP_HOST_SUFFIXES = (
     "github.com",
     "openrouter.ai",
     "groq.com",
+    "schema.org",  # vocabulary in JSON-LD, not a subject site
+    "w3.org",
+    "example.com",
+    "example.org",
+    "example.net",
+    "localhost",
+)
+
+# Bare "domains" that are Latin abbreviations or junk, not websites
+_ABBREVIATION_HOSTS = frozenset(
+    {
+        "e.g",
+        "i.e",
+        "u.s",
+        "u.k",
+        "a.m",
+        "p.m",
+        "n.b",
+        "p.s",
+        "q.v",
+        "cf.",
+        "vs.",
+        "etc",
+        "ie",
+        "eg",
+    }
+)
+
+# Common multi-letter TLDs we accept for bare-domain extraction (not exhaustive)
+_KNOWN_MULTI_TLDS = frozenset(
+    {
+        "com",
+        "org",
+        "net",
+        "edu",
+        "gov",
+        "mil",
+        "int",
+        "info",
+        "biz",
+        "name",
+        "pro",
+        "io",
+        "co",
+        "ai",
+        "app",
+        "dev",
+        "me",
+        "tv",
+        "cc",
+        "xyz",
+        "online",
+        "site",
+        "store",
+        "shop",
+        "blog",
+        "tech",
+        "health",
+        "clinic",
+        "dental",
+        "hn",
+        "mx",
+        "gt",
+        "sv",
+        "ni",
+        "cr",
+        "pa",
+        "us",
+        "uk",
+        "es",
+        "de",
+        "fr",
+        "it",
+        "br",
+        "ar",
+        "cl",
+        "pe",
+        "ec",
+        "bo",
+        "py",
+        "uy",
+        "ca",
+        "au",
+        "nz",
+        "jp",
+        "cn",
+        "in",
+        "ru",
+        "pl",
+        "nl",
+        "se",
+        "no",
+        "fi",
+        "dk",
+        "ch",
+        "at",
+        "be",
+        "pt",
+        "ie",
+        "za",
+        "ph",
+        "sg",
+        "hk",
+        "tw",
+        "kr",
+        "id",
+        "th",
+        "vn",
+        "my",
+        "ae",
+        "sa",
+        "il",
+        "tr",
+        "cz",
+        "ro",
+        "hu",
+        "gr",
+        "ua",
+        "cat",
+        "lat",
+        "cloud",
+        "page",
+        "link",
+        "live",
+        "news",
+        "media",
+        "agency",
+        "studio",
+        "design",
+        "digital",
+        "solutions",
+        "group",
+        "company",
+        "ltd",
+        "llc",
+    }
 )
 
 _DEFAULT_UA = (
@@ -165,14 +302,60 @@ def _host_of(url_or_host: str) -> str:
     return host
 
 
-def _is_skippable_host(host: str) -> bool:
-    h = (host or "").lower()
+def is_plausible_public_host(host: str) -> bool:
+    """True if *host* looks like a real public website hostname.
+
+    Rejects Latin abbreviations (e.g., i.e., U.S.), single-letter TLDs,
+    IP-like junk, and other false positives from bare-domain regexes.
+    """
+    h = (host or "").strip().lower().rstrip(".")
+    if h.startswith("www."):
+        h = h[4:]
     if not h or "." not in h:
+        return False
+    if h in _ABBREVIATION_HOSTS:
+        return False
+    # Strip trailing abbreviation period forms already handled; also "e.g."
+    if h.rstrip(".") in _ABBREVIATION_HOSTS:
+        return False
+    labels = h.split(".")
+    if len(labels) < 2:
+        return False
+    tld = labels[-1]
+    # TLD must be alphabetic and at least 2 chars (kills e.g / i.e / u.s)
+    if not tld.isalpha() or len(tld) < 2:
+        return False
+    # Each label: alnum/hyphen, no empty
+    for lab in labels:
+        if not lab or lab.startswith("-") or lab.endswith("-"):
+            return False
+        if not re.fullmatch(r"[a-z0-9-]+", lab):
+            return False
+    # Bare two-label hosts need a known-ish TLD (still allow foo.co.uk via 3+ labels)
+    if len(labels) == 2 and tld not in _KNOWN_MULTI_TLDS:
+        # Allow any 2–24 letter TLD that is not a single common English word pair
+        # like "or.the" — require tld length 2–24 and sld length >= 2
+        if len(tld) > 24 or len(labels[0]) < 2:
+            return False
+        # Reject if sld is a single letter (a.com is rare; e.g already dead)
+        # Already require sld via labels[0]
+    # Reject pure numeric hosts
+    if all(lab.isdigit() for lab in labels):
+        return False
+    return True
+
+
+def _is_skippable_host(host: str) -> bool:
+    h = (host or "").lower().rstrip(".")
+    if h.startswith("www."):
+        h = h[4:]
+    if not h or "." not in h:
+        return True
+    if not is_plausible_public_host(h):
         return True
     for suf in _SKIP_HOST_SUFFIXES:
         if h == suf or h.endswith("." + suf):
             return True
-    # common TLDs only — drop pure words without TLD already handled
     return False
 
 
@@ -187,6 +370,26 @@ def normalize_url(raw: str) -> str:
     while s and s[-1] in ".,);]'\"«»":
         s = s[:-1]
     return s
+
+
+def is_plausible_source_url(url: str) -> bool:
+    """Whether a URL is worth listing as a research source (not e.g / schema.org)."""
+    u = (url or "").strip()
+    if not u:
+        return False
+    lower = u.lower()
+    if lower.startswith(("mailto:", "tel:")):
+        return True
+    host = _host_of(u if "://" in u else "https://" + u)
+    if not host:
+        return False
+    if not is_plausible_public_host(host):
+        return False
+    # Vocabulary / non-subject hosts never as primary sources
+    for suf in ("schema.org", "w3.org", "example.com", "example.org", "example.net"):
+        if host == suf or host.endswith("." + suf):
+            return False
+    return True
 
 
 def extract_user_urls(text: str, *, max_urls: int = 8) -> list[str]:
@@ -204,29 +407,23 @@ def extract_user_urls(text: str, *, max_urls: int = 8) -> list[str]:
         host = _host_of(url)
         if _is_skippable_host(host):
             return
+        if not is_plausible_public_host(host):
+            return
         key = host + urlparse(url).path.rstrip("/").lower()
         if key in seen:
             return
         seen.add(key)
-        # Prefer origin homepage once per host
         origin = f"https://{host}"
-        if origin not in {normalize_url(u) for u in found}:
-            # If only path variants, still keep first full URL if richer
-            pass
         found.append(url if urlparse(url).path not in ("", "/") else origin)
-        # Always ensure bare origin is present for site:
-        if origin not in found and host:
-            # Will dedupe below
-            pass
 
     for m in _EXPLICIT_URL_RE.finditer(text):
         _add(m.group(0))
 
-    # Bare domains (example.com) — require a known TLD shape
+    # Bare domains (example.com) — require a plausible public host shape
     for m in _URL_RE.finditer(text):
         full = m.group(0)
         host = m.group(1)
-        if _is_skippable_host(host):
+        if _is_skippable_host(host) or not is_plausible_public_host(host):
             continue
         # Prefer explicit https match above; bare domain OK
         _add(full if full.lower().startswith("http") else host)
@@ -686,31 +883,38 @@ def outbound_presence_search_facets(
 def fetch_outbound_presence_pages(
     links: Iterable[OutboundPresence],
     *,
-    max_fetch: int = 4,
-    timeout: float = 15.0,
-    max_chars: int = 8000,
+    max_fetch: int = 3,
+    timeout: float = 8.0,
+    max_chars: int = 6000,
 ) -> list[FetchedSource]:
     """HTTP-fetch social profile pages discovered on the official site.
 
     Many social hosts return login walls; still attempt fetch and record status.
     WhatsApp / tel / mailto are not HTTP-fetched (already decoded into corpus).
+    Fetches run in parallel (bounded) to cut latency.
     """
-    results: list[FetchedSource] = []
+    targets: list[OutboundPresence] = []
     seen_hosts_paths: set[str] = set()
     skip_kinds = {"whatsapp", "email", "phone", "maps"}
     for op in links:
-        if len(results) >= max_fetch:
+        if len(targets) >= max_fetch:
             break
         if op.kind in skip_kinds:
             continue
         url = normalize_url(op.url)
-        if not url:
+        if not url or not is_plausible_source_url(url):
             continue
         key = _host_of(url) + urlparse(url).path.rstrip("/").lower()
         if key in seen_hosts_paths:
             continue
         seen_hosts_paths.add(key)
-        # Social pages: skip nested structured extraction of more outbound noise
+        targets.append(op)
+
+    if not targets:
+        return []
+
+    def _one(op: OutboundPresence) -> FetchedSource:
+        url = normalize_url(op.url)
         src = fetch_url(
             url,
             timeout=timeout,
@@ -718,13 +922,12 @@ def fetch_outbound_presence_pages(
             extract_signals=True,
             follow_outbound=False,
         )
-        # Tag for formatters
         if src.ok and src.text:
             header = (
                 f"[Linked {op.kind} profile fetch | handle={op.handle or '—'} | "
                 f"from_official={op.source_page or '—'}]\n"
             )
-            src = FetchedSource(
+            return FetchedSource(
                 url=src.url,
                 ok=src.ok,
                 status=src.status,
@@ -732,8 +935,40 @@ def fetch_outbound_presence_pages(
                 error=src.error,
                 outbound=src.outbound,
             )
-        results.append(src)
-    return results
+        return src
+
+    results: list[FetchedSource] = []
+    workers = min(3, len(targets))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_one, op): op for op in targets}
+        for fut in as_completed(futs):
+            try:
+                results.append(fut.result())
+            except Exception as exc:
+                op = futs[fut]
+                results.append(
+                    FetchedSource(
+                        url=normalize_url(op.url),
+                        ok=False,
+                        status=None,
+                        text="",
+                        error=str(exc),
+                    )
+                )
+    # Stable order matching targets
+    by_url = {r.url.rstrip("/"): r for r in results}
+    ordered: list[FetchedSource] = []
+    for op in targets:
+        u = normalize_url(op.url).rstrip("/")
+        if u in by_url:
+            ordered.append(by_url[u])
+        else:
+            # prefix match fallback
+            for k, r in by_url.items():
+                if k.startswith(u) or u.startswith(k):
+                    ordered.append(r)
+                    break
+    return ordered or results
 
 
 def format_linked_presence_fetch_block(sources: Iterable[FetchedSource]) -> str:
@@ -1106,25 +1341,48 @@ def fetch_user_primary_sources(
     query: str,
     *,
     max_urls: int = 3,
-    timeout: float = 18.0,
-    max_chars: int = 12000,
+    timeout: float = 12.0,
+    max_chars: int = 10000,
 ) -> list[FetchedSource]:
-    """Fetch up to *max_urls* user-named sites (homepage first per host)."""
+    """Fetch up to *max_urls* user-named sites (homepage first per host).
+
+    Parallel GETs when multiple domains; skips implausible hosts (e.g. ``e.g``).
+    """
     urls = extract_user_urls(query, max_urls=max_urls * 2)
     # Deduplicate by host, keep homepage + maybe one path
     selected: list[str] = []
     hosts_done: set[str] = set()
     for u in urls:
         h = _host_of(u)
-        if h in hosts_done:
+        if not h or h in hosts_done:
+            continue
+        if not is_plausible_public_host(h) or _is_skippable_host(h):
             continue
         hosts_done.add(h)
         selected.append(f"https://{h}")
         if len(selected) >= max_urls:
             break
-    return [
-        fetch_url(u, timeout=timeout, max_chars=max_chars) for u in selected
-    ]
+    if not selected:
+        return []
+    if len(selected) == 1:
+        return [fetch_url(selected[0], timeout=timeout, max_chars=max_chars)]
+
+    results: dict[str, FetchedSource] = {}
+    workers = min(3, len(selected))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {
+            pool.submit(fetch_url, u, timeout=timeout, max_chars=max_chars): u
+            for u in selected
+        }
+        for fut in as_completed(futs):
+            u = futs[fut]
+            try:
+                results[u] = fut.result()
+            except Exception as exc:
+                results[u] = FetchedSource(
+                    url=u, ok=False, status=None, text="", error=str(exc)
+                )
+    return [results[u] for u in selected if u in results]
 
 
 def format_primary_source_block(sources: Iterable[FetchedSource]) -> str:
@@ -1161,3 +1419,159 @@ def format_primary_source_block(sources: Iterable[FetchedSource]) -> str:
         parts.append("(No user-provided domain/URL detected in the topic.)")
     parts.append("=== END PRIMARY SOURCES ===")
     return "\n".join(parts)
+
+
+# PRIMARY OK blocks produced by format_primary_source_block
+_PRIMARY_OK_BLOCK_RE = re.compile(
+    r"--- PRIMARY OK \| URL: (\S+) \| HTTP \d+ ---\n(.*?)\n--- END PRIMARY \1 ---",
+    re.DOTALL,
+)
+_STRUCTURED_EXTRACTS_RE = re.compile(
+    r"--- STRUCTURED EXTRACTS \(literal from HTML; not model-invented\) ---\n"
+    r"(.*?)\n--- END STRUCTURED EXTRACTS ---",
+    re.DOTALL,
+)
+_DENIAL_OF_SITE_RE = re.compile(
+    r"(?is)\b("
+    r"no\s+(?:direct\s+)?hits?|"
+    r"no\s+(?:official\s+)?website|"
+    r"yielded\s+no|"
+    r"could\s+not\s+be\s+verified|"
+    r"cannot\s+be\s+verified|"
+    r"website\s+(?:not\s+found|unavailable)|"
+    r"no\s+digital\s+footprint|"
+    r"digital\s+footprint:\s*no\s|"
+    r"existence:\s*no\s+proof"
+    r")\b"
+)
+
+
+def extract_primary_ok_blocks(search_results: str) -> list[tuple[str, str]]:
+    """Return ``(url, body)`` pairs for successful host PRIMARY fetches."""
+    if not search_results:
+        return []
+    out: list[tuple[str, str]] = []
+    for m in _PRIMARY_OK_BLOCK_RE.finditer(search_results):
+        url = (m.group(1) or "").strip()
+        body = (m.group(2) or "").strip()
+        if url and body:
+            out.append((url, body))
+    return out
+
+
+def merge_host_verified_primary(
+    content: str,
+    sources: Optional[list[str]],
+    search_results: str,
+    *,
+    max_appendix_chars: int = 4500,
+) -> tuple[str, list[str]]:
+    """Ensure successful PRIMARY fetches survive model omissions and denials.
+
+    Free-tier grounding/synthesis models sometimes ignore a successful
+    ``PRIMARY OK`` block and claim the official site does not exist, or drop
+    brand colors / WhatsApp / logo URLs from the prose. When the host already
+    fetched the page, re-inject those facts and source URLs.
+    """
+    blocks = extract_primary_ok_blocks(search_results or "")
+    src_list: list[str] = list(sources or [])
+    text = content or ""
+    if not blocks:
+        return text, src_list
+
+    def _add_source(u: str) -> None:
+        u = (u or "").strip()
+        if not u or not is_plausible_source_url(u):
+            return
+        key = u.rstrip("/").lower()
+        if any(s.rstrip("/").lower() == key for s in src_list):
+            return
+        src_list.append(u)
+
+    brand_tokens: list[str] = []
+    appendix_chunks: list[str] = []
+
+    for url, body in blocks:
+        _add_source(url)
+        # Asset / contact URLs from the fetch body
+        for u in re.findall(
+            r"https?://[^\s\)\]\"'>,;]+", body
+        )[:24]:
+            u = u.rstrip(".,);")
+            if any(
+                k in u.lower()
+                for k in (
+                    "wa.me",
+                    "whatsapp",
+                    "instagram.com",
+                    "facebook.com",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".svg",
+                    ".webp",
+                    "logo",
+                )
+            ):
+                _add_source(u)
+                brand_tokens.append(u)
+        for m in _HEX_COLOR_RE.findall(body):
+            if m.lower() not in {"#000", "#000000", "#fff", "#ffffff", "#555"}:
+                brand_tokens.append(m)
+        for m in re.finditer(r"wa\.me/(\d{8,15})", body, re.I):
+            brand_tokens.append(m.group(0))
+            brand_tokens.append(m.group(1))
+
+        structured = None
+        sm = _STRUCTURED_EXTRACTS_RE.search(body)
+        if sm:
+            structured = sm.group(1).strip()
+        # Prefer structured extracts for the appendix; else a short plain snippet
+        snippet = structured or re.sub(r"\s+", " ", body)[:1200]
+        appendix_chunks.append(f"### {url}\n{snippet}")
+
+    text_l = text.lower()
+    hosts = {_host_of(u) for u, _ in blocks if _host_of(u)}
+    host_mentioned = any(h in text_l for h in hosts if h)
+    denial = bool(_DENIAL_OF_SITE_RE.search(text))
+    missing_brand = [
+        t for t in brand_tokens if t and t.lower() not in text_l
+    ]
+    # De-dupe missing while preserving order
+    seen_m: set[str] = set()
+    missing_unique: list[str] = []
+    for t in missing_brand:
+        k = t.lower()
+        if k in seen_m:
+            continue
+        seen_m.add(k)
+        missing_unique.append(t)
+
+    needs_appendix = (
+        denial
+        or not host_mentioned
+        or len(missing_unique) >= 2
+        or (not src_list and blocks)
+    )
+    if needs_appendix and appendix_chunks:
+        note = (
+            "\n\n## Host-verified primary sources (HTTP fetch by MultiAgent)\n"
+            "The following was retrieved directly from user-named official URL(s). "
+            "Treat as ground truth even if the narrative above understated the site.\n\n"
+        )
+        body_app = "\n\n".join(appendix_chunks)
+        if len(body_app) > max_appendix_chars:
+            body_app = body_app[: max_appendix_chars - 1] + "…"
+        text = text.rstrip() + note + body_app + "\n"
+
+    # Primary URLs first in sources list
+    primary_urls = [u for u, _ in blocks]
+    rest = [s for s in src_list if s.rstrip("/").lower() not in {
+        p.rstrip("/").lower() for p in primary_urls
+    }]
+    ordered = []
+    for p in primary_urls:
+        if is_plausible_source_url(p):
+            ordered.append(p)
+    ordered.extend(rest)
+    return text, ordered

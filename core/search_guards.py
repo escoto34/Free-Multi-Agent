@@ -64,6 +64,29 @@ def raise_if_no_live_search(result_text: str) -> None:
     )
 
 
+def _url_host_plausible(url: str) -> bool:
+    """Drop abbreviation false-positives (https://e.g) and empty hosts."""
+    try:
+        from urllib.parse import urlparse
+
+        host = (urlparse(url).hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if not host or "." not in host:
+            return False
+        # Single-letter TLD → e.g / i.e / u.s
+        tld = host.rsplit(".", 1)[-1]
+        if not tld.isalpha() or len(tld) < 2:
+            return False
+        if host in {"e.g", "i.e", "u.s", "u.k", "a.m", "p.m"}:
+            return False
+        # Vocabulary hosts are fine in corpus but poor citations — still keep
+        # for verification matching; filtering for *listed sources* is separate.
+        return True
+    except Exception:
+        return False
+
+
 def extract_urls(text: str, *, limit: int | None = None) -> list[str]:
     """Extract http(s) URLs from *text*, de-duplicated, order preserved."""
     if not text:
@@ -72,9 +95,14 @@ def extract_urls(text: str, *, limit: int | None = None) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
     for url in raw:
-        while url and url[-1] in (".", ",", ";", ":", "?", "!", ")", "]"):
+        # Markdown/model debris: trailing ` from ``url`` fences, brackets, etc.
+        while url and url[-1] in (".", ",", ";", ":", "?", "!", ")", "]", "}", "'", '"', "`", "»"):
             url = url[:-1]
+        while url and url[0] in ("'", '"', "`", "(", "[", "{", "«"):
+            url = url[1:]
         if not url:
+            continue
+        if not _url_host_plausible(url):
             continue
         key = url.lower().rstrip("/")
         if key in seen:
@@ -94,7 +122,9 @@ def extract_url_set(text: str) -> set[str]:
 def normalize_source_url(url: str) -> str:
     """Lowercase, strip trailing slash/punctuation for comparison."""
     u = (url or "").strip()
-    while u and u[-1] in ".,);]'\"»":
+    while u and u[0] in "'\"`(«[{":
+        u = u[1:]
+    while u and u[-1] in ".,);]'\"»`":
         u = u[:-1]
     return u.lower().rstrip("/")
 
@@ -103,12 +133,19 @@ def source_url_is_verified(source: str, corpus: str) -> bool:
     """True only if *source* matches a URL that actually appears in *corpus*.
 
     Prevents invented citations. Does **not** accept host-only or scheme-only
-    matches (e.g. ``https:`` appearing in every corpus).
+    matches (e.g. bare ``https:`` appearing in every corpus).
+    Also rejects abbreviation false-positives like ``https://e.g``.
     """
     s = normalize_source_url(source)
-    if not s or "://" not in s:
+    if not s:
+        return False
+    # Always reject abbreviation / single-letter-TLD junk even if present in text
+    check = s if "://" in s else f"https://{s}"
+    if not _url_host_plausible(check):
+        return False
+    if "://" not in s:
         # Bare domain as a "source" only if it appears as a URL host in corpus
-        if not s or "." not in s:
+        if "." not in s:
             return False
         hosts = set()
         for u in extract_urls(corpus or ""):
@@ -248,11 +285,17 @@ def scrub_ungrounded_claims(
             notes.append(f"Removed unverified hex color: {color}")
             text = text.replace(color, "[color not found in verified sources]")
 
-    # Drop source list entries that never appeared as real URLs in the corpus
+    # Drop source list entries that never appeared as real URLs in the corpus.
+    # Normalize markdown backticks first so ``https://wa.me/…` is not dropped
+    # when the clean URL is in the primary dump.
     new_sources: list[str] = []
     if sources is not None:
         for src in sources:
             s = (src or "").strip()
+            while s and s[0] in "'\"`(«[{":
+                s = s[1:]
+            while s and s[-1] in ".,);]'\"»`":
+                s = s[:-1]
             if not s:
                 continue
             if source_url_is_verified(s, corpus):

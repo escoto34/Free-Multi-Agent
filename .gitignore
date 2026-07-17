@@ -122,3 +122,7 @@ docker-compose.override.yml
 
 # OS / package manager lock noise (keep intentional lockfiles if added later)
 # poetry.lock and uv.lock may be committed when packaging is formalized
+credental-clinic/
+SESSION_CHANGES.md
+credental_site/
+credental-site/

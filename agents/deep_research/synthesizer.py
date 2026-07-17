@@ -192,5 +192,19 @@ def run_synthesizer(
 
     # Strict: every listed source must appear as a URL in the search corpus
     sources = [s for s in sources if source_url_is_verified(s, corpus)]
+    try:
+        from agents.deep_research.source_fetch import is_plausible_source_url
+
+        sources = [s for s in sources if is_plausible_source_url(s)]
+    except Exception:
+        pass
+
+    # Host-fetched PRIMARY pages stay even if the polish model dropped them
+    try:
+        from agents.deep_research.source_fetch import merge_host_verified_primary
+
+        content, sources = merge_host_verified_primary(content, sources, corpus)
+    except Exception:
+        pass
 
     return GroundedReport(content=content, sources=sources)

@@ -31,6 +31,20 @@ Your job is to implement the Technical Specification with MINIMAL disruption.
 6. For brand-new paths (no existing content), write complete, working files.
 7. Output the FULL final content of every file you touch (not a unified diff).
 
+## Grounded research facts (when present in the idea / architecture)
+8. Copy brand hex colors, WhatsApp (wa.me) links, social URLs, logo image URLs,
+   and address strings EXACTLY from GROUNDED FACTS / research context.
+9. NEVER invent: emails, phones, map lat/lng or embeds for wrong cities, doctor
+   gender/experience/bios, reviews, or a different color palette (e.g. generic green).
+10. Prefer real remote logo URLs from research over placeholder image files.
+    Do not write fake .png/.jpg that are plain text. Use inline SVG if no URL.
+11. If research lists a gap (no email, no hours), do not invent those fields in the UI.
+12. Static marketing pages: keep dependencies minimal; tests as simple pytest
+    file reads unless the spec requires otherwise.
+13. Do NOT create Next.js / package.json / Jest projects for a brand landing page
+    unless the user explicitly asked for that stack. Prefer index.html + css + js
+    in one folder with pytest content tests.
+
 You MUST output your response strictly as a JSON object matching this schema:
 {
   "files": {

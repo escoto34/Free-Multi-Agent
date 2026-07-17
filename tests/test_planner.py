@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from schemas.requests import PipelinePlan, PipelineStep
 from agents.planner import format_plan
-from cli_app.orchestrate import execute_plan, _summarize_step_output
+from cli_app.orchestrate import (
+    execute_plan,
+    ensure_origin_urls_in_research_prompt,
+    _summarize_step_output,
+)
 
 
 def test_pipeline_plan_schema():
@@ -47,6 +51,8 @@ def test_execute_plan_chains_prior(monkeypatch):
     def fake_vibe(prompt: str):
         calls.append(("vibe", prompt))
         assert "API X is free" in prompt  # prior context injected
+        assert "GROUNDED FACTS" in prompt  # research→vibe hard constraints
+        assert "PRIOR RESEARCH CONTEXT" in prompt
         return {
             "passed": True,
             "fix_attempts": 1,
@@ -167,6 +173,60 @@ def test_execute_plan_research_then_vibe_with_long_prior(monkeypatch):
     result = execute_plan(plan)
     assert result["ok"] is True
     assert len(vibe_prompts) == 1
-    assert "Context from prior pipeline steps" in vibe_prompts[0]
+    assert "PRIOR RESEARCH CONTEXT" in vibe_prompts[0] or "GROUNDED FACTS" in vibe_prompts[0]
+    assert "AcmeBrand" in vibe_prompts[0]
     assert "AcmeBrand" in vibe_prompts[0]
     assert len(vibe_prompts[0]) > 4000
+
+
+def test_ensure_origin_urls_reinjects_dropped_domain():
+    step = (
+        "Deep-dive Credental in Colonia Trejo, San Pedro Sula. "
+        "Find address, social, and competitors."
+    )
+    origin = (
+        "investiga Credental clinica dental Honduras Colonia Trejo "
+        "pagina web actual: credentalhn.com imagen de marca"
+    )
+    out = ensure_origin_urls_in_research_prompt(step, origin)
+    assert "credentalhn.com" in out
+    assert "USER-NAMED OFFICIAL" in out
+    # Already present → no duplicate enrichment block
+    same = ensure_origin_urls_in_research_prompt(
+        step + " official site credentalhn.com", origin
+    )
+    assert "USER-NAMED OFFICIAL" not in same
+
+
+def test_execute_plan_injects_origin_url_into_research(monkeypatch):
+    """Planner dropping the official domain must not starve PRIMARY fetch."""
+    research_prompts: list[str] = []
+
+    def fake_research(prompt: str):
+        research_prompts.append(prompt)
+        return {
+            "content": "Clinic found at official site.",
+            "sources": ["https://credentalhn.com"],
+            "is_safe": True,
+            "error": None,
+        }
+
+    monkeypatch.setattr("cli_app.orchestrate._run_research", fake_research)
+
+    plan = PipelinePlan(
+        summary="Research only",
+        steps=[
+            PipelineStep(
+                action="research",
+                # Planner rewrote without the domain
+                prompt="Investigate Credental dental clinic Colonia Trejo SPS",
+                uses_prior=False,
+            ),
+        ],
+    )
+    origin = "Credental Colonia Trejo website credentalhn.com brand image"
+    result = execute_plan(plan, origin_prompt=origin)
+    assert result["ok"] is True
+    assert len(research_prompts) == 1
+    assert "credentalhn.com" in research_prompts[0]
+    assert "USER-NAMED OFFICIAL" in research_prompts[0]

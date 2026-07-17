@@ -205,9 +205,21 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
             "Showing the grounded research draft above.*\n"
             f"*Detail: {exc}*"
         )
+        draft_sources = list(grounded_report.sources or [])
+        try:
+            from agents.deep_research.source_fetch import is_plausible_source_url
+
+            draft_sources = [s for s in draft_sources if is_plausible_source_url(s)]
+        except Exception:
+            draft_sources = [
+                s
+                for s in draft_sources
+                if s
+                and not s.lower().rstrip("/").endswith(("e.g", "i.e", "u.s", "https://e.g"))
+            ]
         draft = GroundedReport(
             content=(grounded_report.content or "") + note,
-            sources=list(grounded_report.sources or []),
+            sources=draft_sources,
         )
         return {"final_report": draft, "error": None}
 

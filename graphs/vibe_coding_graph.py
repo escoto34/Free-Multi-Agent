@@ -27,6 +27,7 @@ from agents.vibe_coding.preserve import (
     missing_preserved_symbols,
     read_existing_sources,
 )
+from agents.vibe_coding.test_runner import execute_vibe_tests
 from core.agent_config import get_max_fix_cycles
 from core.runs import get_run_history
 from schemas.requests import VibeCodingRequest
@@ -37,6 +38,11 @@ logger = logging.getLogger(__name__)
 # Marker used for auto-stashes of the caller's pre-run WIP. Must stay stable so
 # restore can find the right entry even if other stashes exist on the repo.
 USER_WIP_STASH_MESSAGE = "vibe-coding: pre-run user WIP (auto-stashed)"
+
+# Snapshot of last failed vibe artifact (survives git rollback; under data/ gitignore)
+_FAILED_ARTIFACT_DIR = (
+    Path(__file__).resolve().parent.parent / "data" / "vibe_last_failed"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -345,34 +351,35 @@ def coder_node(state: VibeCodingState) -> dict[str, Any]:
 
 
 def test_executor_node(state: VibeCodingState) -> dict[str, Any]:
-    """Runs unit tests on the generated files and captures logs."""
+    """Run project-local tests only — never the MultiAgent monorepo suite.
+
+    Strategy (see ``agents.vibe_coding.test_runner``):
+    - pytest only on ``test_*.py`` files from this artifact/spec
+    - static HTML/CSS content checks when marketing sites are generated
+    - fail fast on Next/Jest stacks (runtime has no npm test integration)
+    """
     logger.info("--- TEST EXECUTOR NODE ---")
     spec = state["spec"]
     if not spec:
         return {"test_logs": "No spec to run tests against.", "error": "No spec"}
 
-    # We will search for any generated test files and run pytest on them
-    test_files = [f for f in spec.files_to_create if "test" in f]
-    if not test_files:
-        # Default fallback to run pytest in directory
-        test_files = ["tests/"]
-
-    logger.info("Running pytest on target test locations: %s", test_files)
+    repo_root = _resolve_repo_root()
+    artifact = state.get("artifact")
+    idea = state.get("idea") or ""
     try:
-        # Run pytest inside the virtualenv environment
-        python_bin = "./venv/bin/pytest"
-        if not Path(python_bin).exists():
-            python_bin = "pytest"
-
-        cmd = [python_bin] + test_files + ["-v"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        logs = f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
-        logger.info("Test execution finished (exit code %d)", result.returncode)
+        logs = execute_vibe_tests(
+            spec=spec,
+            artifact=artifact,
+            idea=idea,
+            repo_root=repo_root,
+        )
+        logger.info(
+            "Test execution finished (overall %s)",
+            "PASS" if logs.startswith("OVERALL: PASS") else "FAIL",
+        )
         return {"test_logs": logs, "error": None}
     except Exception as exc:
-        logger.warning(
-            "Running real tests failed or timed out: %s. Using fallback log.", exc
-        )
+        logger.warning("Test executor error: %s", exc)
         return {"test_logs": f"Execution failed: {exc}", "error": None}
 
 
@@ -447,13 +454,52 @@ def git_commit_node(state: VibeCodingState) -> dict[str, Any]:
     return {}
 
 
+def _snapshot_failed_artifact(state: VibeCodingState) -> Optional[str]:
+    """Persist last failed vibe files under data/ so rollback does not erase them."""
+    artifact = state.get("artifact")
+    if not artifact or not artifact.files:
+        return None
+    try:
+        out = _FAILED_ARTIFACT_DIR
+        out.mkdir(parents=True, exist_ok=True)
+        # Clear previous snapshot
+        for old in out.iterdir():
+            if old.is_file():
+                old.unlink(missing_ok=True)
+            elif old.is_dir():
+                import shutil
+
+                shutil.rmtree(old, ignore_errors=True)
+        for rel, code in artifact.files.items():
+            target = out / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(code or "", encoding="utf-8")
+        meta = out / "README_FAILED_RUN.txt"
+        meta.write_text(
+            "Vibe coding failed tests and Git rolled back the working tree.\n"
+            "This folder is a snapshot of the last failed artifact so work is not lost.\n"
+            f"idea: {(state.get('idea') or '')[:500]}\n"
+            f"issues: {getattr(state.get('debug_report'), 'issues', None)}\n",
+            encoding="utf-8",
+        )
+        logger.info("Saved failed vibe artifact snapshot to %s", out)
+        return str(out)
+    except Exception as exc:
+        logger.warning("Could not snapshot failed artifact: %s", exc)
+        return None
+
+
 def git_rollback_node(state: VibeCodingState) -> dict[str, Any]:
     """Exhausted retries: revert files to the original clean Git state.
 
     After ``reset --hard`` + ``clean -fd``, re-apply any pre-run user WIP that
     was stashed in ``architect_node`` so uncommitted local work is not lost.
+    A copy of the failed artifact is kept under ``data/vibe_last_failed/``.
     """
     logger.info("--- GIT ROLLBACK NODE (EXHAUSTED RETRIES) ---")
+    snap = _snapshot_failed_artifact(state)
+    if snap:
+        logger.warning("Failed artifact preserved at %s", snap)
     repo = get_git_repo()
     sha = state["git_checkpoint_sha"]
     if repo and sha:

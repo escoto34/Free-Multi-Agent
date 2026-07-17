@@ -8,12 +8,14 @@ from agents.deep_research.source_fetch import (
     OutboundPresence,
     collect_outbound_from_sources,
     extract_outbound_presence,
+    extract_primary_ok_blocks,
     extract_structured_signals,
     extract_user_domains,
     extract_user_urls,
     format_outbound_presence_block,
     format_primary_source_block,
     html_to_text,
+    merge_host_verified_primary,
     outbound_presence_search_facets,
 )
 from agents.deep_research.web_search import _build_query_list
@@ -24,12 +26,6 @@ from core.search_guards import (
 
 
 def test_extract_user_urls_bare_domain():
-    q = (
-        "research Acme Clinic in Example City, "
-        "current website: acmeclinic.example, Dr Jane Doe"
-    )
-    # .example is not a real multi-label TLD pattern our regex needs —
-    # use a normal-looking domain.
     q = "research Acme Clinic Example City website acmeclinic.test.com Dr Jane Doe"
     urls = extract_user_urls(q)
     domains = extract_user_domains(q)
@@ -37,10 +33,27 @@ def test_extract_user_urls_bare_domain():
     assert any("acmeclinic.test.com" in u for u in urls)
 
 
+def test_extract_rejects_abbreviation_false_domains():
+    """Latin abbreviations must never become https://e.g primary sources."""
+    from agents.deep_research.source_fetch import is_plausible_public_host, is_plausible_source_url
+
+    assert extract_user_domains("see e.g. the notes and i.e. the clinic") == []
+    assert extract_user_urls("compare U.S. vs local sites e.g. something") == []
+    assert not is_plausible_public_host("e.g")
+    assert not is_plausible_public_host("i.e")
+    assert not is_plausible_public_host("u.s")
+    assert not is_plausible_source_url("https://e.g")
+    assert not is_plausible_source_url("https://schema.org")
+    # Real subject domain still works next to abbreviations
+    domains = extract_user_domains(
+        "official site acmeclinic.test.com — details e.g. hours and i.e. services"
+    )
+    assert domains == ["acmeclinic.test.com"]
+
+
 def test_extract_skips_social_and_archive():
     q = "see https://facebook.com/foo and https://web.archive.org/web/2022/x.com"
     assert extract_user_domains(q) == []
-
 
 def test_entity_focus_mentions_official_url():
     block = entity_focus_block(
@@ -286,9 +299,61 @@ def test_extract_emails():
     assert "a@b.com" in extract_emails("mail a@b.com please")
 
 
+def test_merge_host_verified_primary_fixes_empty_denial():
+    """When PRIMARY OK succeeded, report must not end as Sources: [] / not found."""
+    primary_body = (
+        "CREDental clinic text.\n"
+        "--- STRUCTURED EXTRACTS (literal from HTML; not model-invented) ---\n"
+        "Hex colors found in page CSS/inline styles: #004aad, #cb6ce6, #25D366\n"
+        "Contact / social links found in HTML:\n"
+        "  - https://wa.me/50432433050\n"
+        "  - https://instagram.com/credental_oficial\n"
+        "Image assets (logo/brand candidates):\n"
+        "  - https://credentalhn.com/imagenes/logo.png\n"
+        "--- END STRUCTURED EXTRACTS ---"
+    )
+    corpus = (
+        "=== PRIMARY SOURCES ===\n"
+        f"--- PRIMARY OK | URL: https://credentalhn.com | HTTP 200 ---\n"
+        f"{primary_body}\n"
+        f"--- END PRIMARY https://credentalhn.com ---\n"
+        "=== END PRIMARY SOURCES ===\n"
+        "=== LIVE DUMP ===\n(no useful hits)\n"
+    )
+    denial = (
+        "No official website was found. Credental cannot be verified. "
+        "Sources yielded no direct hits for the clinic."
+    )
+    content, sources = merge_host_verified_primary(denial, [], corpus)
+    assert "credentalhn.com" in content.lower()
+    assert "Host-verified primary" in content
+    assert "#004aad" in content or "wa.me/50432433050" in content
+    assert any("credentalhn.com" in s for s in sources)
+    assert extract_primary_ok_blocks(corpus)[0][0] == "https://credentalhn.com"
+
+
+def test_source_urls_with_markdown_backticks_still_verify():
+    """Models often emit sources as ``https://wa.me/…` with trailing backticks."""
+    from core.search_guards import normalize_source_url, scrub_ungrounded_claims, source_url_is_verified
+
+    corpus = "PRIMARY https://wa.me/50432433050 and https://credentalhn.com/logo.png"
+    dirty = "https://wa.me/50432433050`"
+    assert normalize_source_url(dirty) == "https://wa.me/50432433050"
+    assert source_url_is_verified(dirty, corpus)
+    cleaned, sources, notes = scrub_ungrounded_claims(
+        "Contact via WhatsApp.",
+        corpus,
+        sources=[dirty, "https://credentalhn.com/logo.png`"],
+    )
+    assert "https://wa.me/50432433050" in sources
+    assert any("logo.png" in s for s in sources)
+    assert not any("Dropped source" in n and "wa.me" in n for n in notes)
+    assert cleaned  # still a report body
+
+
 def test_scrub_drops_invented_source_url():
     """Regression: host-only / 'https:' must not keep invented citations."""
-    from core.search_guards import source_url_is_verified
+    from core.search_guards import extract_urls, source_url_is_verified
 
     corpus = (
         "=== PRIMARY ===\n"
@@ -296,15 +361,25 @@ def test_scrub_drops_invented_source_url():
         "Clinic text https://acmeclinic.test.com\n"
         "=== LIVE DUMP ===\n"
         "Found https://www.facebook.com/acmeclinic real page\n"
+        "Note e.g. no other sites. Failed https://e.g\n"
     )
     fake = "https://directories.example/listings/acme-clinic-downtown"
     assert not source_url_is_verified(fake, corpus)
+    assert not source_url_is_verified("https://e.g", corpus)
+    assert "https://e.g" not in extract_urls(corpus)
     cleaned, sources, notes = scrub_ungrounded_claims(
         "See directories.",
         corpus,
-        sources=[fake, "https://acmeclinic.test.com", "https://www.facebook.com/acmeclinic"],
+        sources=[
+            fake,
+            "https://acmeclinic.test.com",
+            "https://www.facebook.com/acmeclinic",
+            "https://e.g",
+            "https://schema.org",
+        ],
     )
     assert fake not in sources
+    assert "https://e.g" not in sources
     assert "https://acmeclinic.test.com" in sources
     assert any("facebook.com/acmeclinic" in s for s in sources)
     assert any("Dropped source" in n for n in notes)

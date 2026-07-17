@@ -156,8 +156,25 @@ def run_grounding(
     if not sources:
         sources = extract_urls(search_results, limit=20)
 
+    # Drop abbreviation junk (https://e.g) and non-source vocabulary hosts
+    try:
+        from agents.deep_research.source_fetch import is_plausible_source_url
+
+        sources = [s for s in sources if is_plausible_source_url(s)]
+    except Exception:
+        sources = [s for s in sources if "://" in (s or "") and not s.lower().rstrip("/").endswith(("e.g", "i.e", "u.s"))]
+
     content = (resp.content or "").strip()
     content, sources, _notes = scrub_ungrounded_claims(
         content, search_results, sources=sources
     )
+    # Re-inject successful PRIMARY fetches the model may have denied or omitted
+    try:
+        from agents.deep_research.source_fetch import merge_host_verified_primary
+
+        content, sources = merge_host_verified_primary(
+            content, sources, search_results
+        )
+    except Exception:
+        pass
     return GroundedReport(content=content, sources=sources)

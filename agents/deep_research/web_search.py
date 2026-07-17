@@ -109,7 +109,8 @@ Rules:
 MAX_SEARCH_TERMS: int = 8
 MAX_QUERY_CHARS: int = 150
 MAX_LIVE_QUERIES: int = 1
-MAX_FACET_HINTS: int = 22
+# Keep facet list short: long prompts slow the live-search model and dilute tool use.
+MAX_FACET_HINTS: int = 12
 
 __all__ = [
     "NoLiveSearchError",
@@ -273,7 +274,7 @@ def run_web_search(
     # Follow WhatsApp / Instagram / other channels linked from the official site
     outbound = collect_outbound_from_sources(primary)
     outbound_block = format_outbound_presence_block(outbound)
-    social_facets = outbound_presence_search_facets(outbound, max_facets=10)
+    social_facets = outbound_presence_search_facets(outbound, max_facets=6)
     if social_facets:
         # Prepend so live search prioritizes exact profile URLs / posts
         facets = list(dict.fromkeys([*social_facets, *facets]))[:MAX_FACET_HINTS]
@@ -283,9 +284,10 @@ def run_web_search(
         kinds = sorted({o.kind for o in outbound})
         progress(f"outbound channels on official page: {', '.join(kinds)}")
 
+    # Linked social HTTP fetches: max 2, short timeout, parallel (login walls often empty)
     if progress and any(o.kind not in ("whatsapp", "email", "phone", "maps") for o in outbound):
         progress("fetching linked social profile page(s)…")
-    linked = fetch_outbound_presence_pages(outbound, max_fetch=4)
+    linked = fetch_outbound_presence_pages(outbound, max_fetch=2, timeout=8.0)
     linked_block = format_linked_presence_fetch_block(linked)
     linked_ok = sum(1 for L in linked if L.ok)
     if linked:

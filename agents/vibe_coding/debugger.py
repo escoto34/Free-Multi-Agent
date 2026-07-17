@@ -23,6 +23,14 @@ You MUST output your response strictly as a JSON object matching this schema:
   "suggested_fix": "Detailed description of the required fix (or null if passed)"
 }
 
+Rules:
+- If logs say OVERALL: PASS and static checks passed, set passed=true.
+- If logs show NODE/JEST PROJECT DETECTED or stack mismatch, set passed=false and
+  suggested_fix must be: rewrite as static HTML/CSS/JS + pytest content tests in a
+  dedicated folder; drop Next.js/Jest unless the user required Node.
+- If grounded brand strings (hex, wa.me, logo URL) are missing, require adding them.
+- Do not suggest installing Selenium or npm for simple marketing sites.
+
 Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
 """
 
@@ -34,9 +42,16 @@ def run_debugger(
     fallback_override: Optional[dict[str, str]] = None,
 ) -> DebugReport:
     """Review code and test logs; return pass/fail + fix suggestion."""
+    # Cap source dump so free models do not truncate the JSON schema reply
+    files_preview: dict[str, str] = {}
+    for path, code in (artifact.files or {}).items():
+        c = code or ""
+        if len(c) > 4000:
+            c = c[:4000] + "\n…[truncated]…"
+        files_preview[path] = c
     prompt_payload = (
-        f"Source Code Files:\n{json.dumps(artifact.files, indent=2)}\n\n"
-        f"Test execution logs/results:\n{test_logs}"
+        f"Source Code Files:\n{json.dumps(files_preview, indent=2)}\n\n"
+        f"Test execution logs/results:\n{test_logs[:12000]}"
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},

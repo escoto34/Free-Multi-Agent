@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional
 
+from cli_app.research_constraints import format_grounded_constraints_block
 from schemas.requests import PipelinePlan, PipelineStep
 
 logger = logging.getLogger(__name__)
@@ -16,14 +17,69 @@ ProgressCb = Optional[Callable[[str], None]]
 
 # Compact blob fed into later steps (token budget). Full report is shown to the user.
 # Must stay under schemas.requests._PIPELINE_INPUT_MAX once the step prompt is prepended.
-_PRIOR_RESEARCH_CHARS = 20000
+_PRIOR_RESEARCH_CHARS = 16000
 _PRIOR_BLOB_CHARS = 24000
+_PRIOR_CONSTRAINTS_CHARS = 5500
 
 
 def _emit(cb: ProgressCb, msg: str) -> None:
     if cb:
         cb(msg)
     logger.info(msg)
+
+
+def ensure_origin_urls_in_research_prompt(
+    step_prompt: str,
+    origin_prompt: str = "",
+) -> str:
+    """Re-inject user-named official domains the planner may have dropped.
+
+    System B only HTTP-fetches PRIMARY sources from the *research step* text.
+    If the planner rewrites the brief and omits e.g. ``credentalhn.com``, the
+    pipeline reports empty sources even when the original /do named the site.
+    """
+    if not (origin_prompt or "").strip():
+        return step_prompt
+
+    try:
+        from agents.deep_research.source_fetch import (
+            extract_user_domains,
+            extract_user_urls,
+        )
+    except Exception:
+        return step_prompt
+
+    origin_urls = extract_user_urls(origin_prompt, max_urls=8)
+    origin_domains = extract_user_domains(origin_prompt)
+    if not origin_urls and not origin_domains:
+        return step_prompt
+
+    prompt = step_prompt or ""
+    prompt_l = prompt.lower()
+    missing_hosts = [d for d in origin_domains if d.lower() not in prompt_l]
+    if not missing_hosts:
+        return prompt
+
+    lines = [
+        prompt.rstrip(),
+        "",
+        "=== USER-NAMED OFFICIAL WEBSITES (from original /do task — MUST fetch & cite) ===",
+        "The planner may have rewritten this brief; the user still named these sites.",
+        "HTTP-fetch them as PRIMARY SOURCES. Extract brand colors, logo/image URLs,",
+        "WhatsApp (wa.me), phone, address, and social links from those pages.",
+        "Do NOT claim the official website is missing if the host fetch succeeds.",
+    ]
+    for u in origin_urls:
+        lines.append(f"- {u}")
+    if not origin_urls:
+        for d in missing_hosts:
+            lines.append(f"- https://{d}")
+    lines.append("=== END USER-NAMED OFFICIAL WEBSITES ===")
+    logger.info(
+        "Research prompt enriched with origin domains dropped by planner: %s",
+        ", ".join(missing_hosts),
+    )
+    return "\n".join(lines)
 
 
 def _run_research(prompt: str) -> dict[str, Any]:
@@ -67,14 +123,21 @@ def _format_research_report(
 def _summarize_step_output(action: str, result: dict[str, Any]) -> str:
     """Compact text for chaining into later steps (not the full CLI display)."""
     if action == "research":
+        # Lead with strict grounded constraints so vibe cannot ignore brand/contact.
+        constraints = format_grounded_constraints_block(
+            result.get("content") or "",
+            list(result.get("sources") or []),
+            max_chars=_PRIOR_CONSTRAINTS_CHARS,
+        )
         text = _format_research_report(
             result,
             max_content=_PRIOR_RESEARCH_CHARS,
             max_sources=12,
         )
-        if len(text) > _PRIOR_BLOB_CHARS:
-            return text[:_PRIOR_BLOB_CHARS] + "…"
-        return text
+        combined = f"{constraints}\n\n{text}"
+        if len(combined) > _PRIOR_BLOB_CHARS:
+            return combined[:_PRIOR_BLOB_CHARS] + "…"
+        return combined
     # vibe
     if result.get("error"):
         return f"[vibe error] {result['error']}"
@@ -98,10 +161,17 @@ def execute_plan(
     plan: PipelinePlan,
     *,
     progress: ProgressCb = None,
+    origin_prompt: str = "",
 ) -> dict[str, Any]:
-    """Run each plan step in order. Returns aggregate result for the CLI."""
+    """Run each plan step in order. Returns aggregate result for the CLI.
+
+    *origin_prompt* is the original /do task (after optional EN translation).
+    Research steps are enriched with any official domains named there so the
+    planner cannot drop primary URLs and empty the PRIMARY source fetch.
+    """
     prior_blobs: list[str] = []
     step_results: list[dict[str, Any]] = []
+    origin = (origin_prompt or "").strip()
 
     for i, step in enumerate(plan.steps, 1):
         action = (step.action or "").strip().lower()
@@ -117,12 +187,25 @@ def execute_plan(
             continue
 
         prompt = step.prompt.strip()
+        if action == "research" and origin:
+            prompt = ensure_origin_urls_in_research_prompt(prompt, origin)
         if step.uses_prior and prior_blobs:
-            prompt = (
-                f"{prompt}\n\n"
-                f"--- Context from prior pipeline steps (use as input) ---\n"
-                + "\n\n".join(prior_blobs[-3:])
-            )
+            prior = "\n\n".join(prior_blobs[-3:])
+            if action == "vibe":
+                prompt = (
+                    f"{prompt}\n\n"
+                    "=== PRIOR RESEARCH CONTEXT (authoritative for facts) ===\n"
+                    "Implement using GROUNDED FACTS first. Never invent contact,\n"
+                    "brand colors, maps, doctor bios, or reviews not listed there.\n"
+                    f"{prior}\n"
+                    "=== END PRIOR RESEARCH CONTEXT ==="
+                )
+            else:
+                prompt = (
+                    f"{prompt}\n\n"
+                    f"--- Context from prior pipeline steps (use as input) ---\n"
+                    f"{prior}"
+                )
 
         _emit(progress, f"step {i}/{len(plan.steps)}: {action} …")
         try:

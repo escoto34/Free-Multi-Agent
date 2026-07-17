@@ -458,9 +458,13 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
 
     plan_text = format_plan(plan)
     _prog(f"plan ready — running {len(plan.steps)} step(s)…")
-    # Execute (blocking; TUI runs this in a worker thread)
+    # Execute (blocking; TUI runs this in a worker thread).
+    # Pass the full user task (EN) so research still PRIMARY-fetches domains
+    # the planner may have dropped from step prompts.
     try:
-        result = execute_plan(plan, progress=_prog)
+        result = execute_plan(
+            plan, progress=_prog, origin_prompt=pipeline_prompt
+        )
     except Exception as exc:
         return CommandResult(
             ok=False,
