@@ -176,11 +176,12 @@ cli:
       provider: groq
       model: openai/gpt-oss-120b
   planner:
-    provider: openrouter
-    model: tencent/hy3:free
+    provider: agnes
+    model: agnes-2.0-flash
     fallback:
       provider: groq
       model: openai/gpt-oss-120b
+
   context_limit_tokens: 16000
   compact_keep_recent_messages: 4
   compact_target_ratio: 0.45

@@ -162,6 +162,18 @@ def extract_entity_anchors(query: str, *, max_anchors: int = 6) -> list[str]:
     loc_bits = _LOCATION_HINTS.findall(q)
     loc = " ".join(dict.fromkeys(b.lower() for b in loc_bits))
 
+    # User-named websites first (site: and bare domain)
+    try:
+        from agents.deep_research.source_fetch import extract_user_domains, extract_user_urls
+
+        for domain in extract_user_domains(q):
+            anchors.append(domain)
+            anchors.append(f"site:{domain}")
+        for url in extract_user_urls(q, max_urls=3):
+            anchors.append(url)
+    except Exception:
+        pass
+
     # Prefer short entity+location anchors over the whole planner essay
     for name in variants:
         anchors.append(name)
@@ -174,6 +186,9 @@ def extract_entity_anchors(query: str, *, max_anchors: int = 6) -> list[str]:
         anchors.append(f"{main} official website")
         anchors.append(f"{main} Google reviews")
         anchors.append(f"{main} Facebook")
+        # Brand assets when the user is redesigning a site
+        if re.search(r"\b(marca|brand|logo|identidad|imagen\s+de\s+marca)\b", q, re.I):
+            anchors.append(f"{main} logo brand colors")
 
     if not anchors:
         primary = " ".join(q.split())
@@ -235,9 +250,35 @@ def entity_focus_block(query: str) -> str:
     """Instruction block injected into search / grounding / synthesis prompts."""
     variants = extract_name_variants(query)
     names = ", ".join(f'"{v}"' for v in variants) if variants else f'"{query[:80]}"'
+    official_lines = ""
+    try:
+        from agents.deep_research.source_fetch import extract_user_domains, extract_user_urls
+
+        urls = extract_user_urls(query, max_urls=5)
+        domains = extract_user_domains(query)
+        if urls or domains:
+            official_lines = (
+                "- USER-PROVIDED OFFICIAL WEB PRESENCE (mandatory primary):\n"
+                + "".join(f"  · {u}\n" for u in urls)
+                + (
+                    "  Domains: " + ", ".join(domains) + "\n"
+                    if domains
+                    else ""
+                )
+                + "  You MUST prioritize these domains (site: queries, content from the "
+                "PRIMARY SOURCES fetch block). Do not ignore them.\n"
+                "  Do NOT invent Wayback Machine / archive.org snapshots, years the site "
+                "existed, emails, phones, hex colors, fonts, or logos unless they appear "
+                "verbatim in PRIMARY SOURCES or the live search dump.\n"
+                "  If a primary fetch failed, say so — never fabricate the page content.\n"
+            )
+    except Exception:
+        official_lines = ""
+
     return (
         "ENTITY FOCUS (strict):\n"
         f"- Primary subject variants: {names}\n"
+        f"{official_lines}"
         "- Only report facts that clearly refer to THIS subject (same brand/legal "
         "entity / same physical business the user named).\n"
         "- Do NOT merge unrelated businesses, clinics, hospitals, or social accounts "
@@ -245,6 +286,8 @@ def entity_focus_block(query: str) -> str:
         "- If a social handle, website, phone, or address is not clearly tied to the "
         "named entity (e.g. Instagram of another clinic), put it under "
         "'Unverified / possibly unrelated' and do not present it as fact.\n"
+        "- Contact data (phone, email, WhatsApp): only if the exact string appears in "
+        "sources. Otherwise write 'not found in verified sources'.\n"
         "- When sources conflict or only look similar, say so explicitly.\n"
         "- Prefer official domain, Google Business, government registries, and pages "
         "that print the exact name + location.\n"

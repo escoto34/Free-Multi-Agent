@@ -11,30 +11,42 @@ from typing import Any
 
 from agents.deep_research.entity_focus import entity_focus_block
 from core.agent_runtime import run_role_raw
-from core.search_guards import extract_urls, find_no_live_search_marker
+from core.search_guards import (
+    extract_urls,
+    find_no_live_search_marker,
+    scrub_ungrounded_claims,
+)
 from schemas.deep_research import GroundedReport
 
 SYSTEM_PROMPT = """You are a precision grounding and verification assistant.
 Your job is to read the provided search documents and write a DETAILED,
 well-organized report that answers the user's query.
 
+Documents may include a "PRIMARY SOURCES" block (HTTP-fetched official pages
+named by the user). Those are highest-trust evidence.
+
 Depth requirements (use Markdown headings):
 1. Identity — official/trade names, spelling variants, what is confirmed vs uncertain
-2. Locations & contact — every address, phone, email, hours found (with source)
+2. Locations & contact — ONLY addresses/phones/emails that appear VERBATIM in documents
 3. Online presence — website and social profiles ONLY if clearly the same entity
-4. Services & specialty — specific treatments, equipment, languages if mentioned
-5. Reputation — review scores, approximate counts, recurring praise/complaints
-6. People & history — owners, dentists, founding year if present; else state gap
-7. Accreditations / legal — registries, professional boards if any
+4. Brand / visual identity — logo, colors, fonts ONLY if present in documents (e.g. CSS,
+   page text, asset URLs). Never invent teal palettes or Montserrat/Open Sans.
+5. Services & specialty — specific treatments if mentioned
+6. Reputation — review scores only if present
+7. People & history — staff names if present; founding years ONLY if dated in sources
 8. Unverified or unrelated hits — anything that might be a different business
-9. Information gaps — what the user asked for that sources do not cover
+9. Information gaps — what was asked but NOT found (including failed primary fetches)
 
-Rules:
-- Cite sources naturally with URLs.
-- Do NOT invent facts. Prefer "not found in sources" over guesses.
+STRICT RULES:
+- Cite sources with URLs that appear in the documents.
+- Do NOT invent facts. Prefer "not found in verified sources" over guesses.
+- Do NOT invent web.archive.org / Wayback links or claim the site existed in 2022/2023
+  unless an archive URL is present in the documents with that year.
+- Do NOT invent email, phone, WhatsApp, or GPS coordinates.
+- Do NOT invent brand colors (#hex), typography, or logo geometry.
 - Do NOT merge unrelated clinics or social accounts into the main profile.
-- Keep maximum useful detail; do not collapse into a thin marketing blurb.
-- If two sources disagree, report both sides.
+- If PRIMARY FETCH FAILED for the official domain, state that clearly.
+- Keep maximum useful detail for redesigning a website, but only evidenced detail.
 """
 
 
@@ -89,7 +101,9 @@ def run_grounding(
             "content": (
                 f"{focus}\n"
                 f"Write a verified, detailed, well-cited report answering:\n{query}\n\n"
-                "Use only the search documents. Separate unrelated businesses clearly."
+                "Use ONLY the search documents (PRIMARY SOURCES + live dump). "
+                "Separate unrelated businesses clearly. "
+                "Any contact or brand detail not literally in the documents goes under Gaps."
             ),
         },
     ]
@@ -108,4 +122,8 @@ def run_grounding(
     if not sources:
         sources = extract_urls(search_results, limit=20)
 
-    return GroundedReport(content=resp.content.strip(), sources=sources)
+    content = (resp.content or "").strip()
+    content, sources, _notes = scrub_ungrounded_claims(
+        content, search_results, sources=sources
+    )
+    return GroundedReport(content=content, sources=sources)

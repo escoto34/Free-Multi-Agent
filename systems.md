@@ -184,18 +184,27 @@ Architect → Coder → Test Executor (local) → Debugger (≤ max_fix_cycles)
 ## 6. System B — Deep Research (role assignments)
 
 ```text
-Safety → Context compressor → Web search → Grounding → Synthesizer
+Safety → Context compressor → Web search (+ primary URL fetch) → Grounding → Synthesizer
 ```
 
 | Role | Primary | Fallback | Why this placement |
 |------|---------|----------|--------------------|
 | **safety_filter** | `groq` / `openai/gpt-oss-safeguard-20b` | `gemini` / `gemini-2.0-flash` | Purpose-aligned safeguard model with **its own** ~1k RPD counter — one cheap classify call per run. Gemini is a binary-classify backup. |
 | **context_compressor** | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` | Keyword/trend extraction is medium difficulty, high frequency. Agnes free volume replaces OpenRouter/hy3. Gemini Flash is a reliable structured alternative. |
-| **web_search** | `groq` / `groq/compound-mini` | *(none — hard fail if no live search)* | **Only free stack model with integrated Tavily-class search.** ~250 RPD — must not be reused for chat/plan. Pipeline aborts if search admits it did not run live (anti-fabrication). |
-| **grounding** | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` | **Single Cohere primary** in the whole product. Best trial-tier anti-hallucination / documents grounding for claims+citations. Mistral Small preserves pipeline if Cohere trial is empty (lower grounding quality). |
-| **synthesizer** | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Long report assembly needs strong reasoning + large output; Groq 120b has headroom separate from safeguard and compound-mini. Agnes large-context fallback if Groq synth is exhausted. **Not Cohere** — that would double-tax the 28/day pool with grounding. |
+| **web_search** | `groq` / `groq/compound-mini` | *(none — hard fail if no live search)* | **Only free stack model with integrated Tavily-class search.** ~250 RPD — must not be reused for chat/plan. Pipeline aborts if search admits it did not run live (anti-fabrication). **Also HTTP-fetches user-named domains** into a PRIMARY SOURCES block before the live dump. |
+| **grounding** | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` | **Single Cohere primary** in the whole product. Best trial-tier anti-hallucination / documents grounding for claims+citations. Mistral Small preserves pipeline if Cohere trial is empty (lower grounding quality). Post-step **scrub** strips emails/phones/archive URLs/hex colors not present in the corpus. |
+| **synthesizer** | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Long report assembly needs strong reasoning + large output; Groq 120b has headroom separate from safeguard and compound-mini. Agnes large-context fallback if Groq synth is exhausted. **Not Cohere** — that would double-tax the 28/day pool with grounding. Scrub again + drop sources absent from the search dump. |
 
 **Entity focus / multi-facet search** (application logic, not a separate model role) keeps queries anchored so compressors do not blend similar business names.
+
+**Anti-hallucination (System B code path):**
+
+1. Extract bare domains / URLs from the user topic (`credentalhn.com`).
+2. `fetch_user_primary_sources` → inject `=== PRIMARY SOURCES ===` above the live search dump.
+3. Facets always include `site:domain` first.
+4. Prompts forbid inventing Wayback years, phones, emails, brand hex/fonts unless verbatim in documents.
+5. `scrub_ungrounded_claims` post-processes grounding + synthesizer output and appends a verification audit.
+
 
 ---
 

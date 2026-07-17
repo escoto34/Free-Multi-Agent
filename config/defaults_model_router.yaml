@@ -198,11 +198,13 @@ cli:
       provider: groq
       model: openai/gpt-oss-120b
   planner:
+    # Keep free-durable; do not use OpenRouter hy3 on hot path (50 RPD / expiry)
     provider: agnes
     model: agnes-2.0-flash
     fallback:
       provider: groq
       model: openai/gpt-oss-120b
+
   context_limit_tokens: 16000
   compact_keep_recent_messages: 4
   compact_target_ratio: 0.45
