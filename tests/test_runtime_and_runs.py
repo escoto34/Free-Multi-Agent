@@ -28,6 +28,14 @@ def test_vibe_coding_request_rejects_too_short():
         VibeCodingRequest(idea="ab")
 
 
+def test_vibe_coding_request_accepts_long_pipeline_idea():
+    """research → vibe chaining injects prior report; must not cap at 4000 chars."""
+    idea = "Write a markdown report from this research:\n" + ("detail " * 3000)
+    assert len(idea) > 4000
+    req = VibeCodingRequest(idea=idea)
+    assert len(req.idea) == len(idea)
+
+
 def test_deep_research_request_accepts_topic():
     req = DeepResearchRequest(topic="Quantum computing trends 2026")
     assert "Quantum" in req.topic

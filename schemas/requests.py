@@ -12,13 +12,18 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+# Pipeline chaining (/do research → vibe) injects prior step output into idea/topic.
+# Keep room for a full research report + instruction without hitting validation.
+_PIPELINE_INPUT_MAX = 32000
+
+
 class VibeCodingRequest(BaseModel):
     """Input for System A (Vibe Coding)."""
 
     idea: str = Field(
         ...,
         min_length=3,
-        max_length=4000,
+        max_length=_PIPELINE_INPUT_MAX,
         description="Natural-language description of what to build.",
     )
 
@@ -29,7 +34,7 @@ class DeepResearchRequest(BaseModel):
     topic: str = Field(
         ...,
         min_length=3,
-        max_length=4000,
+        max_length=_PIPELINE_INPUT_MAX,
         description="Research topic / query.",
     )
     thread_id: Optional[str] = Field(

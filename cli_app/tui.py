@@ -343,12 +343,14 @@ class ChatHistory(VerticalScroll):
         background: $background;
         scrollbar-size-vertical: 1;
         scrollbar-size-horizontal: 0;
+        color: $text;
     }
     ChatHistory .msg {
         height: auto;
         width: 100%;
         margin: 0 0 1 0;
         padding: 0;
+        color: $text;
     }
     ChatHistory .msg-user {
         color: $text;
@@ -365,14 +367,26 @@ class ChatHistory(VerticalScroll):
     ChatHistory .msg-error {
         color: $error;
     }
+    /* Normalize Markdown: body text primary, links accent (not random red/white). */
     ChatHistory Markdown {
         height: auto;
         margin: 0;
         padding: 0;
         background: transparent;
+        color: $text;
+    }
+    ChatHistory .msg-assistant Markdown {
+        color: $text;
+    }
+    ChatHistory .msg-meta Markdown {
+        color: $text-muted;
+    }
+    ChatHistory .msg-error Markdown {
+        color: $error;
     }
     ChatHistory MarkdownFence {
         margin: 1 0;
+        color: $text;
     }
     """
 
@@ -428,8 +442,11 @@ class ChatHistory(VerticalScroll):
         body = (text or "").strip()
         if not body:
             return
-        # Plain emphasis so errors stay readable
-        self._mount_md(f"*{body}*", kind="error")
+        # Long pipeline / partial failures must not paint the whole report red.
+        if len(body) > 500:
+            self._mount_md(body, kind="assistant")
+            return
+        self._mount_md(f"**error:** {body}", kind="error")
 
 
 class SidePanel(Vertical):
@@ -1557,22 +1574,28 @@ class MultiAgentApp(App[None]):
             self.action_help()
             return
         text = result.text or ""
-        if result.ok:
-            if result.data and result.data.get("open_pip") and not self._config_open:
-                self.action_open_config()
-            if result.data and (
-                result.data.get("used_graph") is not None
-                or result.data.get("files_written") is not None
-                or result.data.get("has_report") is not None
-                or result.data.get("passed") is not None
-                or result.data.get("plan") is not None
-                or result.data.get("steps") is not None
-                or result.data.get("tools") is not None
-                or result.data.get("graph_updated") is not None
-            ):
-                self._log_assistant(text)
-            else:
-                self._log_meta(text)
+        data = result.data or {}
+        # Structured pipeline/tool replies always use normal assistant colors,
+        # even when a step failed (partial success). Only bare short errors go red.
+        is_structured = any(
+            data.get(k) is not None
+            for k in (
+                "used_graph",
+                "files_written",
+                "has_report",
+                "passed",
+                "plan",
+                "steps",
+                "tools",
+                "graph_updated",
+            )
+        )
+        if result.ok and data.get("open_pip") and not self._config_open:
+            self.action_open_config()
+        if is_structured:
+            self._log_assistant(text)
+        elif result.ok:
+            self._log_meta(text)
         else:
             self._log_error(text or "error")
         # After a turn: cheap session-info update only

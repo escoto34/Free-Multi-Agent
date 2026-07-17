@@ -461,7 +461,8 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
     if translated:
         header += "\n(task translated to English for Systems A/B)"
     text = f"{header}\n\n{plan_text}\n\n---\n\n{result.get('text', '')}"
-    session.add("assistant", text[:2000])
+    # Keep enough of the report in session history for follow-ups; TUI shows full text.
+    session.add("assistant", text if len(text) <= 24000 else text[:23999] + "…")
     return CommandResult(
         ok=bool(result.get("ok")),
         text=text,
@@ -536,17 +537,18 @@ def _research(args: list[str], session: ConversationSession) -> CommandResult:
     elif summary.get("is_safe") is False:
         text = f"UNSAFE: {', '.join(summary.get('safety_reasons') or [])}"
     else:
-        content = (summary.get("content") or "")[:2000]
+        content = summary.get("content") or ""
         sources = summary.get("sources") or []
         text = content + (
-            "\n\nSources:\n" + "\n".join(f"- {s}" for s in sources[:12])
+            "\n\nSources:\n" + "\n".join(f"- {s}" for s in sources[:20])
             if sources
             else ""
         )
         if summary.get("thread_id"):
             text += f"\n\nthread_id={summary['thread_id']}"
-    session.add("assistant", text[:8000])
-    return CommandResult(ok=True, text=text[:8000], data=summary)
+    # Full report to the user; session keeps a large slice for follow-ups.
+    session.add("assistant", text if len(text) <= 24000 else text[:23999] + "…")
+    return CommandResult(ok=True, text=text, data=summary)
 
 
 def _research_resume(args: list[str], session: ConversationSession) -> CommandResult:

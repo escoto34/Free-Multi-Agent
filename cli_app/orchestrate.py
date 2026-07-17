@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 ProgressCb = Optional[Callable[[str], None]]
 
+# Compact blob fed into later steps (token budget). Full report is shown to the user.
+# Must stay under schemas.requests._PIPELINE_INPUT_MAX once the step prompt is prepended.
+_PRIOR_RESEARCH_CHARS = 20000
+_PRIOR_BLOB_CHARS = 24000
+
 
 def _emit(cb: ProgressCb, msg: str) -> None:
     if cb:
@@ -33,18 +38,43 @@ def _run_vibe(prompt: str) -> dict[str, Any]:
     return invoke_vibe_coding_pipeline(prompt)
 
 
+def _format_research_report(
+    result: dict[str, Any],
+    *,
+    max_content: Optional[int] = None,
+    max_sources: int = 20,
+) -> str:
+    """Human-facing research body (optionally capped for prior-step context)."""
+    content = result.get("content") or ""
+    sources = result.get("sources") or []
+    err = result.get("error")
+    if err:
+        return f"[research error] {err}"
+    if result.get("is_safe") is False:
+        return f"[research unsafe] {', '.join(result.get('safety_reasons') or [])}"
+
+    body = content
+    if max_content is not None and len(body) > max_content:
+        body = body[:max_content] + "…"
+
+    parts = [f"[research report]\n{body}"]
+    if sources:
+        src = "\n".join(f"- {s}" for s in sources[:max_sources])
+        parts.append(f"\nSources:\n{src}")
+    return "\n".join(parts)
+
+
 def _summarize_step_output(action: str, result: dict[str, Any]) -> str:
+    """Compact text for chaining into later steps (not the full CLI display)."""
     if action == "research":
-        content = result.get("content") or ""
-        sources = result.get("sources") or []
-        err = result.get("error")
-        if err:
-            return f"[research error] {err}"
-        if result.get("is_safe") is False:
-            return f"[research unsafe] {', '.join(result.get('safety_reasons') or [])}"
-        src = "\n".join(f"- {s}" for s in sources[:12])
-        body = content[:3000] + ("…" if len(content) > 3000 else "")
-        return f"[research report]\n{body}\n\nSources:\n{src}" if src else body
+        text = _format_research_report(
+            result,
+            max_content=_PRIOR_RESEARCH_CHARS,
+            max_sources=12,
+        )
+        if len(text) > _PRIOR_BLOB_CHARS:
+            return text[:_PRIOR_BLOB_CHARS] + "…"
+        return text
     # vibe
     if result.get("error"):
         return f"[vibe error] {result['error']}"
@@ -55,6 +85,13 @@ def _summarize_step_output(action: str, result: dict[str, Any]) -> str:
         f"attempts={result.get('fix_attempts')} files={paths}\n"
         f"summary={result.get('summary') or ''}"
     )
+
+
+def _display_step_output(action: str, result: dict[str, Any]) -> str:
+    """Full text shown to the user in /do results."""
+    if action == "research":
+        return _format_research_report(result)
+    return _summarize_step_output(action, result)
 
 
 def execute_plan(
@@ -107,8 +144,9 @@ def execute_plan(
             prior_blobs.append(f"[{action} failed] {exc}")
             continue
 
-        blob = _summarize_step_output(action, raw)
-        prior_blobs.append(blob)
+        chain_blob = _summarize_step_output(action, raw)
+        display = _display_step_output(action, raw)
+        prior_blobs.append(chain_blob)
         ok = not raw.get("error") and raw.get("is_safe") is not False
         if action == "vibe":
             ok = ok and (raw.get("passed") is not False or raw.get("passed") is None)
@@ -124,7 +162,8 @@ def execute_plan(
                 "prompt": step.prompt,
                 "rationale": step.rationale,
                 "result": raw,
-                "summary": blob[:1500],
+                "summary": chain_blob[:1500],
+                "display": display,
             }
         )
 
@@ -135,8 +174,11 @@ def execute_plan(
         lines.append(f"[{flag}] step {s['index']} {s['action']}")
         if s.get("error"):
             lines.append(f"  error: {s['error']}")
+        elif s.get("display"):
+            # Full research report / vibe summary — do not truncate for the user.
+            lines.append(s["display"])
         elif s.get("summary"):
-            lines.append(f"  {s['summary'][:400]}")
+            lines.append(s["summary"])
     return {
         "ok": all_ok,
         "plan": plan.model_dump(),
