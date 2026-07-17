@@ -7,14 +7,19 @@ The router wraps all LLM calls and provides:
    exhausted and immediately falls back.
 2. **Exponential-backoff retries** — on transient HTTP 429/402/413/422 errors.
 3. **Cascading fallback** — when retries are exhausted the router walks
-   through the configured fallback chain:
+   the role-level ``fallback`` then ``fallback_cascade`` in YAML, e.g.
+   free-durable mid-2026::
 
-       Cohere  →  OpenRouter / hy3:free
-       OpenRouter  →  Groq / gpt-oss-120b
-       Groq  →  OpenRouter / north-mini-code:free
+       Cohere     →  Mistral small
+       OpenRouter →  Agnes agnes-2.0-flash
+       Agnes      →  Groq gpt-oss-120b
+       Groq       →  Gemini 2.0-flash
+       Gemini     →  Cerebras gemma-4-31b
+       Cerebras   →  Groq gpt-oss-120b
+       Mistral    →  Agnes agnes-2.0-flash
 
-   Role-specific overrides (e.g. debugger's hy3 → gpt-oss-120b) can be
-   passed via the ``fallback`` argument to ``call_agent``.
+   Role-specific overrides (e.g. coder Codestral → Agnes) are passed via
+   the ``fallback`` argument to ``call_agent`` / agent config.
 4. **Cycle / revisit handling** — a ``_visited`` set tracks tried
    (provider, model) pairs. If the cascade points back to a visited hop,
    the router skips ahead to the next unused hop instead of looping forever.
@@ -332,14 +337,19 @@ class ModelRouter:
                     )
                     break
                 else:
+                    # 404 model_not_found, 401, etc. — cascade immediately.
                     logger.error(
                         "Non-retriable error from %s/%s: %s", provider, model, exc
                     )
                     break
 
-        reason = (
-            f"All {max_retries} retries exhausted for {provider}/{model}: {last_error}"
-        )
+        if last_error is not None and self._extract_status(last_error) not in _RETRIABLE_STATUSES:
+            reason = f"{provider}/{model} failed: {last_error}"
+        else:
+            reason = (
+                f"All {max_retries} retries exhausted for {provider}/{model}: "
+                f"{last_error}"
+            )
         logger.warning(reason)
         return self._cascade(
             provider,

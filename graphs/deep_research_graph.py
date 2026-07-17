@@ -137,7 +137,11 @@ def grounding_node(state: DeepResearchState) -> dict[str, Any]:
 
 
 def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
-    """Polishes and structures final document."""
+    """Polishes and structures final document.
+
+    If the synthesizer LLM chain is exhausted, still return the grounded
+    draft so /do research is not a total failure after a successful search.
+    """
     logger.info("--- SYNTHESIZER NODE ---")
     grounded_report = state["grounded_report"]
     if not grounded_report:
@@ -151,8 +155,20 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
         )
         return {"final_report": final_report, "error": None}
     except Exception as exc:
-        logger.error("Synthesizer node failed: %s", exc)
-        raise exc
+        logger.error(
+            "Synthesizer failed (%s) — delivering grounded draft instead", exc
+        )
+        note = (
+            "\n\n---\n"
+            "*Note: final polish step failed (provider/quota/model cascade). "
+            "Showing the grounded research draft above.*\n"
+            f"*Detail: {exc}*"
+        )
+        draft = GroundedReport(
+            content=(grounded_report.content or "") + note,
+            sources=list(grounded_report.sources or []),
+        )
+        return {"final_report": draft, "error": None}
 
 
 # ---------------------------------------------------------------------------

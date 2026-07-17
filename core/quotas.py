@@ -8,13 +8,18 @@ only as a fallback for environments where the YAML isn't available (e.g.
 some unit tests that construct a ``QuotaTracker`` without a full project
 checkout) — if the YAML load succeeds, its values always win.
 
-  +--------------+-----+-----------------------------------------------+
-  | Provider     | RPD | Scope                                         |
-  +--------------+-----+-----------------------------------------------+
-  | Groq         | 800 | Per model (independent counters)               |
-  | OpenRouter   |  45 | SHARED across all ``:free`` models on account  |
-  | Cohere       |  28 | SHARED across all endpoints                    |
-  +--------------+-----+-----------------------------------------------+
+  +--------------+------+-----------------------------------------------+
+  | Provider     | RPD  | Scope                                         |
+  +--------------+------+-----------------------------------------------+
+  | Groq         |  800 | Per model (independent; compound-mini ~250 real)|
+  | OpenRouter   |   45 | SHARED across all ``:free`` models on account |
+  | Cohere       |   28 | SHARED across all endpoints                   |
+  | Mistral      |  200 | Shared experiment tier (conservative)         |
+  | Gemini       |  400 | AI Studio Flash-class (varies by model)       |
+  | Cerebras     |  150 | Free ~5 RPM / ~1M TPD (call soft-cap)         |
+  | Agnes        | 2000 | Free fair-use ~20 RPM text; soft local cap    |
+  | Ollama       | 100k | Local — effectively unlimited                 |
+  +--------------+------+-----------------------------------------------+
 
 Daily reset is **implicit**: queries filter by ``date.today()``, so a new
 day automatically starts at zero without needing a cron job or background
@@ -49,9 +54,9 @@ OPENROUTER_DAILY_LIMIT: int = 45  # 90 % of real ~50 RPD (shared)
 COHERE_DAILY_LIMIT: int = 28  # Conservative midpoint 25-30/day
 MISTRAL_DAILY_LIMIT: int = 200  # Free Experiment tier — conservative call cap
 GEMINI_DAILY_LIMIT: int = 400  # AI Studio free Flash-class (varies by model)
-CEREBRAS_DAILY_LIMIT: int = 500  # Free developer tier (approx.)
+CEREBRAS_DAILY_LIMIT: int = 150  # Free ~5 RPM / ~1M TPD — call soft-cap
 OLLAMA_DAILY_LIMIT: int = 100_000  # Local — effectively unlimited for tracking
-AGNES_DAILY_LIMIT: int = 2000  # Free multimodal gateway — soft local cap
+AGNES_DAILY_LIMIT: int = 2000  # Free fair-use (~20 RPM text); soft local cap
 
 # Maps provider -> the YAML key under providers.<provider>.* that holds its
 # daily limit. Each provider uses a differently-named key because the scope

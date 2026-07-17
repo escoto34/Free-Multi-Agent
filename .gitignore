@@ -1,24 +1,34 @@
 # Environment & secrets (live keys — only .env.example is tracked)
 .env
-*.env
+.env.*
 !.env.example
+!.env.example.*
+*.pem
+*.key
+secrets/
+credentials/
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
-dist/
-build/
-*.egg
 .Python
 pip-wheel-metadata/
+*.egg
+.eggs/
 
 # Virtual environments
 venv/
 .venv/
 env/
 ENV/
+.python-version
+
+# Packaging / build
+dist/
+build/
+*.whl
 
 # IDE / editor
 .vscode/
@@ -27,6 +37,7 @@ ENV/
 *.swo
 *.sublime-project
 *.sublime-workspace
+*.code-workspace
 
 # SQLite databases (quota tracking, checkpoints, run history)
 *.db
@@ -49,13 +60,13 @@ htmlcov/
 coverage.xml
 *.cover
 .hypothesis/
+.tox/
+.nox/
 
 # Tooling caches
 .mypy_cache/
 .ruff_cache/
 .pytype/
-.tox/
-.nox/
 .pyre/
 .dmypy.json
 dmypy.json
@@ -88,20 +99,26 @@ graphify-out/
 scratch/
 tmp/
 temp/
+.scratch/
 
 # Local overrides (optional user copies — never commit live secrets)
 config/model_router.local.yaml
 config/cli_toolbox.local.yaml
-
-# Packaging / build artifacts (pip install -e .)
-*.egg-info/
-build/
-dist/
-.eggs/
+config/*.local.yaml
 
 # Docker (optional local override)
 .env.docker
+docker-compose.override.yml
 
-# Editor / OS noise
-*.swp
-.DS_Store
+# Editor / agent session noise under the repo (if tools dump here)
+.claude/settings.local.json
+.cursor/
+.codex/
+.grok/sessions/
+*.session.md
+
+# Jupyter / notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS / package manager lock noise (keep intentional lockfiles if added later)
+# poetry.lock and uv.lock may be committed when packaging is formalized

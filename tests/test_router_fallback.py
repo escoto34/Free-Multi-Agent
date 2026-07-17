@@ -231,7 +231,7 @@ def test_router_skips_visited_cycle_to_leaf(router_with_tracker):
     # skip path: openrouter → cerebras directly (the fixed config).
     cascade["openrouter_fallback"] = {
         "provider": "cerebras",
-        "model": "llama-3.3-70b",
+        "model": "gemma-4-31b",
     }
 
     respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
@@ -263,7 +263,7 @@ def test_router_skips_visited_cycle_to_leaf(router_with_tracker):
 
     assert resp.content == "ok from cerebras leaf"
     assert resp.provider == "cerebras"
-    assert resp.model == "llama-3.3-70b"
+    assert resp.model == "gemma-4-31b"
     assert resp.used_fallback is True
     assert cerebras_route.called
 

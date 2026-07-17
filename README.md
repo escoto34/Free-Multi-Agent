@@ -1,6 +1,6 @@
 # Free-Multi-Agent
 
-Local multi-agent tooling on free/trial LLM APIs. One install, one `.env`, no config files in other repos.
+Local multi-agent tooling on **free/trial LLM APIs**. One install, one `.env`, no config files in other repos.
 
 | Piece | What it does |
 |-------|----------------|
@@ -8,11 +8,13 @@ Local multi-agent tooling on free/trial LLM APIs. One install, one `.env`, no co
 | **System A — Vibe Coding** | Architect → Coder → tests → Debugger + Git checkpoint/rollback |
 | **System B — Deep Research** | Safety → compress → web search → ground → synthesize (+ SQLite resume) |
 | **Planner** (`/do`) | Splits a task into ordered vibe and/or research steps |
-| **Terminal toolbox** | Curated modern CLI catalog: doctor, suggest, and runtime backends (`eza`/`rg`/`fd`/…) |
+| **Terminal toolbox** | Curated modern CLI catalog: doctor, suggest, runtime backends (`eza`/`rg`/`fd`/…) |
+
+**Orchestration rationale** (benchmarks, rate limits, why each model per role): **[`systems.md`](systems.md)**.
 
 Config lives in `config/model_router.yaml` (live) and `config/defaults_model_router.yaml` (factory reset). Agents load provider/model/fallback at runtime via `core/agent_config.py` — edit YAML (or `/config`) and the next run uses it.
 
-The terminal toolbox catalog is `config/cli_toolbox.yaml` (versioned with the repo). PATH probes and suggestions are implemented in `core/toolbox.py`.
+The terminal toolbox catalog is `config/cli_toolbox.yaml`. PATH probes and suggestions: `core/toolbox.py`.
 
 ---
 
@@ -29,11 +31,31 @@ multiagent                                         # TUI from any directory
 # or: python cli.py chat
 ```
 
+### Free-durable keys (defaults)
+
+| Env | Needed for |
+|-----|------------|
+| `AGNES_API_KEY` | chat, planner, architect, compressor (+ many fallbacks) |
+| `MISTRAL_API_KEY` | coder (`codestral-latest`) |
+| `GROQ_API_KEY` | debugger, safety, web search, synthesizer |
+| `COHERE_API_KEY` | research grounding only |
+| `GEMINI_API_KEY` / `CEREBRAS_API_KEY` | cascade fallbacks |
+| Ollama | no key (optional local override) |
+
+```bash
+multiagent keys set agnes    # https://platform.agnes-ai.com
+multiagent keys set mistral
+multiagent keys set groq
+multiagent keys set cohere
+multiagent config show
+multiagent providers
+```
+
 **Keys stay only in MultiAgent’s `.env`.** Consumer projects do not need MultiAgent files.
 
-System A commits/rollbacks use the **Git repo of your current working directory** (where you launched the command). Chat file tools (`write_file`, shell, venv, pip) also target that **launch cwd**, not the MultiAgent install tree.
+System A commits/rollbacks use the **Git repo of your current working directory**. Chat file tools also target that **launch cwd**, not the MultiAgent install tree.
 
-Optional (better chat UX): install a few modern CLIs from the **core** toolbox profile (`eza`, `bat`, `rg`, `fd`, …). The agent uses them automatically when present:
+Optional (better chat UX): install CLIs from the **core** toolbox profile (`eza`, `bat`, `rg`, `fd`, …):
 
 ```bash
 multiagent tools doctor --profile core
@@ -44,7 +66,7 @@ multiagent tools doctor --profile core
 ## Interactive TUI
 
 ```bash
-multiagent                 # chat
+multiagent                 # chat (default)
 multiagent --help
 multiagent providers
 multiagent keys set groq
@@ -64,7 +86,7 @@ multiagent tools doctor
 | Copy selection | drag text → Ctrl+C (no selection → quit) |
 | Quit | Ctrl+Q |
 
-Config and help are mutually exclusive side panels; they **resize the chat** (push content), drag the left edge to change width (max ½ screen).
+Config and help are mutually exclusive side panels; they **resize the chat** (push content). Drag the left edge to change width (max ½ screen).
 
 Session meter (ctx / graphify / skills) lives under **config → models**, not in the chat footer.
 
@@ -72,11 +94,11 @@ Session meter (ctx / graphify / skills) lives under **config → models**, not i
 
 Free-text chat is **not** pure autocomplete. The host:
 
-1. Seeds context (graphify query + directory/file hits when relevant; modern-toolbox brief when relevant).
+1. Seeds context (graphify + directory/file hits when relevant; toolbox brief when relevant).
 2. Lets the model call host tools (`list_dir`, `read_file`, `write_file`, `edit_file`, `run_terminal` / `bash`, `grep`, `glob`, `create_venv`, `pip_install`, `graphify_query`, `graphify_update`, `toolbox_query`, …).
 3. Asks approval for **mutating** tools **one command at a time**.
 
-You do **not** need to name tools. Example: *“mira `docs/` y edita el tercer `.txt`”* → the agent can `list_dir` → `read_file` → `edit_file` (edit requires approval unless `/approve always`).
+You do **not** need to name tools. Example: *“mira `docs/` y edita el tercer `.txt`”* → `list_dir` → `read_file` → `edit_file` (edit needs approval unless `/approve always`).
 
 Approval bar (compact vertical list):
 
@@ -94,8 +116,6 @@ Important paths:
 - **`agents/`** — Python package (planner, deep_research, vibe_coding)
 - **`.agents/`** — editor rules only (not the package)
 - Writes go to **launch cwd**; MultiAgent package graph lives under the install’s `graphify-out/`
-
-Markdown is rendered in the history; user prompts appear as fenced code blocks.
 
 ### Slash commands (inside TUI)
 
@@ -124,11 +144,10 @@ Markdown is rendered in the history; user prompts appear as fenced code blocks.
 
 Direct `/vibe` and `/research` were removed; use **`/do`** so the planner picks pipelines.
 
-### Outer CLI (no pipelines)
+### Outer CLI
 
 ```bash
-multiagent config show|set|reset|…
-multiagent config doctor        # validate model_router.yaml consistency
+multiagent config show|set|reset
 multiagent keys set|status
 multiagent providers
 multiagent skills list|add|enable|…
@@ -143,79 +162,13 @@ multiagent quota
 multiagent history --limit 20
 ```
 
-### Batch pipelines (no TUI)
-
-The heavy pipelines can also run head-less from the shell (useful in CI or
-scripts):
-
-```bash
-multiagent vibe "add a CLI flag parser to cli.py" --json
-multiagent research "latest free LLM APIs 2026"
-multiagent do "research X then implement Y" --planner mistral/mistral-small-latest
-multiagent serve --port 8777     # local HTTP API (see below)
-```
-
-#### Local HTTP API (`multiagent serve`)
-
-A zero-dependency (stdlib) HTTP server exposes the pipelines for integration:
-
-```bash
-multiagent serve --host 127.0.0.1 --port 8777
-```
-
-| Method | Path | Body | Returns |
-|--------|------|------|---------|
-| GET | `/health` | — | `{"status":"ok"}` |
-| POST | `/vibe` | `{"idea":"..."}` | System A summary (JSON) |
-| POST | `/research` | `{"topic":"..."}` | System B summary (JSON) |
-| POST | `/do` | `{"task":"...","planner":"prov/model"}` | planner + execute (JSON) |
-
-Bind to localhost only; put it behind a reverse proxy + auth for remote access.
-
-#### Python client (`core.client`)
-
-Drive the pipelines from your own code — in-process (no server) or over HTTP:
-
-```python
-from core.client import MultiAgentClient
-
-# In-process (same machine, no server)
-client = MultiAgentClient()
-r = client.vibe("add a CLI flag parser to cli.py")
-print(r.passed, r.files_written)
-
-report = client.research("latest free LLM APIs 2026")
-print(report.content, report.sources)
-
-# Remote (talks to `multiagent serve`)
-remote = MultiAgentClient(base_url="http://127.0.0.1:8777")
-print(remote.health())
-```
-
-Both modes return the same typed results (`VibeResult` / `ResearchResult`).
-
-#### Container deployment
-
-A `Dockerfile` + `docker-compose.yml` run the HTTP API as a service (Ollama is
-intentionally excluded — the container uses remote free-tier providers via
-`.env` keys):
-
-```bash
-docker build -t multiagent .
-docker compose up -d          # serves on 127.0.0.1:8777
-curl -s http://127.0.0.1:8777/health
-```
-
-For production, front port 8777 with a reverse proxy (Caddy/Nginx) adding TLS
-and authentication; do not expose it directly to the internet.
+Pipelines run **inside the TUI** via `/do` (not as outer `vibe`/`research` subcommands).
 
 ---
 
 ## Terminal toolbox
 
-Catalog of modern CLI utilities: `config/cli_toolbox.yaml`  
-Logic: `core/toolbox.py`  
-Tests: `tests/test_toolbox.py`
+Catalog: `config/cli_toolbox.yaml` · Logic: `core/toolbox.py` · Tests: `tests/test_toolbox.py`
 
 ### Surfaces
 
@@ -225,7 +178,7 @@ Tests: `tests/test_toolbox.py`
 | Outer CLI | `multiagent tools doctor -p core`, `multiagent tools search yaml` |
 | Chat host tool | `toolbox_query` with `mode`: `suggest` · `doctor` · `search` · `show` · `alt` · `runtime` |
 
-The catalog is **not** only documentation: when a tool is on `PATH`, host tools prefer it.
+When a tool is on `PATH`, host tools prefer it automatically.
 
 ### Runtime (automatic)
 
@@ -235,20 +188,17 @@ The catalog is **not** only documentation: when a tool is on `PATH`, host tools 
 | `grep` | `rg` (ripgrep) | Python walk |
 | `glob` | `fd` | `pathlib.glob` |
 | `read_file` | `bat -p` (no ANSI) | plain read |
-| `run_terminal` | soft-upgrade `ls`→`eza`, `cat`→`bat`, `grep`→`rg`, `df`→`duf`, `du`→`dust`, `ps`→`procs`, … | original command |
+| `run_terminal` | soft-upgrade `ls`→`eza`, `cat`→`bat`, `grep`→`rg`, … | original command |
 
-Outputs are tagged, e.g. `[via eza]`, `[via rg]`, or `[auto-upgraded ls → eza]`.  
-Disable shell upgrades for one call with `"raw": true` or `"no_upgrade": true` on `run_terminal`.
-
-Destructive classics such as `rm` are **not** auto-rewritten (different semantics from trash tools like `rip`).
+Outputs are tagged, e.g. `[via eza]`. Disable upgrades with `"raw": true` / `"no_upgrade": true` on `run_terminal`. Destructive classics such as `rm` are **not** auto-rewritten.
 
 ### Doctor profiles
 
 `core` · `git` · `docker` · `k8s` · `disk` · `net` · `monitor` · `data` · `security` · `ai` · `modern-rust` · `all`
 
 ```bash
-multiagent tools doctor -p core          # essentials for a good shell
-multiagent tools doctor -p git           # lazygit, gh, delta, gitleaks, …
+multiagent tools doctor -p core
+multiagent tools doctor -p git
 multiagent tools suggest "docker image layers"
 multiagent tools alt grep
 ```
@@ -261,7 +211,7 @@ multiagent tools alt grep
 
 **Architect → Coder → Test Executor → Debugger** (YAML: `vibe_coding.*`, `max_fix_cycles`).
 
-Safeguards (see `graphs/vibe_coding_graph.py`):
+Safeguards (`graphs/vibe_coding_graph.py`):
 
 - Path traversal blocked; all-or-nothing + atomic writes  
 - Dirty tree: pre-run WIP stash, restore after commit/rollback  
@@ -276,81 +226,85 @@ Safeguards:
 - Query size limits; abort if search admits “no live search”  
 - Citation URLs checked against that run’s search hits  
 - Router treats empty HTTP 200 as failure and cascades fallbacks  
+- Entity-focused multi-facet search to reduce brand/entity bleed  
 
 ### Planner (`/do`)
 
 User-chosen model (`cli.planner` or `/planner set`). Non-English tasks can be translated to English for A/B; chat still answers in the user’s language.
 
+Full role rationale → **[systems.md](systems.md)**.
+
 ---
 
-## Providers & quotas
+## Providers, quotas & free-durable defaults
 
-| Provider | Env | Notes |
-|----------|-----|--------|
-| Groq | `GROQ_API_KEY` | Fast; per-model daily caps in YAML/quotas |
-| OpenRouter | `OPENROUTER_API_KEY` | Shared free-tier pool for `:free` models |
-| Cohere | `COHERE_API_KEY` | Trial often non-commercial |
-| Mistral | `MISTRAL_API_KEY` | Studio free / codestral |
-| Gemini | `GEMINI_API_KEY` | AI Studio OpenAI-compat endpoint |
-| Cerebras | `CEREBRAS_API_KEY` | Fast free developer models |
-| **Ollama** | *(none / optional `OLLAMA_API_KEY`)* | Local `http://localhost:11434/v1`; models = only `ollama list` (no static catalog); `OLLAMA_BASE_URL` / `OLLAMA_HOST` override host |
-| **Agnes AI** | `AGNES_API_KEY` | Free OpenAI-compat gateway; text model `agnes-2.0-flash` |
+| Provider | Env | Free-tier notes (summary) |
+|----------|-----|---------------------------|
+| **Agnes AI** | `AGNES_API_KEY` | Default text model `agnes-2.0-flash` (~20 RPM fair-use, $0/M). Image/video models exist but are not chat roles. |
+| **Groq** | `GROQ_API_KEY` | ~1 000 RPD/model; `compound-mini` ~250 RPD + live search |
+| **Mistral** | `MISTRAL_API_KEY` | Experiment free; Codestral for coding |
+| **Cohere** | `COHERE_API_KEY` | Trial ~1 000/mo, non-commercial — **grounding only** |
+| **Gemini** | `GEMINI_API_KEY` | AI Studio Flash free; used as fallback |
+| **Cerebras** | `CEREBRAS_API_KEY` | ~5 RPM, ~1M TPD; quality cascade leaf |
+| **OpenRouter** | `OPENROUTER_API_KEY` | `:free` ~50 RPD shared — **off hot path** |
+| **Ollama** | *(none)* | Local; models = only `ollama list` |
+
+### Default roles (free-durable)
+
+| Role | Primary | Fallback |
+|------|---------|----------|
+| vibe architect | `agnes` / `agnes-2.0-flash` | Gemini 2.0 Flash |
+| vibe coder | `mistral` / `codestral-latest` | Agnes |
+| vibe debugger | `groq` / `gpt-oss-120b` | Agnes |
+| research safety | `groq` / `gpt-oss-safeguard-20b` | Gemini |
+| research compressor | `agnes` / `agnes-2.0-flash` | Gemini |
+| research web_search | `groq` / `compound-mini` | — (hard fail if no live search) |
+| research grounding | `cohere` / `command-a-plus` | Mistral small |
+| research synthesizer | `groq` / `gpt-oss-120b` | Agnes |
+| cli chat / planner | `agnes` / `agnes-2.0-flash` | Groq gpt-oss-120b |
+
+**Cascade (simplified):**  
+`cohere → mistral → agnes → groq → gemini → cerebras → groq`  
+OpenRouter failures hop to **Agnes**, not deeper `:free` models.
 
 ```bash
-multiagent providers
-multiagent keys set mistral
-multiagent keys set agnes               # free key from platform.agnes-ai.com
+multiagent config show
 multiagent config set vibe_coding.coder mistral codestral-latest
+multiagent config reset                 # restore factory free-durable defaults
 
-# Local Ollama (no key) — install ollama, then:
+# Optional local Ollama
 ollama pull llama3.2
 multiagent config set cli.chat ollama llama3.2
-# or in TUI: /config set cli.chat ollama llama3.2
-
-# Agnes text chat
-multiagent config set cli.chat agnes agnes-2.0-flash
-# or: /config set cli.planner agnes agnes-2.0-flash
 ```
 
-Live roles/models: **`config/model_router.yaml`**. Safe daily limits: `core/quotas.py` (must stay aligned with YAML comments).
+- Live: `config/model_router.yaml`  
+- Factory: `config/defaults_model_router.yaml`  
+- Soft daily limits: `core/quotas.py`  
+- Full tables & rationale: **[systems.md](systems.md)**
 
-Hy3 free window (if still used as debugger): check `free_until` in YAML; CLI warns near expiry.
+---
+
+## Production hardening
+
+Built to run on free-tier APIs without burning quota or corrupting the user’s repo:
+
+- **Quota gating + cascading fallback** (`core/router.py`) — refuses calls past a provider’s soft daily limit and walks the fallback chain (skip-visited, no infinite loops).
+- **Empty-completion guard** — HTTP 200 with empty content cascades instead of breaking Pydantic validation.
+- **System A safety rails** — path-traversal blocked, atomic writes, pre-run WIP stash + git rollback.
+- **System B safety rails** — unsafe queries terminate; fake “no live search” hard-aborts before grounding.
+- **Rotating logs** — under `data/logs/` (gitignored); never logs keys or full message bodies.
+- **Tool sandbox** — `run_terminal` blocks classic dangerous commands and soft-upgrades `ls`→`eza`, etc. when available.
+- **KeyboardInterrupt-safe** — TUI and pipelines exit cleanly on Ctrl-C.
 
 ---
 
 ## Tech stack
 
 - Python 3.11+ · Pydantic v2 · LangGraph + SQLite checkpoints  
-- GitPython · Cohere SDK v2 · OpenAI SDK (Groq/OpenRouter/compat)  
+- GitPython · Cohere SDK v2 · OpenAI SDK (Groq / OpenRouter / Mistral / Gemini / Cerebras / Agnes / Ollama)  
 - Click + Textual + Rich (TUI) · PyYAML · python-dotenv  
 - Optional host CLIs from the toolbox (eza, ripgrep, fd, bat, …) — not Python deps  
-- Rotating file logging under `data/logs/` (see `core/logging_setup.py`)  
-- Packaged via `pyproject.toml` (`pip install -e .` exposes the `multiagent` command)  
-- Optional HTTP API + Docker image for head-less / remote use
-
----
-
-## Production hardening
-
-The project is built to run unattended on free-tier APIs without burning quota
-or corrupting the user’s repo:
-
-- **Quota gating + cascading fallback** (`core/router.py`) — refuses calls past
-a provider’s daily limit and walks the configured fallback chain.
-- **Empty-completion guard** — an HTTP 200 with empty content is treated as a
-  failure and cascades instead of crashing downstream Pydantic validation.
-- **System A safety rails** — path-traversal blocked, atomic temp-file writes,
-  pre-run WIP stash + git rollback so failed runs never destroy user work.
-- **System B safety rails** — unsafe queries terminate; a search step that
-  admits it did *not* perform a live search hard-aborts before grounding.
-- **Rotating logs** — `core/logging_setup.py` writes `data/logs/multiagent.log`
-  (gitignored) for audit; never logs keys or message contents.
-- **Tool sandbox** — `run_terminal` blocks destructive/classic-dangerous
-  commands and soft-upgrades `ls`→`eza`, `cat`→`bat`, `grep`→`rg`, etc. when the
-  modern CLI is on PATH.
-- **KeyboardInterrupt-safe** — the TUI and pipelines exit cleanly on Ctrl-C.
-- **Config validator** — `multiagent config doctor` catches dangling
-  provider/model/fallback references before a run wastes free-tier quota.
+- Packaged via `pyproject.toml` (`pip install -e .` exposes the `multiagent` command)
 
 ---
 
@@ -359,38 +313,33 @@ a provider’s daily limit and walks the configured fallback chain.
 ```text
 MultiAgent/
 ├── cli.py                 # Click entry (chat default, config, keys, skills, tools, …)
-├── pyproject.toml         # packaging + `multiagent` console script
-├── MANIFEST.in           # includes config/bin/.env.example in the wheel
-├── Makefile              # setup / test / lint shortcuts
-├── Dockerfile            # container image for `multiagent serve`
-├── docker-compose.yml    # service stack (binds 127.0.0.1:8777)
-├── .env.example          # template for API keys
+├── systems.md             # Free-tier limits, benchmarks, role rationale
+├── pyproject.toml
+├── .env.example
 ├── bin/multiagent         # PATH launcher (preserves caller cwd)
 ├── config/
 │   ├── model_router.yaml              # live provider/model roles
 │   ├── defaults_model_router.yaml     # factory reset snapshot
 │   └── cli_toolbox.yaml               # modern terminal tool catalog
-├── cli_app/               # TUI + slash commands + agent tools + HTTP client
+├── cli_app/               # TUI + slash commands + agent tools
 │   ├── tui.py
-│   ├── commands.py        # /do, /tools, /skills, /config, …
-│   ├── agent_chat.py      # tool loop + approvals + toolbox brief
-│   ├── tools.py           # host tools (modern backends when on PATH)
+│   ├── commands.py
+│   ├── agent_chat.py
+│   ├── tools.py
 │   ├── graph_rag.py
 │   └── session.py
 ├── core/
-│   ├── toolbox.py         # catalog load, doctor, suggest, runtime resolve
+│   ├── toolbox.py
 │   ├── router.py, quotas.py, clients.py, keys.py, skills.py, …
-│   ├── logging_setup.py   # rotating file logging
-│   ├── http_api.py        # stdlib HTTP server for the pipelines
-│   ├── client.py          # programmatic MultiAgentClient (in-process + HTTP)
-│   └── config_validator.py# `config doctor` consistency checks
-├── agents/                # vibe_coding + deep_research agents
+│   ├── agent_config.py, config_editor.py
+│   └── runs.py
+├── agents/                # vibe_coding + deep_research + planner
 ├── graphs/                # LangGraph pipelines
 ├── schemas/
-├── skills/README.md       # SKILL.md format for global skills
-├── data/                  # local SQLite (quotas, runs, checkpoints, logs) — gitignored
-├── graphify-out/          # knowledge graph artifacts — gitignored
-└── tests/                 # mocked HTTP + toolbox unit tests
+├── skills/README.md
+├── data/                  # local SQLite — gitignored
+├── graphify-out/          # knowledge graph — gitignored
+└── tests/
 ```
 
 User-global state (not in this repo):
@@ -404,24 +353,18 @@ User-global state (not in this repo):
 
 ```bash
 pytest tests/ -v
-# toolbox only:
 pytest tests/test_toolbox.py -v
-# production-readiness (logging, executor, packaging):
-pytest tests/test_production_readiness.py -v
-# HTTP API + config validator + batch CLI:
-pytest tests/test_http_and_config.py tests/test_cli_batch.py -v
-# Python client (in-process + HTTP):
-pytest tests/test_client.py -v
+pytest tests/test_router_fallback.py tests/test_graphs_mocked.py -v
 ```
 
-All network-facing tests mock HTTP; no real API usage. Toolbox tests probe the real `PATH` for optional binaries and skip/soft-assert when a tool is missing.
+Network-facing tests mock HTTP; no real API usage in CI-style runs. Toolbox tests probe real `PATH` for optional binaries.
 
 ---
 
 ## Notes
 
-- Prefer short free-tier models for chat; heavy work through `/do`.  
-- Rebuild the package graph after large code changes: `graphify update .` (or ask chat to update the graph). Artifacts land in `graphify-out/` (gitignored).  
+- Prefer **Agnes / Groq** for volume; send heavy multi-step work through **`/do`**.  
+- Rebuild the package graph after large code changes: `graphify update .` (or ask chat). Artifacts → `graphify-out/` (gitignored).  
 - Global skills: `~/.config/multiagent/skills.yaml` — see `skills/README.md`.  
-- Keep the toolbox catalog honest: prefer adding tools to `config/cli_toolbox.yaml` over hard-coding lists in prompts.  
-- Deprecated Groq models (do not use): `llama-3.1-8b-instant`, `llama-3.3-70b-versatile`, legacy qwen/scout ids listed in YAML `deprecated:`.
+- Keep the toolbox catalog honest: prefer `config/cli_toolbox.yaml` over hard-coded tool lists in prompts.  
+- When free-tier limits or catalogs change, update **`systems.md`**, YAML notes, and `core/quotas.py` together.  

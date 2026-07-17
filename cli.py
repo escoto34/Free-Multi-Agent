@@ -72,7 +72,9 @@ def validate_api_keys() -> None:
         click.secho(
             "❌ Missing API keys for providers used by current roles:\n"
             + "\n".join(missing)
-            + "\n\nOptional: mistral/gemini/cerebras/ollama/agnes only needed if "
+            + "\n\nWith free-durable defaults you also need AGNES_API_KEY "
+            "(chat/planner/architect/compressor) and MISTRAL_API_KEY (coder). "
+            "Optional: gemini/cerebras/ollama/openrouter only if "
             "assigned in /config or as fallbacks. Ollama needs no key "
             "(install + ollama serve + ollama pull <model>).",
             fg="red",
