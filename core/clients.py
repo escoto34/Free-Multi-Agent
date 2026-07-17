@@ -249,9 +249,13 @@ def _require_env(env_key: str, provider: str) -> str:
 @lru_cache(maxsize=16)
 def _openai_compat_client(provider: str, base_url: str, env_key: str) -> OpenAI:
     api_key = _require_env(env_key, provider)
+    # Compound / tool-using models can take a while; never hang forever.
+    # Connect timeout 20s; overall read/write up to 180s per request.
+    timeout = float(os.environ.get("MULTIAGENT_HTTP_TIMEOUT", "180") or "180")
     kwargs: dict[str, Any] = {
         "api_key": api_key,
         "base_url": base_url,
+        "timeout": timeout,
     }
     # OpenRouter asks for optional attribution headers (harmless if missing).
     if provider == "openrouter":

@@ -2,26 +2,38 @@
 Web Search agent for System B (Deep Research).
 
 Provider/model from config/model_router.yaml (typically groq/compound-mini).
-Runs several entity-anchored live queries and concatenates results so the
-report can go deeper without mixing unrelated businesses.
+
+Uses a single live compound call that instructs the model to run several
+entity-anchored searches *inside that one turn* (multi-tool). Multiple
+sequential API calls were too slow and made the CLI look hung.
 """
 
 from __future__ import annotations
+
+import logging
+from typing import Callable, Optional
 
 from agents.deep_research.entity_focus import entity_focus_block, extract_entity_anchors
 from core.agent_runtime import run_role_raw
 from core.search_guards import NoLiveSearchError, raise_if_no_live_search
 
+logger = logging.getLogger(__name__)
+
+ProgressCb = Optional[Callable[[str], None]]
+
 SYSTEM_PROMPT = """You are a live web-search research agent.
 You MUST use live web search tools (not training memory alone).
+
+In THIS single response, run MULTIPLE distinct live searches (several tool
+calls) covering different facets of the same subject, then merge the findings.
 
 Rules:
 1. Search the EXACT subject the user named. Do not substitute a different clinic,
    hospital, or brand with a similar name or the same city.
-2. Collect as many concrete facts as you can: legal/trade names, addresses,
-   phones, emails, website, social profiles that clearly belong to the subject,
-   services, hours, staff/doctors if named, reviews (with ratings/counts when
-   available), ownership/history, accreditations, news, and directories.
+2. Collect concrete facts: legal/trade names, addresses, phones, emails, website,
+   social profiles that clearly belong to the subject, services, hours,
+   staff/doctors if named, reviews (ratings/counts), ownership/history,
+   accreditations, news, directories.
 3. For every fact, include the source URL.
 4. If a result is a DIFFERENT organization, mark it as:
    EXCLUDED (unrelated): <name> — <why> — <url>
@@ -40,9 +52,9 @@ Rules:
 
 MAX_SEARCH_TERMS: int = 8
 MAX_QUERY_CHARS: int = 150
-MAX_LIVE_QUERIES: int = 4
+# Kept for API compatibility; multi-facet search is done in one live call.
+MAX_LIVE_QUERIES: int = 1
 
-# Re-export for graphs/tests that import from this module.
 __all__ = [
     "NoLiveSearchError",
     "MAX_SEARCH_TERMS",
@@ -78,7 +90,7 @@ def _build_query_list(
     *,
     max_queries: int = MAX_LIVE_QUERIES,
 ) -> list[str]:
-    """Distinct live-search queries: original topic first, then facets."""
+    """Facet list for the search agent (not separate HTTP calls)."""
     queries: list[str] = []
     seen: set[str] = set()
 
@@ -94,15 +106,19 @@ def _build_query_list(
         queries.append(q)
 
     if original_query:
-        _add(original_query)
-        for a in extract_entity_anchors(original_query, max_anchors=4):
+        for a in extract_entity_anchors(original_query, max_anchors=5):
             _add(a)
+        # Short primary subject line (not the whole English planner essay)
+        anchors = extract_entity_anchors(original_query, max_anchors=2)
+        if anchors:
+            _add(anchors[0])
+        else:
+            _add(original_query)
 
     for term in search_terms or []:
         _add(term)
 
-    # If still only one very long blob, keep it; else cap count.
-    return queries[: max(1, max_queries)]
+    return queries[: max(6, max_queries)]
 
 
 def run_web_search(
@@ -111,55 +127,46 @@ def run_web_search(
     *,
     original_query: str = "",
     max_queries: int = MAX_LIVE_QUERIES,
+    progress: ProgressCb = None,
 ) -> str:
-    """Run multiple live searches; hard-abort if none look like real search."""
-    queries = _build_query_list(
-        search_terms, original_query, max_queries=max_queries
+    """One live multi-facet search; hard-abort if it admits no live search."""
+    facets = _build_query_list(
+        search_terms, original_query, max_queries=max(max_queries, 6)
     )
     focus = entity_focus_block(original_query or " ".join(search_terms[:3]))
-    parts: list[str] = []
-    live_ok = 0
+    facet_block = "\n".join(f"- {f}" for f in facets) if facets else f"- {original_query}"
 
-    for i, q in enumerate(queries, 1):
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"{focus}\n"
-                    f"Full research topic:\n{original_query or q}\n\n"
-                    f"Live-search query {i}/{len(queries)}:\n{q}\n\n"
-                    "Return only material about this subject; list unrelated hits "
-                    "under EXCLUDED. Include source URLs for every claim."
-                ),
-            },
-        ]
-        resp = run_role_raw(
-            "deep_research",
-            "web_search",
-            messages=messages,
-            router_instance=router_instance,
-        )
-        body = (resp.content or "").strip()
-        if not body:
-            continue
-        # Per-query: if this slice admits no live search, skip it but keep others.
-        try:
-            raise_if_no_live_search(body)
-            live_ok += 1
-        except NoLiveSearchError:
-            parts.append(
-                f"===== SEARCH {i}/{len(queries)}: {q} =====\n"
-                f"(skipped — model admitted no live search)\n{body[:500]}"
-            )
-            continue
-        parts.append(f"===== SEARCH {i}/{len(queries)}: {q} =====\n{body}")
+    if progress:
+        progress("web search (live)… this can take 30–90s")
+    logger.info("Web search: 1 live call, %d facet hints", len(facets))
 
-    if live_ok == 0:
-        combined = "\n\n".join(parts) if parts else "(empty search)"
-        raise_if_no_live_search(combined)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"{focus}\n"
+                f"Full research topic:\n"
+                f"{original_query or (facets[0] if facets else '')}\n\n"
+                f"Run several live searches for these facets (same entity only):\n"
+                f"{facet_block}\n\n"
+                "Merge results into one structured dump. List unrelated hits under EXCLUDED. "
+                "Include source URLs for every claim."
+            ),
+        },
+    ]
+    resp = run_role_raw(
+        "deep_research",
+        "web_search",
+        messages=messages,
+        router_instance=router_instance,
+    )
+    body = (resp.content or "").strip()
+    raise_if_no_live_search(body)
+    if not body:
         raise NoLiveSearchError(
-            "Ninguna de las búsquedas en vivo devolvió resultados verificados."
+            "La búsqueda en vivo no devolvió contenido utilizable."
         )
-
-    return "\n\n".join(parts)
+    if progress:
+        progress(f"web search done ({len(body)} chars)")
+    return body

@@ -52,6 +52,8 @@ class ConversationSession:
     cached_graph_snippet: str = ""
     # Tool approval: when True, write/terminal tools run without prompting.
     always_approve: bool = False
+    # Optional progress sink for long /do pipelines (set by TUI worker thread).
+    progress_cb: Optional[Callable[[str], None]] = field(default=None, repr=False)
     system_prompt: str = (
         "You are the Free-Multi-Agent assistant for this local codebase. "
         "You may use host tools (read/write files, graphify, terminal) with user approval. "

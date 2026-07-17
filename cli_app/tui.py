@@ -1531,9 +1531,15 @@ class MultiAgentApp(App[None]):
     @work(thread=True, exclusive=True, group="pipeline")
     def _run_command(self, line: str) -> None:
         self.call_from_thread(self._set_busy, True)
+
+        def progress(msg: str) -> None:
+            self.call_from_thread(self._chat_progress, msg)
+
+        self.session.progress_cb = progress
         try:
             result = dispatch(line, self.session)
         finally:
+            self.session.progress_cb = None
             self.call_from_thread(self._set_busy, False)
         self.call_from_thread(self._handle_result, result)
 

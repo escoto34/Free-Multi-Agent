@@ -19,6 +19,54 @@ _LOCATION_HINTS = re.compile(
     r"hospital|empresa|company|clinic)\b",
     re.IGNORECASE,
 )
+# "about Creddental", "sobre Credental", "information about X"
+# Word boundaries required — bare "on" must not match inside "information".
+_ABOUT_NAME = re.compile(
+    r"\b(?:about|sobre|on)\b\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9][\w\-.]{1,40})"
+    r"(?:\s+(?:o|or|/|aka)\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9][\w\-.]{1,40}))?",
+    re.IGNORECASE,
+)
+_AKA_PAREN = re.compile(
+    r"\((?:also\s+known\s+as|aka|o|or)\s*([^)]{2,60})\)",
+    re.IGNORECASE,
+)
+_FILLER_PREFIX = re.compile(
+    r"^(?:research|investiga(?:r)?|busca(?:r)?|find|look\s+up|"
+    r"tell\s+me\s+about|información\s+sobre|todo\s+sobre|"
+    r"comprehensive\s+information\s+about|information\s+about|"
+    r"gather\s+(?:comprehensive\s+)?(?:factual\s+)?information\s+about|"
+    r"use\s+the\s+deep-research\s+pipeline\s+to\s+gather.*?about)\s+",
+    re.IGNORECASE | re.DOTALL,
+)
+_STOP_NAMES = frozenset(
+    {
+        "research",
+        "information",
+        "comprehensive",
+        "clinic",
+        "dental",
+        "clínica",
+        "clinica",
+        "company",
+        "empresa",
+        "honduras",
+        "san",
+        "pedro",
+        "sula",
+        "the",
+        "and",
+        "with",
+        "from",
+        "pipeline",
+        "factual",
+        "gather",
+        "located",
+        "about",
+        "sobre",
+        "todo",
+        "misma",
+    }
+)
 
 
 def extract_name_variants(query: str) -> list[str]:
@@ -28,12 +76,29 @@ def extract_name_variants(query: str) -> list[str]:
         return []
 
     variants: list[str] = []
-    # Prefer the first clause before commas/parentheses for the brand block.
+
+    # Parenthetical aka: (also known as Credental)
+    for m in _AKA_PAREN.finditer(q):
+        chunk = m.group(1).strip(" \t\"'")
+        for part in _VARIANT_SPLIT.split(chunk):
+            p = part.strip(" \t\"'")
+            if 2 <= len(p) <= 60:
+                variants.append(p)
+
+    # about X or Y
+    for m in _ABOUT_NAME.finditer(q):
+        if m.group(1):
+            variants.append(m.group(1).strip())
+        if m.group(2):
+            variants.append(m.group(2).strip())
+
+    # Prefer the first clause before commas for the brand block.
     head = re.split(r"[,;(]", q, maxsplit=1)[0].strip()
-    # Drop leading verbs like "Research …", "Investiga …"
+    head = _FILLER_PREFIX.sub("", head).strip()
+    # Drop leading fluff words left over
     head = re.sub(
-        r"^(?:research|investiga(?:r)?|busca(?:r)?|find|look\s+up|"
-        r"tell\s+me\s+about|información\s+sobre|todo\s+sobre)\s+",
+        r"^(?:comprehensive|factual|detailed)?\s*(?:information|info)?\s*"
+        r"(?:about|on|sobre)?\s*",
         "",
         head,
         flags=re.IGNORECASE,
@@ -41,24 +106,48 @@ def extract_name_variants(query: str) -> list[str]:
 
     parts = [p.strip(" \t\"'") for p in _VARIANT_SPLIT.split(head) if p.strip()]
     for p in parts:
-        # Keep short proper-name chunks (drop trailing filler words)
         p = re.sub(
-            r"\s+(?:la|el|the|misma\s+empresa|same\s+company).*$",
+            r"\s+(?:la|el|the|misma\s+empresa|same\s+company|"
+            r"a\s+dental.*|dental\s+clinic.*).*$",
             "",
             p,
             flags=re.IGNORECASE,
         ).strip()
-        if 2 <= len(p) <= 80:
+        # If still a long sentence, take first 1–3 tokens that look like a name
+        if len(p) > 40 or " " in p and p.lower().split()[0] in _STOP_NAMES:
+            tokens = p.split()
+            name_toks: list[str] = []
+            for t in tokens[:4]:
+                tl = t.lower().strip(".,")
+                if tl in _STOP_NAMES:
+                    if name_toks:
+                        break
+                    continue
+                name_toks.append(t.strip(".,\"'"))
+            p = " ".join(name_toks)
+        if 2 <= len(p) <= 80 and p.lower() not in _STOP_NAMES:
             variants.append(p)
 
-    # Deduplicate case-insensitively, preserve order
+    # Brand-like tokens in the full query (Creddental, CREDental, CredentalHN)
+    for tok in re.findall(
+        r"\b([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9]{3,})\b", q
+    ):
+        if tok.lower() in _STOP_NAMES:
+            continue
+        variants.append(tok)
+
+    # Deduplicate case-insensitively, preserve order; drop pure stopwords
     seen: set[str] = set()
     out: list[str] = []
     for v in variants:
+        v = v.strip(" \t\"'.,")
+        if not v or len(v) < 2:
+            continue
         key = v.casefold()
-        if key not in seen:
-            seen.add(key)
-            out.append(v)
+        if key in seen or key in _STOP_NAMES:
+            continue
+        seen.add(key)
+        out.append(v)
     return out[:6]
 
 
@@ -70,29 +159,27 @@ def extract_entity_anchors(query: str, *, max_anchors: int = 6) -> list[str]:
 
     anchors: list[str] = []
     variants = extract_name_variants(q)
-
-    # Full topic (truncated) as primary live search — never drop the user intent.
-    primary = " ".join(q.split())
-    if len(primary) > 140:
-        primary = primary[:140].rsplit(" ", 1)[0]
-    if primary:
-        anchors.append(primary)
-
-    # Location-ish tail from the original query
     loc_bits = _LOCATION_HINTS.findall(q)
-    loc = " ".join(dict.fromkeys(b.lower() for b in loc_bits))  # unique order
+    loc = " ".join(dict.fromkeys(b.lower() for b in loc_bits))
 
+    # Prefer short entity+location anchors over the whole planner essay
     for name in variants:
         anchors.append(name)
         if loc:
             anchors.append(f"{name} {loc}")
         anchors.append(f'"{name}"')
 
-    # Common official-site / review patterns for the first name only
     if variants:
         main = variants[0]
-        anchors.append(f"{main} site oficial")
+        anchors.append(f"{main} official website")
         anchors.append(f"{main} Google reviews")
+        anchors.append(f"{main} Facebook")
+
+    if not anchors:
+        primary = " ".join(q.split())
+        if len(primary) > 140:
+            primary = primary[:140].rsplit(" ", 1)[0]
+        anchors.append(primary)
 
     seen: set[str] = set()
     out: list[str] = []
@@ -126,7 +213,6 @@ def merge_search_terms(
         key = t.casefold()
         if key in seen:
             continue
-        # Skip ultra-generic terms that cause entity bleed
         if key in {
             "dental",
             "clinic",

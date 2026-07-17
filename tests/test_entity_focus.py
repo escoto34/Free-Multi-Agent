@@ -23,6 +23,20 @@ def test_name_variants_credental():
     assert any("cred" in v.lower() for v in variants)
 
 
+def test_name_variants_english_planner_phrasing():
+    q = (
+        "Research comprehensive information about Creddental "
+        "(also known as Credental), a dental clinic located in "
+        "San Pedro Sula, Honduras."
+    )
+    variants = extract_name_variants(q)
+    joined = " ".join(variants).lower()
+    assert "creddental" in joined
+    assert "credental" in joined
+    # Must not treat the whole English essay as the company name
+    assert not any("comprehensive information" in v.lower() for v in variants)
+
+
 def test_anchors_include_topic_and_not_only_generics():
     q = "Credental dental clinic San Pedro Sula Honduras"
     anchors = extract_entity_anchors(q)
@@ -48,16 +62,18 @@ def test_entity_focus_block_mentions_exclusion():
     assert "Unverified" in block or "unrelated" in block.lower()
 
 
-def test_build_query_list_prefers_original_topic():
+def test_build_query_list_prefers_entity_anchors():
     terms = ["Credental reviews", "generic dental"]
     queries = _build_query_list(
         terms,
         "Research Credental clinic San Pedro Sula Honduras",
-        max_queries=4,
+        max_queries=1,
     )
     assert queries
-    assert "Credental" in queries[0] or "credental" in queries[0].lower()
-    assert len(queries) <= 4
+    blob = " ".join(queries).lower()
+    assert "credental" in blob
+    # Facet list can be longer than max_queries (hints for one live call)
+    assert any("credental" in q.lower() for q in queries)
 
 
 def test_build_safe_query_still_bounded():

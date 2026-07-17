@@ -127,8 +127,10 @@ def execute_plan(
         _emit(progress, f"step {i}/{len(plan.steps)}: {action} …")
         try:
             if action == "research":
+                _emit(progress, "deep-research: safety → search → ground → synthesize")
                 raw = _run_research(prompt)
             else:
+                _emit(progress, "vibe-coding: architect → code → test …")
                 raw = _run_vibe(prompt)
         except Exception as exc:
             step_results.append(

@@ -424,12 +424,21 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
 
     prov, model = _resolve_planner(session)
     session.add("user", f"/do {prompt[:500]}")
+    progress = getattr(session, "progress_cb", None)
+
+    def _prog(msg: str) -> None:
+        if progress:
+            try:
+                progress(msg)
+            except Exception:
+                pass
 
     # Systems A/B work best in English — translate when the user writes otherwise.
     from cli_app.language import to_english_for_pipelines
 
     settings = get_cli_settings()
     chat = settings.get("chat") or {}
+    _prog("planning…")
     pipeline_prompt = to_english_for_pipelines(
         prompt,
         invoke_fn=invoke_router,
@@ -448,9 +457,10 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
         return CommandResult(ok=False, text=f"Planner failed ({prov}/{model}): {exc}")
 
     plan_text = format_plan(plan)
+    _prog(f"plan ready — running {len(plan.steps)} step(s)…")
     # Execute (blocking; TUI runs this in a worker thread)
     try:
-        result = execute_plan(plan)
+        result = execute_plan(plan, progress=_prog)
     except Exception as exc:
         return CommandResult(
             ok=False,
