@@ -26,6 +26,13 @@ from agents.deep_research.research_types import profile_from_mapping
 from agents.deep_research.safety_filter import run_safety_filter
 from agents.deep_research.synthesizer import run_synthesizer
 from agents.deep_research.web_search import NoLiveSearchError, run_web_search
+from core.difficulty_scorer import (
+    assessment_from_state,
+    assessments_to_state_dict,
+    plan_pipeline_difficulties,
+)
+from core.handoff import HandoffError, transfer_control
+from core.model_selector import record_model_selection_handoff, select_for_role
 from core.runs import get_run_history
 from schemas.deep_research import CondensedTrends, GroundedReport, SafetyClassification
 from schemas.requests import DeepResearchRequest
@@ -44,7 +51,11 @@ _DEFAULT_CHECKPOINT_DB = str(
 
 
 class DeepResearchState(TypedDict):
-    """LangGraph state representation for the Deep Research pipeline."""
+    """LangGraph state representation for the Deep Research pipeline.
+
+    Domain fields hold intermediate agent outputs. ``handoff_history`` is the
+    formal Swarm-style audit trail (see ``core.handoff.transfer_control``).
+    """
 
     query: str
     safety: Optional[SafetyClassification]
@@ -53,6 +64,9 @@ class DeepResearchState(TypedDict):
     grounded_report: Optional[GroundedReport]
     final_report: Optional[GroundedReport]
     error: Optional[str]
+    handoff_history: list
+    difficulty_by_role: Optional[dict]
+    last_model_selection: Optional[dict]
 
 
 # ---------------------------------------------------------------------------
@@ -64,8 +78,68 @@ def safety_filter_node(state: DeepResearchState) -> dict[str, Any]:
     """Assess whether the input research query is safe."""
     logger.info("--- SAFETY FILTER NODE ---")
     try:
+        # Plan difficulties for all research roles up front (planner scores).
+        diff_plan = plan_pipeline_difficulties(
+            state["query"], pipeline="deep_research"
+        )
+        difficulty_by_role = assessments_to_state_dict(diff_plan)
+        assess = assessment_from_state(
+            difficulty_by_role,
+            role_short="safety_filter",
+            task_text=state["query"],
+            role_path="deep_research.safety_filter",
+        )
+        selection = select_for_role(
+            "deep_research", "safety_filter", assessment=assess
+        )
+        state_for_call = {
+            **dict(state),
+            "difficulty_by_role": difficulty_by_role,
+            **record_model_selection_handoff(
+                {**dict(state), "difficulty_by_role": difficulty_by_role},
+                selection,
+                role="safety_filter",
+                user_input_key="query",
+                pipeline="deep_research",
+                updates={"difficulty_by_role": difficulty_by_role},
+            ),
+        }
+
         safety = run_safety_filter(state["query"])
-        return {"safety": safety, "error": None}
+        if safety.is_safe:
+            return transfer_control(
+                state_for_call,
+                from_agent="safety_filter",
+                to_agent="context_compressor",
+                reason="Query classified safe; proceed to compression",
+                pipeline="deep_research",
+                user_input_key="query",
+                updates={
+                    "safety": safety,
+                    "error": None,
+                    "difficulty_by_role": difficulty_by_role,
+                    "last_model_selection": selection.as_dict(),
+                },
+                require_keys=["safety"],
+            )
+        return transfer_control(
+            state_for_call,
+            from_agent="safety_filter",
+            to_agent="END",
+            reason="Query classified unsafe; terminate pipeline",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={
+                "safety": safety,
+                "error": None,
+                "difficulty_by_role": difficulty_by_role,
+                "last_model_selection": selection.as_dict(),
+            },
+            require_keys=["safety"],
+            note="; ".join(safety.reasons or []) or None,
+        )
+    except HandoffError:
+        raise
     except Exception as exc:
         logger.error("Safety node failed: %s", exc)
         raise exc
@@ -75,8 +149,42 @@ def context_compressor_node(state: DeepResearchState) -> dict[str, Any]:
     """Analyze the query to produce keywords/trends."""
     logger.info("--- CONTEXT COMPRESSOR NODE ---")
     try:
-        trends = run_context_compressor(state["query"])
-        return {"trends": trends, "error": None}
+        assess = assessment_from_state(
+            state.get("difficulty_by_role"),
+            role_short="context_compressor",
+            task_text=state["query"],
+            role_path="deep_research.context_compressor",
+        )
+        selection = select_for_role(
+            "deep_research", "context_compressor", assessment=assess
+        )
+        state_for_call = {
+            **dict(state),
+            **record_model_selection_handoff(
+                state,
+                selection,
+                role="context_compressor",
+                user_input_key="query",
+                pipeline="deep_research",
+            ),
+        }
+        trends = run_context_compressor(state["query"], assessment=assess)
+        return transfer_control(
+            state_for_call,
+            from_agent="context_compressor",
+            to_agent="web_search",
+            reason="CondensedTrends ready for live web search",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={
+                "trends": trends,
+                "error": None,
+                "last_model_selection": selection.as_dict(),
+            },
+            require_keys=["trends"],
+        )
+    except HandoffError:
+        raise
     except Exception as exc:
         logger.error("Context compressor node failed: %s", exc)
         raise exc
@@ -93,7 +201,15 @@ def web_search_node(state: DeepResearchState) -> dict[str, Any]:
     logger.info("--- WEB SEARCH NODE ---")
     trends = state["trends"]
     if not trends:
-        return {"error": "Missing trends for search."}
+        return transfer_control(
+            state,
+            from_agent="web_search",
+            to_agent="END",
+            reason="Missing CondensedTrends; abort before ungrounded search",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={"error": "Missing trends for search."},
+        )
 
     try:
         # Keep the full user topic so search stays entity-anchored (not only
@@ -113,19 +229,39 @@ def web_search_node(state: DeepResearchState) -> dict[str, Any]:
             original_query=state.get("query") or "",
             research_profile=profile,
         )
-        return {"search_results": results, "error": None}
+        return transfer_control(
+            state,
+            from_agent="web_search",
+            to_agent="grounding",
+            reason="Live search results ready for grounding",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={"search_results": results, "error": None},
+            require_keys=["search_results"],
+        )
     except NoLiveSearchError as exc:
         logger.error(
             "⚠️ ABORTING — search step did not perform a real live search: %s", exc
         )
-        return {
-            "search_results": None,
-            "error": (
-                "El paso de búsqueda no devolvió resultados verificados en vivo. "
-                "Abortando para evitar generar un reporte no fundamentado. "
-                f"Detalle: {exc}"
-            ),
-        }
+        return transfer_control(
+            state,
+            from_agent="web_search",
+            to_agent="END",
+            reason="No live search — hard abort (anti-fabrication)",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={
+                "search_results": None,
+                "error": (
+                    "El paso de búsqueda no devolvió resultados verificados en vivo. "
+                    "Abortando para evitar generar un reporte no fundamentado. "
+                    f"Detalle: {exc}"
+                ),
+            },
+            note=str(exc),
+        )
+    except HandoffError:
+        raise
     except Exception as exc:
         logger.error("Web search node failed: %s", exc)
         raise exc
@@ -138,7 +274,17 @@ def grounding_node(state: DeepResearchState) -> dict[str, Any]:
     if not search_results:
         # Covers both "no results at all" and the NoLiveSearchError abort
         # from web_search_node (which sets search_results=None + error).
-        return {"error": state.get("error") or "No search results to ground against."}
+        return transfer_control(
+            state,
+            from_agent="grounding",
+            to_agent="END",
+            reason="No search corpus to ground against",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={
+                "error": state.get("error") or "No search results to ground against.",
+            },
+        )
 
     try:
         trends = state.get("trends")
@@ -158,7 +304,18 @@ def grounding_node(state: DeepResearchState) -> dict[str, Any]:
             search_results,
             research_profile=profile,
         )
-        return {"grounded_report": grounded, "error": None}
+        return transfer_control(
+            state,
+            from_agent="grounding",
+            to_agent="synthesizer",
+            reason="GroundedReport with citations ready for synthesis",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={"grounded_report": grounded, "error": None},
+            require_keys=["grounded_report"],
+        )
+    except HandoffError:
+        raise
     except Exception as exc:
         logger.error("Grounding node failed: %s", exc)
         raise exc
@@ -173,7 +330,17 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
     logger.info("--- SYNTHESIZER NODE ---")
     grounded_report = state["grounded_report"]
     if not grounded_report:
-        return {"error": state.get("error") or "No grounded report to synthesize."}
+        return transfer_control(
+            state,
+            from_agent="synthesizer",
+            to_agent="END",
+            reason="No grounded report to synthesize",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={
+                "error": state.get("error") or "No grounded report to synthesize.",
+            },
+        )
 
     try:
         trends = state.get("trends")
@@ -194,7 +361,18 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
             query=state.get("query") or "",
             research_profile=profile,
         )
-        return {"final_report": final_report, "error": None}
+        return transfer_control(
+            state,
+            from_agent="synthesizer",
+            to_agent="END",
+            reason="Final report polished; research pipeline complete",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={"final_report": final_report, "error": None},
+            require_keys=["final_report"],
+        )
+    except HandoffError:
+        raise
     except Exception as exc:
         logger.error(
             "Synthesizer failed (%s) — delivering grounded draft instead", exc
@@ -221,7 +399,17 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
             content=(grounded_report.content or "") + note,
             sources=draft_sources,
         )
-        return {"final_report": draft, "error": None}
+        return transfer_control(
+            state,
+            from_agent="synthesizer",
+            to_agent="END",
+            reason="Synthesizer LLM failed; deliver grounded draft",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={"final_report": draft, "error": None},
+            require_keys=["final_report"],
+            note=str(exc),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +509,9 @@ def initial_deep_research_state(topic: str) -> DeepResearchState:
         "grounded_report": None,
         "final_report": None,
         "error": None,
+        "handoff_history": [],
+        "difficulty_by_role": None,
+        "last_model_selection": None,
     }
 
 

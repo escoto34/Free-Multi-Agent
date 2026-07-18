@@ -43,6 +43,7 @@ build/
 *.db
 *.sqlite
 *.sqlite3
+# Local runtime data: quotas.db, checkpoints.db, runs.db, logs/, vibe_last_failed/
 data/
 
 # OS
@@ -82,6 +83,7 @@ dmypy.json
 # Generated knowledge graph (local graphify tooling; not product source)
 # Includes graph.json, graph.html, GRAPH_REPORT.md, cache/, cost.json, manifests
 graphify-out/
+# If graphify-out/ was ever force-added, prefer: git rm -r --cached graphify-out
 
 # Graphify / agent sidecars if ever written outside graphify-out/
 .graphify_python
@@ -100,9 +102,12 @@ scratch/
 tmp/
 temp/
 .scratch/
+# Editor / agent local notes (keep SESSION_CHANGES.md local if used)
+SESSION_CHANGES.md
 
 # Local overrides (optional user copies — never commit live secrets)
 config/model_router.local.yaml
+config/model_benchmarks.local.yaml
 config/cli_toolbox.local.yaml
 config/*.local.yaml
 
@@ -122,7 +127,8 @@ docker-compose.override.yml
 
 # OS / package manager lock noise (keep intentional lockfiles if added later)
 # poetry.lock and uv.lock may be committed when packaging is formalized
+# Generated demo sites / local experiments (not product source)
 credental-clinic/
-SESSION_CHANGES.md
 credental_site/
 credental-site/
+

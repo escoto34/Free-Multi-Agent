@@ -1,324 +1,425 @@
-# Graph Report - MultiAgent  (2026-07-13)
+# Graph Report - MultiAgent  (2026-07-17)
 
 ## Corpus Check
-- 61 files · ~48,273 words
+- 84 files · ~87,023 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1077 nodes · 2593 edges · 60 communities (56 shown, 4 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 232 edges (avg confidence: 0.56)
+- 1562 nodes · 3839 edges · 82 communities (77 shown, 5 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 240 edges (avg confidence: 0.53)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c132b135`
+- Built from commit: `b18b8690`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- [[_COMMUNITY_External Skills CLI|External Skills CLI]]
-- [[_COMMUNITY_Planner Orchestration|Planner Orchestration]]
-- [[_COMMUNITY_Deep Research Graph|Deep Research Graph]]
-- [[_COMMUNITY_TUI App Shell|TUI App Shell]]
-- [[_COMMUNITY_Quota Tracker SQLite|Quota Tracker SQLite]]
-- [[_COMMUNITY_Context Tools Files|Context Tools Files]]
-- [[_COMMUNITY_CLI Entry Commands|CLI Entry Commands]]
-- [[_COMMUNITY_Model Router Config|Model Router Config]]
+- [[_COMMUNITY_CLI Session Context|CLI Session Context]]
+- [[_COMMUNITY_Docs and Config|Docs and Config]]
+- [[_COMMUNITY_Source Fetch Search|Source Fetch Search]]
+- [[_COMMUNITY_Agent Chat Context|Agent Chat Context]]
+- [[_COMMUNITY_Research Grounding Types|Research Grounding Types]]
+- [[_COMMUNITY_Skills Registry CLI|Skills Registry CLI]]
+- [[_COMMUNITY_Vibe Coding Graph|Vibe Coding Graph]]
+- [[_COMMUNITY_Entity Focus Anchors|Entity Focus Anchors]]
+- [[_COMMUNITY_Host Tools Terminal|Host Tools Terminal]]
+- [[_COMMUNITY_Main CLI Entrypoint|Main CLI Entrypoint]]
+- [[_COMMUNITY_Pipeline Orchestration|Pipeline Orchestration]]
+- [[_COMMUNITY_Toolbox Catalog|Toolbox Catalog]]
+- [[_COMMUNITY_Slash Commands|Slash Commands]]
+- [[_COMMUNITY_Search Guards Scrub|Search Guards Scrub]]
+- [[_COMMUNITY_TUI App Core|TUI App Core]]
+- [[_COMMUNITY_Quota Tracker|Quota Tracker]]
+- [[_COMMUNITY_Chat Turn Tools|Chat Turn Tools]]
 - [[_COMMUNITY_Router Fallback Tests|Router Fallback Tests]]
-- [[_COMMUNITY_Vibe Coding Architect|Vibe Coding Architect]]
-- [[_COMMUNITY_Coder Agent Artifacts|Coder Agent Artifacts]]
-- [[_COMMUNITY_Grounding And Runs|Grounding And Runs]]
-- [[_COMMUNITY_Config PiP UI|Config PiP UI]]
-- [[_COMMUNITY_Slash Commands Chat|Slash Commands Chat]]
-- [[_COMMUNITY_API Keys Providers|API Keys Providers]]
-- [[_COMMUNITY_Host Tools Exec|Host Tools Exec]]
-- [[_COMMUNITY_Session Context Compact|Session Context Compact]]
-- [[_COMMUNITY_Side Panel UI|Side Panel UI]]
-- [[_COMMUNITY_Run History DB|Run History DB]]
-- [[_COMMUNITY_Research Safety Compress|Research Safety Compress]]
-- [[_COMMUNITY_Agent Chat Loop|Agent Chat Loop]]
-- [[_COMMUNITY_TUI Main Entry|TUI Main Entry]]
-- [[_COMMUNITY_Deep Research Schemas|Deep Research Schemas]]
-- [[_COMMUNITY_Pipeline Graph Tests|Pipeline Graph Tests]]
-- [[_COMMUNITY_Synthesizer Agent|Synthesizer Agent]]
-- [[_COMMUNITY_Test Executor Node|Test Executor Node]]
-- [[_COMMUNITY_LLM Clients Cache|LLM Clients Cache]]
-- [[_COMMUNITY_MCP Server Tools|MCP Server Tools]]
-- [[_COMMUNITY_Deep Research Invoke|Deep Research Invoke]]
-- [[_COMMUNITY_Synthesizer Citations|Synthesizer Citations]]
-- [[_COMMUNITY_CLI Chat Defaults|CLI Chat Defaults]]
-- [[_COMMUNITY_Vibe Graph Routing|Vibe Graph Routing]]
-- [[_COMMUNITY_Prompt Area Input|Prompt Area Input]]
-- [[_COMMUNITY_Vibe Role Config|Vibe Role Config]]
-- [[_COMMUNITY_Dependencies LangGraph|Dependencies LangGraph]]
-- [[_COMMUNITY_Code Preserve Merge|Code Preserve Merge]]
-- [[_COMMUNITY_ModelRouter Core|ModelRouter Core]]
-- [[_COMMUNITY_Help PiP Overlay|Help PiP Overlay]]
-- [[_COMMUNITY_Providers Overview|Providers Overview]]
-- [[_COMMUNITY_GraphRAG Query|GraphRAG Query]]
-- [[_COMMUNITY_Chat History Widgets|Chat History Widgets]]
-- [[_COMMUNITY_Fallback Cascade Config|Fallback Cascade Config]]
-- [[_COMMUNITY_Vibe Pipeline Invoke|Vibe Pipeline Invoke]]
+- [[_COMMUNITY_Deep Research Graph|Deep Research Graph]]
+- [[_COMMUNITY_Coder Preserve Files|Coder Preserve Files]]
+- [[_COMMUNITY_Model Router|Model Router]]
+- [[_COMMUNITY_Research Run History|Research Run History]]
+- [[_COMMUNITY_LLM Clients|LLM Clients]]
 - [[_COMMUNITY_Web Search Agent|Web Search Agent]]
-- [[_COMMUNITY_Compose Layout Widgets|Compose Layout Widgets]]
-- [[_COMMUNITY_Quotas And Router|Quotas And Router]]
-- [[_COMMUNITY_Debugger Agent|Debugger Agent]]
-- [[_COMMUNITY_Status Line Widgets|Status Line Widgets]]
-- [[_COMMUNITY_Language Helpers|Language Helpers]]
-- [[_COMMUNITY_Approval Bar UI|Approval Bar UI]]
-- [[_COMMUNITY_Global Skills System|Global Skills System]]
-- [[_COMMUNITY_Graphify Workflow|Graphify Workflow]]
+- [[_COMMUNITY_Config Editor|Config Editor]]
+- [[_COMMUNITY_Research Pipeline Tests|Research Pipeline Tests]]
+- [[_COMMUNITY_Architect Spec Schema|Architect Spec Schema]]
+- [[_COMMUNITY_Graphify RAG|Graphify RAG]]
+- [[_COMMUNITY_Debugger Rollback Tests|Debugger Rollback Tests]]
+- [[_COMMUNITY_TUI Launch Init|TUI Launch Init]]
+- [[_COMMUNITY_Research Constraints|Research Constraints]]
+- [[_COMMUNITY_Toolbox Runtime Resolve|Toolbox Runtime Resolve]]
+- [[_COMMUNITY_Agent Config Loader|Agent Config Loader]]
+- [[_COMMUNITY_TUI Approval Widgets|TUI Approval Widgets]]
+- [[_COMMUNITY_Config PiP Panel|Config PiP Panel]]
+- [[_COMMUNITY_Prompt Area Input|Prompt Area Input]]
+- [[_COMMUNITY_Symbol Preserve Logic|Symbol Preserve Logic]]
+- [[_COMMUNITY_Runtime Schema Tests|Runtime Schema Tests]]
+- [[_COMMUNITY_Python Dependencies|Python Dependencies]]
+- [[_COMMUNITY_Chat History Widget|Chat History Widget]]
+- [[_COMMUNITY_HTML to Text|HTML to Text]]
+- [[_COMMUNITY_Safe Artifact Writes|Safe Artifact Writes]]
+- [[_COMMUNITY_Context Compressor|Context Compressor]]
+- [[_COMMUNITY_Pytest Fixtures|Pytest Fixtures]]
+- [[_COMMUNITY_TUI Role Selectors|TUI Role Selectors]]
+- [[_COMMUNITY_Tool Approval Handlers|Tool Approval Handlers]]
+- [[_COMMUNITY_Help Side Panel|Help Side Panel]]
+- [[_COMMUNITY_External Skills Docs|External Skills Docs]]
+- [[_COMMUNITY_Graphify Agent Rules|Graphify Agent Rules]]
+- [[_COMMUNITY_Architect Agent|Architect Agent]]
+- [[_COMMUNITY_Tool Approval Wait|Tool Approval Wait]]
+- [[_COMMUNITY_Safety Filter|Safety Filter]]
 - [[_COMMUNITY_Install Launcher Script|Install Launcher Script]]
+- [[_COMMUNITY_Project Metadata|Project Metadata]]
+- [[_COMMUNITY_Community 61|Community 61]]
+- [[_COMMUNITY_Community 62|Community 62]]
+- [[_COMMUNITY_Community 63|Community 63]]
+- [[_COMMUNITY_Community 64|Community 64]]
+- [[_COMMUNITY_Community 65|Community 65]]
+- [[_COMMUNITY_Community 66|Community 66]]
+- [[_COMMUNITY_Community 67|Community 67]]
+- [[_COMMUNITY_Community 68|Community 68]]
+- [[_COMMUNITY_Community 69|Community 69]]
+- [[_COMMUNITY_Community 70|Community 70]]
+- [[_COMMUNITY_Community 71|Community 71]]
+- [[_COMMUNITY_Community 72|Community 72]]
+- [[_COMMUNITY_Community 73|Community 73]]
+- [[_COMMUNITY_Community 74|Community 74]]
+- [[_COMMUNITY_Community 75|Community 75]]
+- [[_COMMUNITY_Community 76|Community 76]]
+- [[_COMMUNITY_Community 77|Community 77]]
+- [[_COMMUNITY_Community 78|Community 78]]
+- [[_COMMUNITY_Community 80|Community 80]]
+- [[_COMMUNITY_Community 81|Community 81]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `ConversationSession` - 92 edges
+1. `ConversationSession` - 65 edges
 2. `MultiAgentApp` - 55 edges
-3. `ToolCall` - 35 edges
-4. `CodeArtifact` - 31 edges
-5. `QuotaTracker` - 29 edges
-6. `TechnicalSpec` - 28 edges
-7. `exec_tool()` - 27 edges
-8. `ConversationSession` - 24 edges
-9. `dispatch()` - 24 edges
-10. `CommandResult` - 23 edges
+3. `DifficultyAssessment` - 47 edges
+4. `QuotaTracker` - 43 edges
+5. `CodeArtifact` - 40 edges
+6. `TechnicalSpec` - 38 edges
+7. `select_for_role()` - 34 edges
+8. `ToolCall` - 33 edges
+9. `transfer_control()` - 30 edges
+10. `exec_tool()` - 27 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `cli.chat → groq/openai/gpt-oss-120b` --semantically_similar_to--> `Chat tool-using agent`  [INFERRED] [semantically similar]
-  config/defaults_model_router.yaml → README.md
+- `Planner (/do)` --semantically_similar_to--> `cli.planner`  [INFERRED] [semantically similar]
+  README.md → systems.md
 - `CondensedTrends` --uses--> `CondensedTrends`  [INFERRED]
   agents/deep_research/context_compressor.py → schemas/deep_research.py
-- `Any` --uses--> `GroundedReport`  [INFERRED]
-  agents/deep_research/grounding.py → schemas/deep_research.py
-- `GroundedReport` --uses--> `GroundedReport`  [INFERRED]
-  agents/deep_research/grounding.py → schemas/deep_research.py
 - `SafetyClassification` --uses--> `SafetyClassification`  [INFERRED]
   agents/deep_research/safety_filter.py → schemas/deep_research.py
+- `TechnicalSpec` --uses--> `TechnicalSpec`  [INFERRED]
+  agents/vibe_coding/architect.py → schemas/vibe_coding.py
+- `test_outbound_from_json_ld_same_as()` --calls--> `extract_outbound_presence()`  [EXTRACTED]
+  tests/test_source_fetch_and_scrub.py → agents/deep_research/source_fetch.py
 
 ## Import Cycles
 - 1-file cycle: `core/router.py -> core/router.py`
 - 1-file cycle: `core/clients.py -> core/clients.py`
 
 ## Hyperedges (group relationships)
-- **Vibe Coding pipeline role sequence** — readme_architect, readme_coder, readme_test_executor, readme_debugger [EXTRACTED 1.00]
-- **Deep Research pipeline stages** — readme_safety_filter, readme_context_compressor, readme_web_search, readme_grounding, readme_synthesizer [EXTRACTED 1.00]
-- **Model router config: live, defaults, and agent load path** — readme_model_router_yaml, readme_defaults_model_router_yaml, readme_agent_config, config_model_router_live, config_defaults_model_router_providers [INFERRED 0.85]
+- **System A Vibe Coding pipeline roles** — multiagent_systems_role_architect, multiagent_systems_role_coder, multiagent_systems_role_debugger, multiagent_readme_system_a_vibe_coding [EXTRACTED 1.00]
+- **System B Deep Research pipeline roles** — multiagent_systems_role_safety_filter, multiagent_systems_role_context_compressor, multiagent_systems_role_web_search, multiagent_systems_role_grounding, multiagent_systems_role_synthesizer, multiagent_readme_system_b_deep_research [EXTRACTED 1.00]
+- **Free-durable hot-path primary models** — multiagent_systems_model_agnes_2_0_flash, multiagent_systems_model_codestral_latest, multiagent_systems_model_gpt_oss_120b, multiagent_systems_model_compound_mini, multiagent_systems_model_command_a_plus, multiagent_systems_model_gpt_oss_safeguard_20b [EXTRACTED 1.00]
 
-## Communities (60 total, 4 thin omitted)
+## Communities (82 total, 5 thin omitted)
 
-### Community 0 - "External Skills CLI"
-Cohesion: 0.26
-Nodes (17): Manage global external skills (path + SKILL.md format)., _skills(), add_skill(), _ensure_global_file(), load_registry(), load_skill(), parse_skill_md(), Any (+9 more)
-
-### Community 1 - "Planner Orchestration"
-Cohesion: 0.17
-Nodes (24): format_plan(), plan_pipelines(), PipelinePlan, Planner agent: given a free-form user prompt, choose System A (/vibe), System B, Ask the planner model for a PipelinePlan.      If *provider*/*model* are set, th, _emit(), execute_plan(), Any (+16 more)
-
-### Community 2 - "Deep Research Graph"
-Cohesion: 0.12
-Nodes (28): CondensedTrends, Extract short search terms from the research query., run_context_compressor(), Classify whether the research query is safe to process., run_safety_filter(), context_compressor_node(), DeepResearchState, get_deep_research_graph() (+20 more)
-
-### Community 3 - "TUI App Shell"
-Cohesion: 0.31
-Nodes (4): ChatHistory, Scrollable chat: Markdown for assistant, fenced code block for user prompts., User prompt as a markdown fenced block (``` ... ```)., Assistant reply as rendered markdown (no role label).
-
-### Community 4 - "Quota Tracker SQLite"
-Cohesion: 0.12
-Nodes (11): Connection, Open a connection to the quota database., ISO-formatted current date for partitioning., Determine the tracking key for a (provider, model) pair.          * **Groq** — e, Return the daily limit for *provider*.          Reads from ``config/model_router, Return today's call count for *provider*/*model*., Return how many calls remain today for *provider*/*model*., Check whether a call is allowed within today's quota. (+3 more)
-
-### Community 5 - "Context Tools Files"
-Cohesion: 0.08
-Nodes (40): _clean_final(), _modern_toolbox_block(), Tool-using chat loop for the interactive CLI.  The host fetches graph/dir seeds,, Cheap host-side context so the model need not invent graphify CLI., Installed catalog capabilities so the model prefers modern CLIs., _seed_context(), _system_prompt(), extract_path_candidates() (+32 more)
-
-### Community 6 - "CLI Entry Commands"
-Cohesion: 0.05
-Nodes (42): config(), config_reset(), config_set(), keys(), _print_quota_summary(), Command Line Interface for Free-Multi-Agent.  Pipelines (vibe-coding / deep-rese, Show today's free-tier quota usage (from data/quotas.db)., Show recent pipeline runs (from data/runs.db). (+34 more)
-
-### Community 7 - "Model Router Config"
-Cohesion: 0.17
-Nodes (25): _config(), config_show(), Print active provider/model per agent role., Force the next ``get_agent_config`` call to re-read the YAML from disk.      Use, reload_config(), ensure_defaults_snapshot(), get_cli_settings(), list_roles() (+17 more)
-
-### Community 8 - "Router Fallback Tests"
-Cohesion: 0.08
-Nodes (19): custom_tracker(), Tests for ModelRouter, QuotaTracker, and fallback cascade. These tests mock HTTP, Provide an isolated QuotaTracker using a temp database., Historical bug: groq→gemini→openrouter→groq cycled when Gemini failed.      With, Provide a ModelRouter bound to the isolated QuotaTracker., Test cohere routing through ClientV2 mock/interceptor., Verify that OpenRouter uses a single SHARED counter for all :free models.      C, Verify that OpenRouter and Cohere quotas are isolated from each other.      Open (+11 more)
-
-### Community 9 - "Vibe Coding Architect"
-Cohesion: 0.08
-Nodes (50): _after_architect(), _after_coder(), architect_node(), coder_node(), debugger_node(), debugger_routing(), get_git_repo(), get_vibe_coding_graph() (+42 more)
-
-### Community 10 - "Coder Agent Artifacts"
-Cohesion: 0.10
-Nodes (32): TechnicalSpec, CodeArtifact, TechnicalSpec, CodeArtifact, Load role config from YAML, call the router, parse JSON into ``schema``.      Ex, run_structured_agent(), DebugReport, CodeArtifact (+24 more)
-
-### Community 11 - "Grounding And Runs"
-Cohesion: 0.21
-Nodes (11): Remove optional markdown code fences around model JSON/text output., strip_fences(), extract_urls(), Extract http(s) URLs from *text*, de-duplicated, order preserved., Unit tests for agent_runtime, run history, entry schemas, and YAML helpers., test_deep_research_request_accepts_topic(), test_extract_urls_dedupes(), test_max_fix_cycles_from_yaml() (+3 more)
-
-### Community 12 - "Config PiP UI"
-Cohesion: 0.24
-Nodes (4): Changed, ConfigPiP, _models_for_provider(), Full-height side panel; each tab is one scroll (no nested height fight).
-
-### Community 13 - "Slash Commands Chat"
-Cohesion: 0.12
-Nodes (34): _approve_cmd(), chat_turn(), _clear(), CommandResult, _compact(), _do(), _exit(), _help() (+26 more)
-
-### Community 14 - "API Keys Providers"
-Cohesion: 0.06
-Nodes (59): Interactive Free-Multi-Agent CLI (slash commands + session context)., run_tui(), _invalidate_option_caches(), _known_provider_options(), _planner_options(), _provider_options(), _quiet_logging_for_tui(), MultiAgent TUI — chat + side config/help panels that push the main column.  - En (+51 more)
-
-### Community 15 - "Host Tools Exec"
-Cohesion: 0.05
-Nodes (92): Terminal toolbox: doctor / suggest / search over the curated catalog., _tools(), exec_tool(), format_tool_results(), _looks_like_pip_or_venv(), needs_approval(), Any, ApprovalFn (+84 more)
-
-### Community 16 - "Session Context Compact"
+### Community 0 - "CLI Session Context"
 Cohesion: 0.11
-Nodes (19): dispatch(), Parse a slash command line and run the handler., ConversationSession, Message, OpenAI-style messages for the chat role (skip pure system-notes)., Last *n* user/assistant turns only (for slim graph-augmented chat).          Exc, Auto-run local compact when usage exceeds *threshold*., Drop middle turns, keep system + recent messages (no LLM).          Returns a hu (+11 more)
+Nodes (26): dispatch(), Parse a slash command line and run the handler., ConversationSession, OpenAI-style messages for the chat role (skip pure system-notes)., Last *n* user/assistant turns only (for slim graph-augmented chat).          Exc, In-memory chat session with a soft context budget., Path, Tests for interactive CLI helpers (config editor, keys, session, slash cmds). (+18 more)
 
-### Community 17 - "Side Panel UI"
-Cohesion: 0.08
-Nodes (24): agent_chat_turn(), Any, ApprovalFn, ConversationSession, Run a tool-augmented chat turn., Run local graphify update; return status text for the user., _try_graphify_update(), _wants_graph_refresh() (+16 more)
+### Community 1 - "Docs and Config"
+Cohesion: 0.23
+Nodes (15): System B anti-hallucination multi-source path, command-a-plus-05-2026, groq/compound-mini, openai/gpt-oss-120b, openai/gpt-oss-safeguard-20b, Cohere provider, Groq provider, ResearchProfile typology (+7 more)
 
-### Community 18 - "Run History DB"
+### Community 2 - "Source Fetch Search"
+Cohesion: 0.09
+Nodes (44): _abs_url(), classify_outbound_url(), _clean_href(), collect_outbound_from_sources(), extract_outbound_presence(), extract_structured_signals(), extract_user_urls(), fetch_outbound_presence_pages() (+36 more)
+
+### Community 3 - "Agent Chat Context"
+Cohesion: 0.16
+Nodes (22): extract_path_candidates(), gather_dir_context(), gather_file_context(), graph_mtime(), in_multiagent_project(), _is_safe_dir(), _is_safe_path(), list_project_dir() (+14 more)
+
+### Community 4 - "Research Grounding Types"
+Cohesion: 0.11
+Nodes (28): Any, CondensedTrends, Context Compressor agent for System B (Deep Research).  Provider/model/fallback, Extract search terms + research profile from the research query., run_context_compressor(), classify_research(), merge_profiles(), profile_from_mapping() (+20 more)
+
+### Community 5 - "Skills Registry CLI"
+Cohesion: 0.11
+Nodes (44): Manage global external skills (path + SKILL.md format)., _skills(), List registered skills (ON/off). Works from any directory., Register a skill folder (must contain valid SKILL.md)., Enable a registered skill globally., Disable a skill globally (stays registered)., Show skill metadata and body preview., skills_add() (+36 more)
+
+### Community 6 - "Vibe Coding Graph"
+Cohesion: 0.07
+Nodes (48): TechnicalSpec, get_max_fix_cycles(), Return System A max debugger fix cycles from YAML (default 3)., assessments_to_state_dict(), JSON-serializable map for LangGraph state (short keys only)., _after_architect(), _after_coder(), architect_node() (+40 more)
+
+### Community 7 - "Entity Focus Anchors"
+Cohesion: 0.07
+Nodes (46): ProgressCb, ResearchProfile, NoLiveSearchError, raise_if_no_live_search(), Raised when search output admits it did not perform a live search., Raise ``NoLiveSearchError`` if the result admits it wasn't a real search., entity_focus_block(), extract_entity_anchors() (+38 more)
+
+### Community 8 - "Host Tools Terminal"
+Cohesion: 0.16
+Nodes (18): format_command_header(), needs_approval(), ApprovalFn, Path, Host-side tools for interactive chat (files, dirs, graphify, terminal).  The mod, Directory where multiagent was *launched* (user project).      File writes, shel, Resolve a relative path under the launch cwd (work root), not package root., Return python executable inside a venv (POSIX or Windows). (+10 more)
+
+### Community 9 - "Main CLI Entrypoint"
+Cohesion: 0.07
+Nodes (40): _providers(), List free-tier providers, models, and whether keys are configured., config(), config_reset(), config_set(), keys(), keys_set(), main() (+32 more)
+
+### Community 10 - "Pipeline Orchestration"
+Cohesion: 0.10
+Nodes (38): _display_step_output(), _emit(), ensure_origin_urls_in_research_prompt(), execute_plan(), _format_research_report(), Any, PipelinePlan, ProgressCb (+30 more)
+
+### Community 11 - "Toolbox Catalog"
+Cohesion: 0.05
+Nodes (87): Terminal toolbox: doctor / suggest / search over the curated catalog., _tools(), exec_tool(), _looks_like_pip_or_venv(), Any, Execute a single tool; never raises — returns ToolResult., Recommend tools for a free-form task description., Search the toolbox catalog by keyword. (+79 more)
+
+### Community 12 - "Slash Commands"
+Cohesion: 0.11
+Nodes (37): format_plan(), PipelinePlan, _approve_cmd(), _build_planner_context(), chat_turn(), _clear(), CommandResult, _compact() (+29 more)
+
+### Community 13 - "Search Guards Scrub"
+Cohesion: 0.09
+Nodes (42): _address_lines(), _asset_urls(), extract_research_facts(), _gaps(), _hex_colors(), Extract grounded constraints from a research report for vibe-coding steps.  When, Parse a research report (+ optional source URLs) into fact buckets., _social() (+34 more)
+
+### Community 14 - "TUI App Core"
+Cohesion: 0.15
+Nodes (4): HelpPiP, _invalidate_option_caches(), Update status line. Config selects only when full_config=True., F1 help side panel (not dumped into chat history).
+
+### Community 15 - "Quota Tracker"
+Cohesion: 0.10
+Nodes (13): Connection, Path, Create the usage table if it doesn't exist yet., Open a connection to the quota database., ISO-formatted current date for partitioning., Determine the tracking key for a (provider, model) pair.          * **Groq** — e, Return the daily limit for *provider*.          Reads from ``config/model_router, Return today's call count for *provider*/*model*. (+5 more)
+
+### Community 16 - "Chat Turn Tools"
+Cohesion: 0.10
+Nodes (11): Side panel sibling of chat — pushes main content (does not float over it)., Keep PiP within half screen when the terminal is resized., SidePanel, MouseDown, MouseMove, MouseScrollDown, MouseScrollLeft, MouseScrollRight (+3 more)
+
+### Community 17 - "Router Fallback Tests"
+Cohesion: 0.06
+Nodes (24): Persistent SQLite-backed quota counters with automatic daily reset.  Limits are, custom_tracker(), Tests for ModelRouter, QuotaTracker, and fallback cascade. These tests mock HTTP, Provide an isolated QuotaTracker using a temp database., Historical bug: groq→gemini→openrouter→groq cycled when Gemini failed.      With, Provide a ModelRouter bound to the isolated QuotaTracker., groq→gemini→openrouter→groq: skip visited groq and stop cleanly if leaf gone., Test cohere routing through ClientV2 mock/interceptor. (+16 more)
+
+### Community 18 - "Deep Research Graph"
+Cohesion: 0.06
+Nodes (56): Any, GroundedReport, ResearchProfile, GroundedReport, ResearchProfile, find_no_live_search_marker(), Return the first matching marker in *text*, or None if clean., _extract_sources_from_citations() (+48 more)
+
+### Community 19 - "Coder Preserve Files"
+Cohesion: 0.11
+Nodes (28): CodeArtifact, TechnicalSpec, Path, coder_node(), Pydantic schemas for the System A (Vibe Coding) pipeline. These models define th, Output schema for the Architect agent.      Defines the system design, component, TechnicalSpec, Path (+20 more)
+
+### Community 20 - "Model Router"
+Cohesion: 0.15
+Nodes (26): CodeArtifact, Path, TechnicalSpec, CodeArtifact, Output schema for the Coder agent.      Contains the written source code mapped, Path, Vibe test runner: scoped pytest targets + static grounded checks., test_node_project_fails_execute_vibe_tests() (+18 more)
+
+### Community 21 - "Research Run History"
+Cohesion: 0.12
+Nodes (19): call_agent(), EmptyCompletionError, get_router(), ModelRouter, Any, ClientV2, OpenAI, Path (+11 more)
+
+### Community 22 - "LLM Clients"
+Cohesion: 0.17
+Nodes (18): get_client(), get_cohere_client(), get_groq_client(), get_openrouter_client(), list_ollama_local_models(), _normalize_openai_base_url(), _ollama_base_url(), _openai_compat_client() (+10 more)
+
+### Community 23 - "Web Search Agent"
+Cohesion: 0.13
+Nodes (18): CodeArtifact, DebugReport, _debugger_next_agent(), debugger_node(), DebugReport, Mirror ``debugger_routing`` so the handoff names the real next hop., Runs the Debugger agent to assess test logs and propose fixes.      Always incre, DebugReport (+10 more)
+
+### Community 24 - "Config Editor"
+Cohesion: 0.18
+Nodes (24): _config(), config_show(), Print active provider/model per agent role., ensure_defaults_snapshot(), get_cli_settings(), list_roles(), Any, Path (+16 more)
+
+### Community 25 - "Research Pipeline Tests"
+Cohesion: 0.11
+Nodes (32): invoke_router(), Any, date, DifficultyAssessment, Shared runtime helpers for every agent role.  Eliminates the 8-way copy of: load, Return (provider, model, fallback, selection, assessment) for a role call., Load role config, pick model by difficulty, apply reasoning, call LLM.      Exam, Like ``run_structured_agent`` but returns the raw ``LLMResponse`` (prose paths). (+24 more)
+
+### Community 26 - "Architect Spec Schema"
+Cohesion: 0.12
+Nodes (24): keys_status(), Show which provider keys are set (masked)., _isolate_clients(), Path, Root conftest — sets up fake API keys so that imports of core.clients don't rais, Clear cached LLM clients between tests to avoid cross-contamination., Provide a temporary SQLite path for QuotaTracker in tests., tmp_quota_db() (+16 more)
+
+### Community 27 - "Graphify RAG"
 Cohesion: 0.18
 Nodes (11): Any, Connection, Path, Mark a run as completed / failed / aborted., Return newest runs first., Thread-safe log of MAS pipeline executions., Insert a running row; return its id., RunHistory (+3 more)
 
-### Community 19 - "Research Safety Compress"
-Cohesion: 0.24
-Nodes (13): invoke_router(), Any, Shared runtime helpers for every agent role.  Eliminates the 8-way copy of: load, Like ``run_structured_agent`` but returns the raw ``LLMResponse`` (prose paths)., Call either ``ModelRouter.call_agent``, module ``call_agent``, or a test mock., run_role_raw(), LLMResponse, Standardised response envelope returned by ``call_agent``. (+5 more)
+### Community 28 - "Debugger Rollback Tests"
+Cohesion: 0.16
+Nodes (17): get_vibe_coding_graph(), initial_vibe_coding_state(), Build a fresh graph state for System A., Build and compile the StateGraph for System A., StateGraph, Path, Tests for LangGraph orchestration. Includes testing the Git rollback behavior fo, Debugger LLM failures must still increment fix_attempts and end the graph. (+9 more)
 
-### Community 20 - "Agent Chat Loop"
-Cohesion: 0.27
-Nodes (16): active_skills(), build_skills_system_block(), list_skills(), Resolve user path to the SKILL.md file., Validate format and return metadata (enabled=False placeholder)., Markdown block to inject into the chat system prompt for enabled skills., resolve_skill_md(), validate_skill_path() (+8 more)
+### Community 29 - "TUI Launch Init"
+Cohesion: 0.15
+Nodes (15): Interactive Free-Multi-Agent CLI (slash commands + session context)., run_tui(), _known_provider_options(), _planner_options(), _provider_options(), _quiet_logging_for_tui(), MultiAgent TUI — chat + side config/help panels that push the main column.  - En, Stop router/HTTP retry noise from painting over the prompt bar.      ``cli.py`` (+7 more)
 
-### Community 21 - "TUI Main Entry"
+### Community 30 - "Research Constraints"
+Cohesion: 0.10
+Nodes (46): _expired_fallback_for(), get_model_entry(), get_model_scores(), hy3_status(), is_model_available(), _is_primary_degraded(), _load_benchmarks(), _mis_specialization_reasons() (+38 more)
+
+### Community 31 - "Toolbox Runtime Resolve"
+Cohesion: 0.14
+Nodes (30): _clamp_effort(), difficulty_to_effort(), _effort_rank(), get_model_reasoning_capability(), _load_benchmarks(), _map_effort_for_style(), Any, DifficultyAssessment (+22 more)
+
+### Community 32 - "Agent Config Loader"
+Cohesion: 0.18
+Nodes (14): plan_pipelines(), Planner agent: given a free-form user prompt, choose System A (/vibe), System B, Ask the planner model for a PipelinePlan.      If *provider*/*model* are set, th, check_hy3_expiration(), Warn if tencent/hy3:free is near or past free_until.      Uses ``config/model_be, get_agent_config(), get_full_config(), _load() (+6 more)
+
+### Community 33 - "TUI Approval Widgets"
 Cohesion: 0.20
-Nodes (4): HelpPiP, F1 help side panel (not dumped into chat history)., Keep PiP within half screen when the terminal is resized., Resize
+Nodes (8): ApprovalBar, Compact vertical list: bold header + three bordered, centered option rows., StatusLine, ComposeResult, Horizontal, Static, Vertical, VerticalScroll
 
-### Community 22 - "Deep Research Schemas"
-Cohesion: 0.12
-Nodes (21): BaseModel, Context Compressor agent for System B (Deep Research).  Provider/model/fallback, Safety Filter agent for System B (Deep Research).  Provider/model from config/mo, CondensedTrends, GroundedReport, Pydantic schemas for the System B (Deep Research) pipeline. These models define, Output schema for the Safety Filter agent.      Determines if the research topic, Output schema for the Context Compressor agent.      Represents key entities, tr (+13 more)
+### Community 34 - "Config PiP Panel"
+Cohesion: 0.38
+Nodes (3): _planner_label(), ConversationSession, _short_cwd()
 
-### Community 23 - "Pipeline Graph Tests"
+### Community 35 - "Prompt Area Input"
+Cohesion: 0.18
+Nodes (4): PromptArea, Multi-line prompt: Enter = send, Shift+Enter = newline., Key, TextArea
+
+### Community 36 - "Symbol Preserve Logic"
 Cohesion: 0.13
-Nodes (18): build_graph_augmented_messages(), Compose a **small** message list for the chat model.      - Does not include the, estimate_tokens(), Multi-turn conversation context for the interactive CLI.  Tracks messages, estim, Cheap token estimate without tiktoken (≈ 4 chars/token)., Path, Tests for interactive CLI helpers (config editor, keys, session, slash cmds)., test_build_graph_augmented_messages_is_slim() (+10 more)
+Nodes (24): agent_chat_turn(), _clean_final(), _modern_toolbox_block(), Any, ApprovalFn, ConversationSession, Tool-using chat loop for the interactive CLI.  The host fetches graph/dir seeds,, Run a tool-augmented chat turn. (+16 more)
 
-### Community 24 - "Synthesizer Agent"
-Cohesion: 0.33
-Nodes (6): initial_vibe_coding_state(), Build a fresh graph state for System A., Debugger LLM failures must still increment fix_attempts and end the graph., Architect failure must go to rollback/end, not spin into coder forever., test_vibe_coding_architect_failure_does_not_loop(), test_vibe_coding_stops_when_debugger_always_raises()
+### Community 37 - "Runtime Schema Tests"
+Cohesion: 0.10
+Nodes (25): Force the next ``get_agent_config`` call to re-read the YAML from disk.      Use, reload_config(), Remove optional markdown code fences around model JSON/text output., strip_fences(), Clear benchmarks cache (tests / live YAML edit)., reload_benchmarks(), Clear local + model_selector benchmarks caches after YAML edits., reload_reasoning_config() (+17 more)
 
-### Community 25 - "Test Executor Node"
-Cohesion: 0.20
-Nodes (9): call_agent(), ModelRouter, Any, ClientV2, Routes LLM calls with automatic fallback cascade and quota tracking., Route the call to the correct provider backend.          Raises:             Emp, Make an LLM call with automatic fallback on quota / HTTP / empty-completion erro, Walk the cascade graph skipping already-tried (provider, model) pairs. (+1 more)
+### Community 38 - "Python Dependencies"
+Cohesion: 0.17
+Nodes (11): click>=8.1.0, cohere>=5.0.0, gitpython>=3.1.0, langgraph>=0.4.0, langgraph-checkpoint-sqlite>=2.0.0, mcp>=1.0.0, openai>=1.30.0, pydantic>=2.7.0 (+3 more)
 
-### Community 26 - "LLM Clients Cache"
-Cohesion: 0.40
-Nodes (5): chat_cmd(), main(), Free-Multi-Agent — interactive CLI (pipelines only inside the TUI).      With no, Interactive TUI (pipelines via /do planner only here)., Context
+### Community 39 - "Chat History Widget"
+Cohesion: 0.15
+Nodes (6): ChatHistory, Restore factory defaults: one role if selected, else all roles., Progress line from the agent loop (called via call_from_thread)., Scrollable chat: Markdown for assistant, fenced code block for user prompts., User prompt as a markdown fenced block (``` ... ```)., Assistant reply as rendered markdown (no role label).
 
-### Community 27 - "MCP Server Tools"
+### Community 40 - "HTML to Text"
 Cohesion: 0.22
-Nodes (15): deep_research.context_compressor → openrouter/tencent/hy3:free, deep_research role config (defaults), deep_research.grounding → cohere/command-a-plus-05-2026, deep_research.safety_filter → groq/gpt-oss-safeguard-20b, deep_research.synthesizer → cohere/command-r-plus-08-2024, deep_research.web_search → groq/compound-mini, agents/ package, Context Compressor (Deep Research) (+7 more)
+Nodes (5): html_to_text(), _HTMLToText, Minimal HTML → visible text (scripts/styles dropped)., HTMLParser, test_html_to_text_strips_scripts()
 
-### Community 28 - "Deep Research Invoke"
-Cohesion: 0.50
-Nodes (4): _providers_used_by_config(), Providers referenced by active System A/B + cli roles., Validate keys only for providers actually used in model_router.yaml roles., validate_api_keys()
-
-### Community 29 - "Synthesizer Citations"
-Cohesion: 0.19
-Nodes (12): GroundedReport, extract_url_set(), Lowercased, slash-stripped URL set for cross-referencing citations., clean_and_parse_synthesizer_report(), extract_urls(), Synthesizer agent for System B (Deep Research).  JSON GroundedReport output; ret, Compatibility wrapper — prefers shared ``extract_url_set``., Clean markdown code blocks and parse content as GroundedReport. (+4 more)
-
-### Community 30 - "CLI Chat Defaults"
+### Community 41 - "Safe Artifact Writes"
 Cohesion: 0.24
-Nodes (11): cli chat/planner config (defaults), cli.chat → groq/openai/gpt-oss-120b, cli.planner → groq/openai/gpt-oss-120b (defaults), cli.use_graphify=true (defaults), cli.planner → mistral/mistral-small-latest (live), cli.use_graphify=true (live), Chat tool-using agent, Graphify knowledge graph (+3 more)
+Nodes (10): _apply_preservation_warnings(), CodeArtifact, Path, Raised when the Coder agent tries to write outside the repo root or     to a pat, Resolve `file_path` against `repo_root` and ensure it can't escape it.      Reje, Validate and write every file in `artifact.files` atomically.      All paths are, Log (and note in summary) if the Coder dropped top-level symbols from existing f, UnsafeFilePathError (+2 more)
 
-### Community 32 - "Prompt Area Input"
+### Community 42 - "Context Compressor"
+Cohesion: 0.17
+Nodes (22): _coerce_history(), extract_user_input(), HandoffError, _present_keys(), Any, PipelineName, Central handoff API for LangGraph agent nodes.  ``transfer_control`` is the **on, Build a LangGraph state patch that records a formal agent handoff.      Paramete (+14 more)
+
+### Community 43 - "Pytest Fixtures"
 Cohesion: 0.18
-Nodes (5): PromptArea, Grow input-row with content; skip no-op height changes., Multi-line prompt: Enter = send, Shift+Enter = newline., Key, TextArea
+Nodes (24): BucketDemand, build_system_estimate(), estimate_all(), format_quota_report(), _limit_and_usage(), _load_benchmarks(), pipeline_role_calls(), _provider_limit() (+16 more)
 
-### Community 33 - "Vibe Role Config"
-Cohesion: 0.20
-Nodes (15): vibe_coding.architect → cohere/command-a-plus-05-2026, vibe_coding.coder → openrouter/cohere/north-mini-code:free, vibe_coding.debugger → openrouter/tencent/hy3:free, vibe_coding role config (defaults), tencent/hy3:free free_until 2026-07-21, vibe_coding role config (live), Architect (Vibe Coding role), Coder (Vibe Coding role) (+7 more)
-
-### Community 34 - "Dependencies LangGraph"
-Cohesion: 0.15
-Nodes (12): graphs/ LangGraph pipelines, LangGraph + SQLite checkpoints, Provider: Cohere, click>=8.1.0, cohere>=5.0.0, gitpython>=3.1.0, langgraph>=0.4.0, langgraph-checkpoint-sqlite>=2.0.0 (+4 more)
-
-### Community 35 - "Code Preserve Merge"
-Cohesion: 0.13
-Nodes (21): Path, _apply_preservation_warnings(), CodeArtifact, Log (and note in summary) if the Coder dropped top-level symbols from existing f, Path, Tests for existing-source preservation helpers and coder merge wiring., Integration-ish: coder_node reads disk before run_coder., test_coder_node_loads_disk_and_calls_run_coder() (+13 more)
-
-### Community 36 - "ModelRouter Core"
-Cohesion: 0.29
-Nodes (7): Path, QuotaTracker, Create the usage table if it doesn't exist yet., Thread-safe, SQLite-backed quota tracker with automatic daily reset.      Usage:, get_router(), Path, QuotaTracker
-
-### Community 37 - "Help PiP Overlay"
-Cohesion: 0.18
-Nodes (12): Any, GroundedReport, find_no_live_search_marker(), Return the first matching marker in *text*, or None if clean., _extract_sources_from_citations(), Grounding agent for System B (Deep Research).  Plain cited prose from the model;, Best-effort extraction of source URLs from Cohere's native citations., Ground the query against search_results; return prose + sources. (+4 more)
-
-### Community 38 - "Providers Overview"
-Cohesion: 0.12
-Nodes (17): Deprecated models list, Providers block (factory defaults), Launch-cwd vs install-tree isolation, config/defaults_model_router.yaml (factory reset), Free-Multi-Agent, Notes, Project layout, Provider: Cerebras (+9 more)
-
-### Community 39 - "GraphRAG Query"
-Cohesion: 0.20
-Nodes (13): _build_planner_context(), _graphify(), File reads + optional graphify for the planner (not every turn blindly)., Query the local knowledge graph (budgeted). Same backend free chat uses., paths_from_graph_snippet(), Best-effort extract source_file paths from a graphify text dump., graph_available(), _local_fallback() (+5 more)
-
-### Community 40 - "Chat History Widgets"
-Cohesion: 0.15
-Nodes (12): EmptyCompletionError, OpenAI, QuotaExhaustedError, Intelligent model router with cascading fallback and quota management.  The rout, Drop the cached default router (e.g. after editing model_router.yaml)., Raised when a provider returns HTTP 200 but empty/whitespace content.      Treat, Raised when every provider in the fallback chain is exhausted., reset_router() (+4 more)
-
-### Community 41 - "Fallback Cascade Config"
+### Community 44 - "TUI Role Selectors"
 Cohesion: 0.22
-Nodes (10): Acyclic fallback cascade design, fallback_cascade (acyclic DAG, defaults), deep_research role config (live), fallback_cascade (live), Live model_router.yaml config, core/agent_config.py, core/ (router, quotas, clients, keys, skills), config/model_router.yaml (live) (+2 more)
+Nodes (6): Changed, ConfigPiP, _models_for_provider(), Full-height side panel; each tab is one scroll (no nested height fight)., True when a Textual :class:`Select` has no real option chosen.      Textual ≥0.x, _select_unset()
 
-### Community 42 - "Vibe Pipeline Invoke"
+### Community 45 - "Tool Approval Handlers"
 Cohesion: 0.18
-Nodes (11): Chat (tool-using agent), cli_app (TUI + tools), cli.py, Doctor profiles, Interactive TUI, Keys & chrome, Outer CLI (no pipelines), Runtime (automatic) (+3 more)
+Nodes (5): MultiAgentApp, Grow input-row with content; skip no-op height changes., Called from PromptArea (Enter)., Chat shell with optional side panel that pushes the main column., Click
 
-### Community 43 - "Web Search Agent"
-Cohesion: 0.24
-Nodes (10): NoLiveSearchError, raise_if_no_live_search(), Shared guards for live web-search verification and URL extraction.  Single sourc, Raised when search output admits it did not perform a live search., Raise ``NoLiveSearchError`` if the result admits it wasn't a real search., _build_safe_query(), Web Search agent for System B (Deep Research).  Provider/model from config/model, Build a short, bounded query string from a list of search terms. (+2 more)
-
-### Community 44 - "Compose Layout Widgets"
-Cohesion: 0.26
-Nodes (7): ApprovalBar, Compact vertical list: bold header + three bordered, centered option rows., ComposeResult, Horizontal, Static, Vertical, VerticalScroll
-
-### Community 45 - "Quotas And Router"
-Cohesion: 0.19
-Nodes (14): check_hy3_expiration(), Warn if tencent/hy3:free is near or past free_until (from YAML cache)., get_agent_config(), get_full_config(), get_max_fix_cycles(), _load(), Any, Path (+6 more)
-
-### Community 47 - "Status Line Widgets"
+### Community 46 - "Help Side Panel"
 Cohesion: 0.13
-Nodes (7): _planner_label(), ConversationSession, Cheap path: update ctx line without rebuilding selects., Update status line. Config selects only when full_config=True., _session_info_text(), _short_cwd(), StatusLine
+Nodes (19): assessment_from_state(), _clip(), DifficultyAssessment, _length_base(), plan_pipeline_difficulties(), Any, Task difficulty scoring (0–100) aligned with systems.md / model_benchmarks.yaml., Heuristic 0–100 assessment (no LLM). Suitable for planners and tests. (+11 more)
 
-### Community 52 - "Approval Bar UI"
-Cohesion: 0.15
-Nodes (5): MultiAgentApp, Progress line from the agent loop (called via call_from_thread)., Called from PromptArea (Enter)., Chat shell with optional side panel that pushes the main column., Click
+### Community 47 - "External Skills Docs"
+Cohesion: 0.25
+Nodes (8): CLI, Format, Global registry, MultiAgent skills, Runtime behaviour, Skill body injection into chat system prompt, SKILL.md format, Skills (policy/workflow) vs Graphify (codebase facts)
 
-### Community 53 - "Global Skills System"
-Cohesion: 0.24
-Nodes (9): Global skills (~/.config/multiagent/), CLI, Format, Global registry, MultiAgent skills, Runtime behaviour, Skill body injection into chat system prompt, SKILL.md format (+1 more)
-
-### Community 54 - "Graphify Workflow"
+### Community 48 - "Graphify Agent Rules"
 Cohesion: 0.50
 Nodes (4): graphify Knowledge Graph (graphify-out/), graphify query / query_graph, graphify update (AST-only refresh), graphify Workflow
 
+### Community 49 - "Architect Agent"
+Cohesion: 0.14
+Nodes (8): estimate_tokens(), Message, Multi-turn conversation context for the interactive CLI.  Tracks messages, estim, Auto-run local compact when usage exceeds *threshold*., Drop middle turns, keep system + recent messages (no LLM).          Returns a hu, Summarize older turns via LLM, keep recent messages intact., Cheap token estimate without tiktoken (≈ 4 chars/token)., test_estimate_tokens_positive()
+
+### Community 51 - "Safety Filter"
+Cohesion: 0.23
+Nodes (17): Map a role to provider/model for ``primary`` or ``fallback`` scenario., resolve_role_endpoint(), _minimal_router(), Path, Tests for live System A/B quota capacity estimates (no real HTTP)., (a) Exhausting a required provider bucket → 0 complete runs., (b) Swapping primary model in YAML changes which bucket is charged., (c) Planner fallback mode bills fallback endpoints for roles that have them. (+9 more)
+
+### Community 61 - "Community 61"
+Cohesion: 0.12
+Nodes (16): Agent handoffs, Default roles (free-durable), Free-durable keys (defaults), Free-Multi-Agent, Model selection, difficulty & reasoning, Notes, Pipelines, Planner (`/do`) (+8 more)
+
+### Community 62 - "Community 62"
+Cohesion: 0.15
+Nodes (13): 0. Live role inventory (primary + fallback), 10. Anti-patterns deliberately avoided, 11. Optional profiles (not default), 12. Key checklist for free-durable defaults, 13. Source map (research), 1. Design goals, 2. Calls per pipeline (budget math), 5. System A — Vibe Coding (role assignments) (+5 more)
+
+### Community 63 - "Community 63"
+Cohesion: 0.21
+Nodes (12): config/cli_toolbox.yaml, Toolbox profile: core, bat (toolbox), eza (toolbox), fd (toolbox), ripgrep (toolbox), core/toolbox.py, Runtime CLI soft-upgrade (+4 more)
+
+### Community 64 - "Community 64"
+Cohesion: 0.24
+Nodes (9): build_graph_augmented_messages(), _local_fallback(), query_graph(), Graph-backed retrieval for the interactive chat.  Queries ``graphify-out/graph.j, Compose a **small** message list for the chat model.      - Does not include the, Return a compact graph traversal for *question*.      Prefers ``graphify query …, Keyword hit list from GRAPH_REPORT + graph.json when CLI is unavailable., _trim() (+1 more)
+
+### Community 65 - "Community 65"
+Cohesion: 0.27
+Nodes (10): CLI context settings, Graphify context integration, Chat host tools, Interactive TUI (multiagent), Planner (/do), agnes-2.0-flash, Agnes AI provider, vibe_coding.architect (+2 more)
+
+### Community 66 - "Community 66"
+Cohesion: 0.27
+Nodes (10): max_fix_cycles, core/router.py, Fallback cascade DAG, codestral-latest, Cerebras provider, Gemini (Google AI Studio) provider, Mistral provider, vibe_coding.coder (+2 more)
+
+### Community 67 - "Community 67"
+Cohesion: 0.22
+Nodes (9): 1. What existed before, 3. Control flow diagrams, 4. Swarm analogy, 5. Failure modes, 6. Model selection handoffs, 7. Extending the protocol, Agent handoff protocol, System A — Vibe Coding (+1 more)
+
+### Community 68 - "Community 68"
+Cohesion: 0.22
+Nodes (9): 3.1 Groq, 3.2 Agnes AI, 3.3 Mistral (La Plateforme Experiment), 3.4 Google AI Studio (Gemini), 3.5 Cohere (Trial), 3.6 Cerebras Inference, 3.7 OpenRouter (`:free` models), 3.8 Ollama (local) (+1 more)
+
+### Community 69 - "Community 69"
+Cohesion: 0.33
+Nodes (7): Free-tier anti-patterns, Free-tier design goals, Free-durable profile, One scarce bucket = one critical role, Optional orchestration profiles, Ollama local provider, OpenRouter provider
+
+### Community 70 - "Community 70"
+Cohesion: 0.33
+Nodes (5): BaseModel, HandoffEnvelope, Any, PipelineName, Optional structured view of the full transfer history for a run.      Graph stat
+
+### Community 71 - "Community 71"
+Cohesion: 0.40
+Nodes (6): looks_non_english(), Any, Cheap check — not a full language detector., Return English text suitable for Systems A/B.      If the text already looks Eng, to_english_for_pipelines(), test_language_helpers()
+
+### Community 72 - "Community 72"
+Cohesion: 0.33
+Nodes (6): _print_quota_capacity_report(), _print_quota_summary(), Legacy one-liner usage dump (still used by brief TUI preflight)., Full System A/B capacity estimate (primary vs fallback scenarios)., Show today's quota usage and estimated full System A/B runs left.      Reads liv, show_quota()
+
+### Community 73 - "Community 73"
+Cohesion: 0.40
+Nodes (6): config/defaults_model_router.yaml (factory), config/model_router.yaml (live), core/agent_config.py, core/quotas.py, Systems orchestration document, Soft quotas vs real limits
+
+### Community 74 - "Community 74"
+Cohesion: 0.33
+Nodes (6): 4.1 Rubric definition (0–100 per area), 4.2 Benchmark scores by model × area, 4.3 Recomendación primario vs fallback por rol, 4.4 Cómo se elige y se usa el modelo en un run (end-to-end), 4. Scoring rubric and model benchmarks (0–100), Critical quota fact (calls ≠ tokens)
+
+### Community 75 - "Community 75"
+Cohesion: 0.33
+Nodes (6): 4.5 Reasoning / thinking effort (same call, no extra RPD), Cascade safety, Difficulty → abstract effort bands, Provider-native kwargs (only capable models), What is **not** thinking mode, When to raise effort vs when to change model
+
+### Community 76 - "Community 76"
+Cohesion: 0.40
+Nodes (5): Chat (tool-using agent), Interactive TUI, Keys & chrome, Outer CLI, Slash commands (inside TUI)
+
+### Community 77 - "Community 77"
+Cohesion: 0.50
+Nodes (4): extract_primary_ok_blocks(), Return ``(url, body)`` pairs for successful host PRIMARY fetches., When PRIMARY OK succeeded, report must not end as Sources: [] / not found., test_merge_host_verified_primary_fixes_empty_denial()
+
+### Community 78 - "Community 78"
+Cohesion: 0.50
+Nodes (4): 2.1 `HandoffRecord` (one transfer), 2.2 Graph state field, 2.3 Official API: `transfer_control`, 2. Formal handoff model
+
 ## Knowledge Gaps
-- **46 isolated node(s):** `install-launcher.sh script`, `Context`, `Any`, `Any`, `ApprovalFn` (+41 more)
+- **99 isolated node(s):** `Any`, `install-launcher.sh script`, `Context`, `Any`, `Any` (+94 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **4 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **5 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `ConversationSession` connect `Session Context Compact` to `External Skills CLI`, `Prompt Area Input`, `TUI App Shell`, `Context Tools Files`, `GraphRAG Query`, `Model Router Config`, `Config PiP UI`, `Slash Commands Chat`, `API Keys Providers`, `Compose Layout Widgets`, `Status Line Widgets`, `Side Panel UI`, `Host Tools Exec`, `Research Safety Compress`, `Approval Bar UI`, `TUI Main Entry`, `Agent Chat Loop`, `Pipeline Graph Tests`?**
-  _High betweenness centrality (0.135) - this node is a cross-community bridge._
-- **Why does `QuotaTracker` connect `ModelRouter Core` to `Quota Tracker SQLite`, `Chat History Widgets`, `Router Fallback Tests`, `Quotas And Router`, `Research Safety Compress`, `Test Executor Node`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
-- **Why does `clear_client_cache()` connect `API Keys Providers` to `Router Fallback Tests`?**
-  _High betweenness centrality (0.040) - this node is a cross-community bridge._
+- **Why does `ConversationSession` connect `CLI Session Context` to `TUI Approval Widgets`, `Config PiP Panel`, `Prompt Area Input`, `Symbol Preserve Logic`, `Skills Registry CLI`, `Chat History Widget`, `Toolbox Catalog`, `TUI Role Selectors`, `Slash Commands`, `TUI App Core`, `Tool Approval Handlers`, `Chat Turn Tools`, `Architect Agent`, `Tool Approval Wait`, `TUI Launch Init`?**
+  _High betweenness centrality (0.061) - this node is a cross-community bridge._
+- **Why does `get_agent_config()` connect `Agent Config Loader` to `Vibe Coding Graph`, `Main CLI Entrypoint`, `Pytest Fixtures`, `Slash Commands`, `Quota Tracker`, `Router Fallback Tests`, `Deep Research Graph`, `Safety Filter`, `Research Pipeline Tests`, `Research Constraints`?**
+  _High betweenness centrality (0.037) - this node is a cross-community bridge._
+- **Why does `is_plausible_source_url()` connect `Deep Research Graph` to `Source Fetch Search`, `Search Guards Scrub`?**
+  _High betweenness centrality (0.035) - this node is a cross-community bridge._
 - **Are the 30 inferred relationships involving `ConversationSession` (e.g. with `Changed` and `Any`) actually correct?**
   _`ConversationSession` has 30 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 2 inferred relationships involving `MultiAgentApp` (e.g. with `ConversationSession` and `ToolCall`) actually correct?**
   _`MultiAgentApp` has 2 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 27 inferred relationships involving `ToolCall` (e.g. with `Changed` and `Any`) actually correct?**
-  _`ToolCall` has 27 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 13 inferred relationships involving `CodeArtifact` (e.g. with `CodeArtifact` and `TechnicalSpec`) actually correct?**
-  _`CodeArtifact` has 13 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 18 inferred relationships involving `DifficultyAssessment` (e.g. with `Any` and `date`) actually correct?**
+  _`DifficultyAssessment` has 18 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 16 inferred relationships involving `QuotaTracker` (e.g. with `BucketDemand` and `Any`) actually correct?**
+  _`QuotaTracker` has 16 INFERRED edges - model-reasoned connections that need verification._

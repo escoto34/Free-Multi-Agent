@@ -29,6 +29,13 @@ from agents.vibe_coding.preserve import (
 )
 from agents.vibe_coding.test_runner import execute_vibe_tests
 from core.agent_config import get_max_fix_cycles
+from core.difficulty_scorer import (
+    assessment_from_state,
+    assessments_to_state_dict,
+    plan_pipeline_difficulties,
+)
+from core.handoff import HandoffError, transfer_control
+from core.model_selector import record_model_selection_handoff, select_for_role
 from core.runs import get_run_history
 from schemas.requests import VibeCodingRequest
 from schemas.vibe_coding import CodeArtifact, DebugReport, TechnicalSpec
@@ -51,7 +58,13 @@ _FAILED_ARTIFACT_DIR = (
 
 
 class VibeCodingState(TypedDict):
-    """LangGraph state representation for the Vibe Coding pipeline."""
+    """LangGraph state representation for the Vibe Coding pipeline.
+
+    Domain fields (``spec``, ``artifact``, …) hold intermediate agent
+    outputs. ``handoff_history`` is the formal Swarm-style audit trail of
+    control transfers (see ``core.handoff.transfer_control`` and
+    ``docs/handoff_protocol.md``).
+    """
 
     idea: str
     spec: Optional[TechnicalSpec]
@@ -62,6 +75,9 @@ class VibeCodingState(TypedDict):
     git_checkpoint_sha: Optional[str]
     user_wip_stashed: bool
     error: Optional[str]
+    handoff_history: list
+    difficulty_by_role: Optional[dict]
+    last_model_selection: Optional[dict]
 
 
 # ---------------------------------------------------------------------------
@@ -177,16 +193,44 @@ def architect_node(state: VibeCodingState) -> dict[str, Any]:
             user_wip_stashed = stash_preexisting_work(repo)
             sha = repo.head.commit.hexsha
 
+        # Planner-side difficulty scores for downstream roles (coder/debugger)
+        # before control is handed off — structured 0–100, not free text.
+        diff_plan = plan_pipeline_difficulties(
+            state["idea"], pipeline="vibe_coding"
+        )
+        difficulty_by_role = assessments_to_state_dict(diff_plan)
+
         spec = run_architect(state["idea"])
-        return {
-            "spec": spec,
-            "git_checkpoint_sha": sha,
-            "user_wip_stashed": user_wip_stashed,
-            "error": None,
-        }
+        return transfer_control(
+            state,
+            from_agent="architect",
+            to_agent="coder",
+            reason="TechnicalSpec ready for implementation",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={
+                "spec": spec,
+                "git_checkpoint_sha": sha,
+                "user_wip_stashed": user_wip_stashed,
+                "error": None,
+                "difficulty_by_role": difficulty_by_role,
+            },
+            require_keys=["spec"],
+        )
+    except HandoffError:
+        raise
     except Exception as exc:
         logger.error("Architect node failed: %s", exc)
-        return {"error": f"Architect error: {exc}"}
+        return transfer_control(
+            state,
+            from_agent="architect",
+            to_agent="git_rollback",
+            reason="Architect failed; abort code loop",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={"error": f"Architect error: {exc}"},
+            note=str(exc),
+        )
 
 
 class UnsafeFilePathError(Exception):
@@ -338,16 +382,80 @@ def coder_node(state: VibeCodingState) -> dict[str, Any]:
                 files_to_create=spec.files_to_create,
             )
 
-        artifact = run_coder(work_spec, existing_files=existing)
+        # Difficulty-based primary vs fallback (must handoff via transfer_control)
+        assess = assessment_from_state(
+            state.get("difficulty_by_role"),
+            role_short="coder",
+            task_text=state.get("idea") or "",
+            role_path="vibe_coding.coder",
+        )
+        selection = select_for_role("vibe_coding", "coder", assessment=assess)
+        state_for_call: dict[str, Any] = dict(state)
+        if selection.used_fallback or selection.forced_expiry:
+            state_for_call = {
+                **state_for_call,
+                **record_model_selection_handoff(
+                    state_for_call,
+                    selection,
+                    role="coder",
+                    user_input_key="idea",
+                    pipeline="vibe_coding",
+                ),
+            }
+        else:
+            # Still audit which model the selector chose
+            state_for_call = {
+                **state_for_call,
+                **record_model_selection_handoff(
+                    state_for_call,
+                    selection,
+                    role="coder",
+                    user_input_key="idea",
+                    pipeline="vibe_coding",
+                ),
+            }
+
+        sel_out: dict[str, Any] = {}
+        artifact = run_coder(
+            work_spec,
+            existing_files=existing,
+            assessment=assess,
+            selection_out=sel_out,
+        )
         artifact = _apply_preservation_warnings(existing, artifact)
 
         written = _write_artifact_files(artifact, repo_root)
         logger.info("Coder wrote %d file(s) under %s", len(written), repo_root)
 
-        return {"artifact": artifact, "error": None}
+        return transfer_control(
+            state_for_call,
+            from_agent="coder",
+            to_agent="test_executor",
+            reason="CodeArtifact written; run project-local tests",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={
+                "artifact": artifact,
+                "error": None,
+                "last_model_selection": selection.as_dict(),
+            },
+            require_keys=["spec", "artifact"],
+            note=f"wrote {len(written)} file(s); model={selection.provider}/{selection.model}",
+        )
+    except HandoffError:
+        raise
     except Exception as exc:
         logger.error("Coder node failed: %s", exc)
-        return {"error": f"Coder error: {exc}"}
+        return transfer_control(
+            state,
+            from_agent="coder",
+            to_agent="git_rollback",
+            reason="Coder failed; abort code loop",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={"error": f"Coder error: {exc}"},
+            note=str(exc),
+        )
 
 
 def test_executor_node(state: VibeCodingState) -> dict[str, Any]:
@@ -361,7 +469,18 @@ def test_executor_node(state: VibeCodingState) -> dict[str, Any]:
     logger.info("--- TEST EXECUTOR NODE ---")
     spec = state["spec"]
     if not spec:
-        return {"test_logs": "No spec to run tests against.", "error": "No spec"}
+        return transfer_control(
+            state,
+            from_agent="test_executor",
+            to_agent="debugger",
+            reason="No TechnicalSpec available; debugger will see empty context",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={
+                "test_logs": "No spec to run tests against.",
+                "error": "No spec",
+            },
+        )
 
     repo_root = _resolve_repo_root()
     artifact = state.get("artifact")
@@ -373,14 +492,48 @@ def test_executor_node(state: VibeCodingState) -> dict[str, Any]:
             idea=idea,
             repo_root=repo_root,
         )
-        logger.info(
-            "Test execution finished (overall %s)",
-            "PASS" if logs.startswith("OVERALL: PASS") else "FAIL",
+        overall = "PASS" if logs.startswith("OVERALL: PASS") else "FAIL"
+        logger.info("Test execution finished (overall %s)", overall)
+        return transfer_control(
+            state,
+            from_agent="test_executor",
+            to_agent="debugger",
+            reason=f"Tests finished ({overall}); debugger evaluates logs",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={"test_logs": logs, "error": None},
+            require_keys=["spec"],
         )
-        return {"test_logs": logs, "error": None}
     except Exception as exc:
         logger.warning("Test executor error: %s", exc)
-        return {"test_logs": f"Execution failed: {exc}", "error": None}
+        return transfer_control(
+            state,
+            from_agent="test_executor",
+            to_agent="debugger",
+            reason="Test runner raised; pass failure text to debugger",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={"test_logs": f"Execution failed: {exc}", "error": None},
+            note=str(exc),
+        )
+
+
+def _debugger_next_agent(
+    dr: DebugReport,
+    *,
+    attempts: int,
+    max_cycles: int,
+    has_artifact: bool,
+) -> str:
+    """Mirror ``debugger_routing`` so the handoff names the real next hop."""
+    hard_ceiling = max(max_cycles * 2, max_cycles + 1)
+    if dr.passed:
+        return "git_commit"
+    if attempts >= max_cycles or attempts >= hard_ceiling:
+        return "git_rollback"
+    if not has_artifact:
+        return "git_rollback"
+    return "coder"
 
 
 def debugger_node(state: VibeCodingState) -> dict[str, Any]:
@@ -399,18 +552,46 @@ def debugger_node(state: VibeCodingState) -> dict[str, Any]:
 
     if not artifact:
         logger.error("Debugger: no artifact (attempt %d/%d)", attempts, max_cycles)
-        return {
-            "debug_report": DebugReport(
-                passed=False,
-                issues=["No code artifact to debug."],
-                suggested_fix=None,
+        dr = DebugReport(
+            passed=False,
+            issues=["No code artifact to debug."],
+            suggested_fix=None,
+        )
+        return transfer_control(
+            state,
+            from_agent="debugger",
+            to_agent=_debugger_next_agent(
+                dr, attempts=attempts, max_cycles=max_cycles, has_artifact=False
             ),
-            "fix_attempts": attempts,
-            "error": "No code artifact to debug.",
-        }
+            reason="No artifact to debug; hand off toward rollback",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={
+                "debug_report": dr,
+                "fix_attempts": attempts,
+                "error": "No code artifact to debug.",
+            },
+        )
 
     try:
-        dr = run_debugger(artifact, test_logs)
+        assess = assessment_from_state(
+            state.get("difficulty_by_role"),
+            role_short="debugger",
+            task_text=(state.get("idea") or "") + "\n" + test_logs[:2000],
+            role_path="vibe_coding.debugger",
+        )
+        selection = select_for_role("vibe_coding", "debugger", assessment=assess)
+        state_for_call: dict[str, Any] = {
+            **dict(state),
+            **record_model_selection_handoff(
+                state,
+                selection,
+                role="debugger",
+                user_input_key="idea",
+                pipeline="vibe_coding",
+            ),
+        }
+        dr = run_debugger(artifact, test_logs, assessment=assess)
         logger.info(
             "Debugger Result: passed=%s, issues=%d, attempts=%d/%d",
             dr.passed,
@@ -418,26 +599,58 @@ def debugger_node(state: VibeCodingState) -> dict[str, Any]:
             attempts,
             max_cycles,
         )
-        return {
-            "debug_report": dr,
-            "fix_attempts": attempts,
-            "error": None,
-        }
+        next_agent = _debugger_next_agent(
+            dr, attempts=attempts, max_cycles=max_cycles, has_artifact=True
+        )
+        if dr.passed:
+            reason = "Tests passed; transfer to git_commit"
+        elif next_agent == "coder":
+            reason = f"Tests failed; fix cycle {attempts}/{max_cycles} → coder"
+        else:
+            reason = f"Fix budget exhausted ({attempts}/{max_cycles}); rollback"
+        return transfer_control(
+            state_for_call,
+            from_agent="debugger",
+            to_agent=next_agent,
+            reason=reason,
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={
+                "debug_report": dr,
+                "fix_attempts": attempts,
+                "error": None,
+                "last_model_selection": selection.as_dict(),
+            },
+            require_keys=["debug_report"],
+        )
     except Exception as exc:
         logger.error("Debugger node failed (attempt %d/%d): %s", attempts, max_cycles, exc)
         # Still count the attempt so the graph cannot spin forever.
-        return {
-            "debug_report": DebugReport(
-                passed=False,
-                issues=[f"Debugger agent error: {exc}"],
-                suggested_fix=(
-                    "Debugger failed to analyze results. Simplify the change set "
-                    "and ensure tests are runnable."
-                ),
+        dr = DebugReport(
+            passed=False,
+            issues=[f"Debugger agent error: {exc}"],
+            suggested_fix=(
+                "Debugger failed to analyze results. Simplify the change set "
+                "and ensure tests are runnable."
             ),
-            "fix_attempts": attempts,
-            "error": f"Debugger error: {exc}",
-        }
+        )
+        next_agent = _debugger_next_agent(
+            dr, attempts=attempts, max_cycles=max_cycles, has_artifact=True
+        )
+        return transfer_control(
+            state,
+            from_agent="debugger",
+            to_agent=next_agent,
+            reason="Debugger agent error; still count attempt and route",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={
+                "debug_report": dr,
+                "fix_attempts": attempts,
+                "error": f"Debugger error: {exc}",
+            },
+            note=str(exc),
+        )
 
 
 def git_commit_node(state: VibeCodingState) -> dict[str, Any]:
@@ -449,9 +662,25 @@ def git_commit_node(state: VibeCodingState) -> dict[str, Any]:
         # Re-apply any user WIP that was stashed at the start of the run.
         if state.get("user_wip_stashed"):
             restore_preexisting_work(repo)
-        return {"git_checkpoint_sha": sha}
+        return transfer_control(
+            state,
+            from_agent="git_commit",
+            to_agent="END",
+            reason="Successful vibe run committed; pipeline complete",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={"git_checkpoint_sha": sha},
+        )
     logger.warning("Skipping Git commit node: No Git repo found.")
-    return {}
+    return transfer_control(
+        state,
+        from_agent="git_commit",
+        to_agent="END",
+        reason="No git repo; end without commit SHA update",
+        pipeline="vibe_coding",
+        user_input_key="idea",
+        updates={},
+    )
 
 
 def _snapshot_failed_artifact(state: VibeCodingState) -> Optional[str]:
@@ -511,7 +740,16 @@ def git_rollback_node(state: VibeCodingState) -> dict[str, Any]:
             restore_preexisting_work(repo)
     else:
         logger.warning("Skipping Git rollback: Repo or checkpoint SHA missing.")
-    return {}
+    return transfer_control(
+        state,
+        from_agent="git_rollback",
+        to_agent="END",
+        reason="Exhausted fix cycles or fatal error; tree restored, pipeline end",
+        pipeline="vibe_coding",
+        user_input_key="idea",
+        updates={},
+        note=f"snapshot={snap}" if snap else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +809,9 @@ def initial_vibe_coding_state(idea: str) -> VibeCodingState:
         "git_checkpoint_sha": None,
         "user_wip_stashed": False,
         "error": None,
+        "handoff_history": [],
+        "difficulty_by_role": None,
+        "last_model_selection": None,
     }
 
 

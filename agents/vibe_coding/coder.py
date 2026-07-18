@@ -75,6 +75,10 @@ def run_coder(
     spec: TechnicalSpec,
     router_instance=None,
     existing_files: Optional[dict[str, str]] = None,
+    assessment=None,
+    selection_out=None,
+    task_text: Optional[str] = None,
+    **runtime_kwargs,
 ) -> CodeArtifact:
     """Implement the TechnicalSpec, merging into *existing_files* when present."""
     existing_files = existing_files or {}
@@ -94,4 +98,8 @@ def run_coder(
         messages=messages,
         schema=CodeArtifact,
         router_instance=router_instance,
+        assessment=assessment,
+        selection_out=selection_out,
+        task_text=task_text or prompt_payload,
+        **runtime_kwargs,
     )

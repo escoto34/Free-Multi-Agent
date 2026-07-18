@@ -74,6 +74,9 @@ def run_context_compressor(
     query: str,
     router_instance=None,
     fallback_override: Optional[dict[str, str]] = None,
+    assessment=None,
+    selection_out=None,
+    **runtime_kwargs,
 ) -> CondensedTrends:
     """Extract search terms + research profile from the research query."""
     heuristic = classify_research(query)
@@ -95,6 +98,10 @@ def run_context_compressor(
         schema=CondensedTrends,
         router_instance=router_instance,
         fallback_override=fallback_override,
+        assessment=assessment,
+        selection_out=selection_out,
+        task_text=query,
+        **runtime_kwargs,
     )
 
     # Defensive normalization — never trust the model alone.

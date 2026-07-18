@@ -21,8 +21,7 @@ from agents.deep_research.research_types import (
     report_outline_hints,
     research_profile_block,
 )
-from core.agent_config import get_agent_config
-from core.agent_runtime import invoke_router, strip_fences
+from core.agent_runtime import run_role_raw, strip_fences
 from core.search_guards import (
     extract_urls,
     scrub_ungrounded_claims,
@@ -143,15 +142,14 @@ def run_synthesizer(
         },
     ]
 
-    cfg = get_agent_config("deep_research", "synthesizer")
-
     def _call(msgs: list) -> GroundedReport:
-        resp = invoke_router(
-            router_instance,
-            provider=cfg["provider"],
-            model=cfg["model"],
+        # run_role_raw applies difficulty selection + reasoning_effort for
+        # gpt-oss (min medium for synthesizer) without an extra quota call.
+        resp = run_role_raw(
+            "deep_research",
+            "synthesizer",
             messages=msgs,
-            fallback=cfg.get("fallback"),
+            router_instance=router_instance,
             max_tokens=8192,
         )
         return clean_and_parse_synthesizer_report(

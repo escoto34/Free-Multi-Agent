@@ -103,17 +103,23 @@ def plan_pipelines(
     ]
 
     if provider and model:
-        from core.agent_runtime import invoke_router
-        from core.agent_runtime import strip_fences
+        # Explicit provider/model (tests): still score difficulty for reasoning kwargs.
+        from core.agent_runtime import invoke_router, strip_fences
+        from core.difficulty_scorer import score_task_difficulty
 
         cfg = get_agent_config("cli", "planner")
         fb = cfg.get("fallback") if isinstance(cfg, dict) else None
+        assess = score_task_difficulty(
+            user_body, role_path="cli.planner", subtask="planner"
+        )
         resp = invoke_router(
             router_instance,
             provider=provider,
             model=model,
             messages=messages,
             fallback=fb,
+            assessment=assess,
+            role_path="cli.planner",
         )
         return PipelinePlan.model_validate_json(strip_fences(resp.content))
 

@@ -259,14 +259,14 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
     # 1. Setup agent mocks
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_safety_filter",
-        lambda query: (
+        lambda query, *args, **kwargs: (
             calls.update({"safety": calls["safety"] + 1})
             or SafetyClassification(is_safe=True)
         ),
     )
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_context_compressor",
-        lambda query: (
+        lambda query, *args, **kwargs: (
             calls.update({"compressor": calls["compressor"] + 1})
             or CondensedTrends(technologies=["AI"], rationale="test")
         ),
@@ -312,6 +312,8 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
     graph = get_deep_research_graph(db_path=db_file)
     config = {"configurable": {"thread_id": "thread-123"}}
 
+    # handoff_history is required by DeepResearchState (Swarm-style audit trail);
+    # resume still works because the checkpointer stores the full state including it.
     initial_state = {
         "query": "Quantum AI",
         "safety": None,
@@ -320,6 +322,9 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
         "grounded_report": None,
         "final_report": None,
         "error": None,
+        "handoff_history": [],
+        "difficulty_by_role": None,
+        "last_model_selection": None,
     }
 
     with pytest.raises(ValueError) as exc:
@@ -351,3 +356,10 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
     assert calls["web_search"] == 1    # Stays at 1 (not re-run)
     assert calls["grounding"] == 2      # Incremented from 1 to 2 (re-run from failure point)
     assert calls["synthesizer"] == 1    # Incremented from 0 to 1 (run for the first time)
+
+    # Formal handoffs must preserve the original user query end-to-end
+    history = final_state.get("handoff_history") or []
+    assert len(history) >= 4  # safety, compressor, search, grounding, synth (partial if crash mid-way)
+    assert all(h.get("user_input") == "Quantum AI" for h in history)
+    assert history[-1]["from_agent"] == "synthesizer"
+    assert history[-1]["to_agent"] == "END"

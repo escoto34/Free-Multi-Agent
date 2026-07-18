@@ -40,6 +40,9 @@ def run_debugger(
     test_logs: str,
     router_instance=None,
     fallback_override: Optional[dict[str, str]] = None,
+    assessment=None,
+    selection_out=None,
+    **runtime_kwargs,
 ) -> DebugReport:
     """Review code and test logs; return pass/fail + fix suggestion."""
     # Cap source dump so free models do not truncate the JSON schema reply
@@ -64,4 +67,8 @@ def run_debugger(
         schema=DebugReport,
         router_instance=router_instance,
         fallback_override=fallback_override,
+        assessment=assessment,
+        selection_out=selection_out,
+        task_text=prompt_payload,
+        **runtime_kwargs,
     )

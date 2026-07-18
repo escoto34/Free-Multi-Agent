@@ -54,6 +54,7 @@ from openai import APIStatusError, OpenAI
 
 from core.clients import get_client
 from core.quotas import QuotaTracker
+from core.reasoning_params import sanitize_call_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -142,10 +143,23 @@ class ModelRouter:
         messages: list[dict[str, str]],
         **kwargs: Any,
     ) -> tuple[str, Any]:
+        # Groq reasoning params (reasoning_effort, include_reasoning, …) are
+        # valid on the wire but not always typed on the OpenAI SDK — move them
+        # into extra_body so create() does not raise TypeError.
+        from core.reasoning_params import REASONING_KWARG_KEYS
+
+        call_kwargs = dict(kwargs)
+        extra = dict(call_kwargs.pop("extra_body", None) or {})
+        for key in list(call_kwargs.keys()):
+            if key in REASONING_KWARG_KEYS:
+                extra[key] = call_kwargs.pop(key)
+        if extra:
+            call_kwargs["extra_body"] = extra
+
         response = client.chat.completions.create(
             model=model,
             messages=messages,
-            **kwargs,
+            **call_kwargs,
         )
         content = response.choices[0].message.content or ""
         return content, response
@@ -185,19 +199,35 @@ class ModelRouter:
     ) -> tuple[str, Any]:
         """Route the call to the correct provider backend.
 
+        Reasoning kwargs are sanitized per model so a cascade hop never
+        forwards ``reasoning_effort`` to providers that reject it.
+
         Raises:
             EmptyCompletionError: if the provider returned HTTP 200 but the
                 completion content is empty or whitespace-only.
         """
         client = get_client(provider)
 
+        # Copy so retries / cascade still see internal control keys.
+        raw_kwargs = dict(kwargs)
+        assessment = raw_kwargs.pop("_difficulty_assessment", None)
+        role_path = str(raw_kwargs.pop("_role_path", "") or "")
+        safe_kwargs = sanitize_call_kwargs(
+            provider,
+            model,
+            raw_kwargs,
+            assessment=assessment,
+            role_path=role_path,
+            reapply=True,
+        )
+
         if provider == "cohere":
-            documents = kwargs.pop("documents", None)
+            documents = safe_kwargs.pop("documents", None)
             content, raw = self._call_cohere_v2(
-                client, model, messages, documents=documents, **kwargs
+                client, model, messages, documents=documents, **safe_kwargs
             )
         else:
-            clean = {k: v for k, v in kwargs.items() if k not in ("documents",)}
+            clean = {k: v for k, v in safe_kwargs.items() if k not in ("documents",)}
             content, raw = self._call_openai_compatible(
                 client, model, messages, **clean
             )
@@ -425,6 +455,8 @@ class ModelRouter:
             reason,
         )
 
+        # Keep internal assessment/role_path so the next hop can re-map
+        # reasoning effort for *its* model (or strip if unsupported).
         response = self.call_agent(
             provider=fb_provider,
             model=fb_model,

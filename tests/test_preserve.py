@@ -90,7 +90,7 @@ def test_coder_node_loads_disk_and_calls_run_coder(tmp_path: Path, monkeypatch):
 
     seen: dict = {}
 
-    def fake_coder(spec, router_instance=None, existing_files=None):
+    def fake_coder(spec, router_instance=None, existing_files=None, **kwargs):
         seen["existing"] = existing_files
         return CodeArtifact(
             files={
@@ -122,6 +122,9 @@ def test_coder_node_loads_disk_and_calls_run_coder(tmp_path: Path, monkeypatch):
         "git_checkpoint_sha": None,
         "user_wip_stashed": False,
         "error": None,
+        "handoff_history": [],
+        "difficulty_by_role": None,
+        "last_model_selection": None,
     }
     out = coder_node(state)
     assert out.get("error") is None

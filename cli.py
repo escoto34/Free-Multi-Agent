@@ -85,19 +85,21 @@ def validate_api_keys() -> None:
 
 
 def check_hy3_expiration() -> None:
-    """Warn if tencent/hy3:free is near or past free_until (from YAML cache)."""
-    try:
-        free_until_str = get_agent_config("vibe_coding", "debugger").get("free_until")
-        if not free_until_str:
-            free_until_str = get_agent_config(
-                "deep_research", "context_compressor"
-            ).get("free_until")
-        if not free_until_str:
-            return
+    """Warn if tencent/hy3:free is near or past free_until.
 
-        expiration_date = date.fromisoformat(free_until_str)
+    Uses ``config/model_benchmarks.yaml`` (and role free_until if set).
+    After expiry, ``core.model_selector`` auto-routes away from hy3 to
+    ``expired_fallback`` (gpt-oss-120b) without editing YAML.
+    """
+    try:
+        from core.model_selector import hy3_status
+
+        st = hy3_status()
         today = date.today()
-        delta_days = (expiration_date - today).days
+        expiration_date = date.fromisoformat(st["free_until"])
+        delta_days = int(st["days_remaining"])
+        fb = st.get("expired_fallback") or {}
+        fb_label = f"{fb.get('provider', 'groq')}/{fb.get('model', 'openai/gpt-oss-120b')}"
 
         click.secho("=" * 70, fg="blue")
         click.secho(
@@ -110,7 +112,8 @@ def check_hy3_expiration() -> None:
             click.secho(
                 f"⚠️ WARNING: tencent/hy3:free expires in {delta_days} day(s) "
                 f"(on {expiration_date.isoformat()})!\n"
-                f"Edit config/model_router.yaml to switch models; no Python changes needed.",
+                f"After expiry, model_selector auto-switches to {fb_label} "
+                f"(no manual YAML edit required).",
                 fg="yellow",
                 bold=True,
             )
@@ -118,7 +121,7 @@ def check_hy3_expiration() -> None:
             click.secho(
                 f"⚠️ WARNING: tencent/hy3:free EXPIRED {abs(delta_days)} day(s) ago "
                 f"(on {expiration_date.isoformat()})!\n"
-                f"Fallback cascade (e.g. gpt-oss-120b on Groq) will be used when primary fails.",
+                f"Scoring/selection skips hy3 and uses {fb_label} automatically.",
                 fg="red",
                 bold=True,
             )
@@ -133,6 +136,7 @@ def check_hy3_expiration() -> None:
 
 
 def _print_quota_summary() -> None:
+    """Legacy one-liner usage dump (still used by brief TUI preflight)."""
     router = get_router()
     summary = router.quota.status_summary()
     if not summary:
@@ -143,6 +147,15 @@ def _print_quota_summary() -> None:
         click.echo(
             f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}"
         )
+
+
+def _print_quota_capacity_report() -> None:
+    """Full System A/B capacity estimate (primary vs fallback scenarios)."""
+    from core.quota_estimate import format_quota_report
+    from core.router import get_router
+
+    report_text = format_quota_report(tracker=get_router().quota)
+    click.echo(report_text)
 
 
 @click.group(invoke_without_command=True)
@@ -158,9 +171,24 @@ def main(ctx: click.Context) -> None:
 
 
 @main.command(name="quota")
-def show_quota() -> None:
-    """Show today's free-tier quota usage (from data/quotas.db)."""
-    _print_quota_summary()
+@click.option(
+    "--brief",
+    is_flag=True,
+    help="Only show raw usage counters (old short format).",
+)
+def show_quota(brief: bool) -> None:
+    """Show today's quota usage and estimated full System A/B runs left.
+
+    Reads live roles from config/model_router.yaml and soft-caps from
+    providers.* — not hardcoded model lists. Shows two scenarios:
+
+    * all roles on primary models
+    * planner worst-case: every role with a fallback uses that fallback
+    """
+    if brief:
+        _print_quota_summary()
+        return
+    _print_quota_capacity_report()
 
 
 @main.command(name="history")
@@ -331,6 +359,27 @@ def providers_cmd() -> None:
 @main.command(name="chat")
 def chat_cmd() -> None:
     """Interactive TUI (pipelines via /do planner only here)."""
+    # Preflight capacity snapshot (same live estimate as `multiagent quota`)
+    try:
+        from core.quota_estimate import build_system_estimate
+        from core.router import get_router
+
+        qt = get_router().quota
+        a = build_system_estimate(
+            "vibe_coding", scenario="primary", tracker=qt, reload=True
+        )
+        b = build_system_estimate(
+            "deep_research", scenario="primary", tracker=qt, reload=False
+        )
+        click.secho(
+            f"Quota preflight — typical full runs left today (primary): "
+            f"System A ≈ {a.runs_remaining}, System B ≈ {b.runs_remaining}  "
+            f"(details: multiagent quota)",
+            fg="cyan",
+        )
+    except Exception as exc:
+        click.secho(f"(quota preflight skipped: {exc})", fg="yellow")
+
     try:
         from cli_app.tui import run_app
     except ImportError as exc:

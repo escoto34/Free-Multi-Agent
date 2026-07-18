@@ -45,6 +45,7 @@ from core.config_editor import (
     known_providers,
     list_roles,
     reset_role_to_default,
+    reset_to_defaults,
     set_role,
 )
 from core.keys import get_key_status, set_api_key
@@ -77,6 +78,29 @@ def _invalidate_option_caches() -> None:
     _planner_opts_cache = None
     _known_providers_cache = None
     _models_cache.clear()
+
+
+def _select_unset(value: object) -> bool:
+    """True when a Textual :class:`Select` has no real option chosen.
+
+    Textual ≥0.x uses ``Select.NULL`` (a truthy ``NoSelection`` singleton).
+    Older docs/code referred to ``Select.BLANK``; in current Textual
+    ``Select.BLANK`` may be missing or equal to ``False``, so
+    ``value is Select.BLANK or not value`` **does not** catch ``Select.NULL``
+    and ``str(Select.NULL)`` becomes ``\"Select.NULL\"`` — which then looks
+    like a role id (``Select`` / ``NULL``) and blows up config_editor.
+    """
+    if value is None or value is False:
+        return True
+    for name in ("NULL", "BLANK"):
+        sentinel = getattr(Select, name, None)
+        if sentinel is not None and value is sentinel:
+            return True
+    # Defensive: stringified sentinel / empty label
+    text = str(value).strip() if value is not None else ""
+    if not text or text in ("Select.NULL", "Select.BLANK", "None"):
+        return True
+    return False
 
 
 def _provider_options() -> list[tuple[str, str]]:
@@ -808,7 +832,7 @@ class ConfigPiP(SidePanel):
     def _refresh_role_model_options(self, provider: str | None = None) -> None:
         if provider is None:
             sel = self.query_one("#sel-role-provider", Select)
-            if sel.value is Select.BLANK or not sel.value:
+            if _select_unset(sel.value):
                 models: list[str] = []
             else:
                 models = _models_for_provider(str(sel.value))
@@ -823,7 +847,7 @@ class ConfigPiP(SidePanel):
         sel = self.query_one("#sel-role-model", Select)
         custom = self.query_one("#inp-role-model", Input).value.strip()
         val = sel.value
-        if val is Select.BLANK or val == _CUSTOM_MODEL or not val:
+        if _select_unset(val) or val == _CUSTOM_MODEL:
             return custom
         if custom and custom != str(val):
             return custom
@@ -1236,7 +1260,7 @@ class MultiAgentApp(App[None]):
     def on_apply_planner(self) -> None:
         sel = self.query_one("#sel-planner", Select)
         val = sel.value
-        if val is Select.BLANK or not val:
+        if _select_unset(val):
             self._log_meta("pick a planner model first")
             return
         prov, model = str(val).split("::", 1)
@@ -1249,7 +1273,7 @@ class MultiAgentApp(App[None]):
     def on_save_key(self) -> None:
         prov = self.query_one("#sel-key-provider", Select).value
         key = self.query_one("#inp-key", Input).value.strip()
-        if prov is Select.BLANK or not prov:
+        if _select_unset(prov):
             self._log_meta("pick a provider")
             return
         if not key:
@@ -1269,7 +1293,7 @@ class MultiAgentApp(App[None]):
         import os as _os
 
         prov = self.query_one("#sel-key-provider", Select).value
-        if prov is Select.BLANK or not prov:
+        if _select_unset(prov):
             self._log_meta("pick a provider to clear")
             return
         env_map = provider_env_map()
@@ -1293,10 +1317,10 @@ class MultiAgentApp(App[None]):
         role_id = self.query_one("#sel-role", Select).value
         prov = self.query_one("#sel-role-provider", Select).value
         model = pip.resolve_role_model()
-        if role_id is Select.BLANK or not role_id:
+        if _select_unset(role_id):
             self._log_meta("pick a role")
             return
-        if prov is Select.BLANK or not prov or not model:
+        if _select_unset(prov) or not model:
             self._log_meta("pick provider and model id")
             return
         system, role = str(role_id).split(".", 1)
@@ -1321,28 +1345,35 @@ class MultiAgentApp(App[None]):
 
     @on(Button.Pressed, "#btn-role-default")
     def on_role_default(self) -> None:
+        """Restore factory defaults: one role if selected, else all roles."""
         role_id = self.query_one("#sel-role", Select).value
-        if role_id is Select.BLANK or not role_id:
-            self._log_meta("pick a role to restore default")
-            return
-        system, role = str(role_id).split(".", 1)
         try:
-            node = reset_role_to_default(system, role)
-            if "max_fix_cycles" in node:
+            if _select_unset(role_id):
+                # No role selected → full free-durable factory snapshot
+                reset_to_defaults()
                 self._log_meta(
-                    f"{role_id} → default max_fix_cycles={node['max_fix_cycles']}"
+                    "all roles → system defaults "
+                    "(defaults_model_router.yaml)"
                 )
             else:
-                self._log_meta(
-                    f"{role_id} → default {node.get('provider')}/{node.get('model')}"
-                )
+                system, role = str(role_id).split(".", 1)
+                node = reset_role_to_default(system, role)
+                if "max_fix_cycles" in node:
+                    self._log_meta(
+                        f"{role_id} → default max_fix_cycles={node['max_fix_cycles']}"
+                    )
+                else:
+                    self._log_meta(
+                        f"{role_id} → default "
+                        f"{node.get('provider')}/{node.get('model')}"
+                    )
         except Exception as exc:
             self._log_error(str(exc))
         self._refresh_chrome(full_config=True)
 
     @on(Select.Changed, "#sel-role")
     def on_role_selected(self, event: Select.Changed) -> None:
-        if event.value is Select.BLANK:
+        if _select_unset(event.value):
             return
         rid = str(event.value)
         for row in list_roles():
@@ -1376,7 +1407,7 @@ class MultiAgentApp(App[None]):
 
     @on(Select.Changed, "#sel-role-provider")
     def on_role_provider_changed(self, event: Select.Changed) -> None:
-        if event.value is Select.BLANK:
+        if _select_unset(event.value):
             return
         try:
             self.query_one(ConfigPiP)._refresh_role_model_options(str(event.value))
@@ -1389,7 +1420,7 @@ class MultiAgentApp(App[None]):
 
     @on(Select.Changed, "#sel-role-model")
     def on_role_model_changed(self, event: Select.Changed) -> None:
-        if event.value is Select.BLANK or event.value == _CUSTOM_MODEL:
+        if _select_unset(event.value) or event.value == _CUSTOM_MODEL:
             return
         try:
             self.query_one("#inp-role-model", Input).value = str(event.value)

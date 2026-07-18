@@ -1,10 +1,19 @@
+# Factory defaults — free-durable orchestration (mid-2026).
+# Live overrides: config/model_router.yaml (same shape). Reset: multiagent config reset
+#
+# Design goals:
+#   - Spread scarce free buckets (Cohere ~28/day, OpenRouter :free ~50 RPD shared)
+#   - Use Agnes free text (agnes-2.0-flash, ~20 RPM fair-use) for high-volume roles
+#   - Groq per-model ~1k RPD; compound-mini ~250 RPD for web_search only
+#   - Codestral for coding; Cohere only for grounding; no hy3/openrouter on hot path
 providers:
   groq:
     base_url: https://api.groq.com/openai/v1
     env_key: GROQ_API_KEY
     signup: https://console.groq.com/keys
-    notes: Free ~1000 RPD/model (gpt-oss family). compound-mini ~250 RPD + Tavily
-      web search — reserve for deep_research.web_search only.
+    notes: >-
+      Free ~1000 RPD/model (gpt-oss family). compound-mini ~250 RPD + Tavily web search
+      — reserve for deep_research.web_search only.
     daily_limit_per_model: 800
     models:
     - openai/gpt-oss-120b
@@ -16,9 +25,9 @@ providers:
     base_url: https://openrouter.ai/api/v1
     env_key: OPENROUTER_API_KEY
     signup: https://openrouter.ai/keys
-    notes: ~50 RPD free models shared (20 RPM); ~1000 RPD after $10 lifetime credits.
-      Prefer :free model ids. Not on free-durable hot path — catalog for optional
-      use.
+    notes: >-
+      ~50 RPD free models shared (20 RPM); ~1000 RPD after $10 lifetime credits.
+      Prefer :free model ids. Not on free-durable hot path — catalog for optional use.
     daily_limit_shared: 45
     models:
     - cohere/north-mini-code:free
@@ -29,8 +38,9 @@ providers:
   cohere:
     env_key: COHERE_API_KEY
     signup: https://dashboard.cohere.com/api-keys
-    notes: 'Trial ~1000 calls/month (~25-30/day). Non-commercial on trial — check
-      ToS. Free-durable: only deep_research.grounding uses Cohere as primary.'
+    notes: >-
+      Trial ~1000 calls/month (~25-30/day). Non-commercial on trial — check ToS.
+      Free-durable: only deep_research.grounding uses Cohere as primary.
     daily_limit: 28
     models:
     - command-a-plus-05-2026
@@ -64,9 +74,9 @@ providers:
     base_url: https://api.cerebras.ai/v1
     env_key: CEREBRAS_API_KEY
     signup: https://cloud.cerebras.ai
-    notes: 'Catalog changes often. Free/dev ~5 RPM, ~1M TPD. Common IDs: gemma-4-31b,
-      gpt-oss-120b, zai-glm-4.7 (Llama IDs may 404). Quality burst fallback, not hot
-      path.'
+    notes: >-
+      Catalog changes often. Free/dev ~5 RPM, ~1M TPD. Common IDs: gemma-4-31b,
+      gpt-oss-120b, zai-glm-4.7 (Llama IDs may 404). Quality burst fallback, not hot path.
     daily_limit: 150
     models:
     - gemma-4-31b
@@ -76,20 +86,23 @@ providers:
     base_url: http://localhost:11434/v1
     env_key: OLLAMA_API_KEY
     signup: https://ollama.com/download
-    notes: 'Local OpenAI-compatible server. No API key required. Model list is ONLY
-      what `ollama list` reports (daemon /api/tags) — not a static catalog. Override
-      host: OLLAMA_BASE_URL or OLLAMA_HOST. Pull: ollama pull <name>.'
+    notes: >-
+      Local OpenAI-compatible server. No API key required.
+      Model list is ONLY what `ollama list` reports (daemon /api/tags) — not a static catalog.
+      Override host: OLLAMA_BASE_URL or OLLAMA_HOST. Pull: ollama pull <name>.
     daily_limit: 100000
-    models: []
+    models: []   # populated at runtime from `ollama list` only
   agnes:
     base_url: https://apihub.agnes-ai.com/v1
     env_key: AGNES_API_KEY
     signup: https://platform.agnes-ai.com
-    notes: 'Agnes AI free multimodal OpenAI-compatible gateway (no card). Chat/pipelines
-      text model: agnes-2.0-flash (~20 RPM free fair-use, $0/M tokens, large context,
-      tool-calling, coding, agents — Claw-Eval strong). Also free (other endpoints,
-      not chat roles): agnes-image-2.0-flash, agnes-image-2.1-flash (/v1/images/generations),
-      agnes-video-v2.0 (/v1/videos). Key: platform.agnes-ai.com'
+    notes: >-
+      Agnes AI free multimodal OpenAI-compatible gateway (no card).
+      Chat/pipelines text model: agnes-2.0-flash (~20 RPM free fair-use, $0/M tokens,
+      large context, tool-calling, coding, agents — Claw-Eval strong).
+      Also free (other endpoints, not chat roles): agnes-image-2.0-flash,
+      agnes-image-2.1-flash (/v1/images/generations), agnes-video-v2.0 (/v1/videos).
+      Key: platform.agnes-ai.com
     daily_limit: 2000
     models:
     - agnes-2.0-flash
@@ -99,18 +112,21 @@ deprecated:
 - qwen/qwen3-32b
 - llama-4-scout-17b-16e-instruct
 vibe_coding:
+  # Architect: agent/planning + large context on free Agnes
   architect:
     provider: agnes
     model: agnes-2.0-flash
     fallback:
       provider: gemini
       model: gemini-2.0-flash
+  # Coder: Codestral specialist; Agnes free coding fallback
   coder:
     provider: mistral
     model: codestral-latest
     fallback:
       provider: agnes
       model: agnes-2.0-flash
+  # Debugger: Groq gpt-oss reasoning; Agnes if Groq exhausted
   debugger:
     provider: groq
     model: openai/gpt-oss-120b
@@ -125,27 +141,33 @@ deep_research:
     fallback:
       provider: gemini
       model: gemini-2.0-flash
+  # Compressor: free Agnes volume (replaces OpenRouter hy3)
   context_compressor:
     provider: agnes
     model: agnes-2.0-flash
     fallback:
       provider: gemini
       model: gemini-2.0-flash
+  # Live web search — only free path with Tavily; ~250 RPD
   web_search:
     provider: groq
     model: groq/compound-mini
+  # Sole Cohere primary (anti-hallucination / documents=)
   grounding:
     provider: cohere
     model: command-a-plus-05-2026
     fallback:
       provider: mistral
       model: mistral-small-latest
+  # Long synthesis: Groq 120b; Agnes 512k-class context as fallback
   synthesizer:
     provider: groq
     model: openai/gpt-oss-120b
     fallback:
       provider: agnes
       model: agnes-2.0-flash
+# Fallback DAG: avoid OpenRouter :free sink; Agnes is a durable free hop.
+# Acyclic leaf via cerebras → groq (skip-visited breaks rings).
 fallback_cascade:
   cohere_fallback:
     provider: mistral
@@ -176,6 +198,7 @@ cli:
       provider: groq
       model: openai/gpt-oss-120b
   planner:
+    # Keep free-durable; do not use OpenRouter hy3 on hot path (50 RPD / expiry)
     provider: agnes
     model: agnes-2.0-flash
     fallback:

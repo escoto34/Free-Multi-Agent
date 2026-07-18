@@ -1,0 +1,187 @@
+# Structured model quality scores + difficulty-selection rules.
+# Machine-readable twin of systems.md §4 (table 4.2 + policy 4.3).
+# Source of truth for auto primary/fallback choice (core/model_selector.py).
+# Edit thresholds here — do not hardcode them in Python.
+
+version: 1
+updated: "2026-07-17"
+
+# Rubric bands (0-100) — mirrors systems.md §4.1
+rubric_bands:
+  - min: 0
+    max: 30
+    label: unreliable
+    meaning: "Do not use unsupervised for this area."
+  - min: 31
+    max: 49
+    label: weak
+    meaning: "Only with heavy host guards or last-resort cascade."
+  - min: 50
+    max: 69
+    label: adequate
+    meaning: "Usable with pipeline checks; not best-in-stack."
+  - min: 70
+    max: 84
+    label: strong
+    meaning: "Prefer as role primary when quota allows."
+  - min: 85
+    max: 100
+    label: production_free
+    meaning: "Best-in-stack for that area within free/trial tier."
+
+# Model key format: "{provider}/{model_id}"
+# Scores = systems.md §4.2 (relative free-durable stack, mid-2026). Do not invent new numbers.
+models:
+  mistral/codestral-latest:
+    scores: {code: 88, reason: 62, ground: 40, synth: 55, safety: 35}
+  groq/openai/gpt-oss-120b:
+    scores: {code: 82, reason: 90, ground: 48, synth: 85, safety: 45}
+  agnes/agnes-2.0-flash:
+    scores: {code: 78, reason: 76, ground: 42, synth: 80, safety: 40}
+  gemini/gemini-2.0-flash:
+    scores: {code: 70, reason: 78, ground: 55, synth: 75, safety: 50}
+  cohere/command-a-plus-05-2026:
+    scores: {code: 58, reason: 72, ground: 93, synth: 78, safety: 48}
+  mistral/mistral-small-latest:
+    scores: {code: 58, reason: 62, ground: 55, synth: 65, safety: 40}
+  groq/groq/compound-mini:
+    scores: {code: 50, reason: 58, ground: 88, synth: 52, safety: 30}
+  groq/openai/gpt-oss-safeguard-20b:
+    scores: {code: 35, reason: 55, ground: 30, synth: 40, safety: 92}
+  # Temporal OpenRouter promo — NOT default primary/fallback (free-durable).
+  # free_until past → is_model_available=false; get_model_scores caps each area ≤49.
+  openrouter/tencent/hy3:free:
+    scores: {code: 55, reason: 60, ground: 38, synth: 58, safety: 35}
+    free_until: "2026-07-21"
+    temporal: true
+    note: "Verify availability before every run; expired → expired_fallback; scores capped ≤49."
+    expired_fallback:
+      provider: groq
+      model: openai/gpt-oss-120b
+
+# ---------------------------------------------------------------------------
+# Selection policy (systems.md §4.3) — editable, not hardcoded in Python
+# ---------------------------------------------------------------------------
+# Prefer fallback when EITHER:
+#   (1) primary is degraded/unavailable (quota_exhausted | rate_limited_429 |
+#       empty_completion | unavailable) and a role fallback exists, OR
+#   (2) primary is mis-specialized for a relevant area:
+#       score_fallback(area) − score_primary(area) ≥ score_advantage_threshold
+#       AND primary score ≤ weak_specialization_max (e.g. Safeguard on coding).
+# Healthy primary (even on hard tasks) → keep primary; do not switch just
+# because fallback edges higher on a secondary area (Gemini reason 78 vs Agnes 76).
+selection_defaults:
+  score_advantage_threshold: 8   # systems.md: score_fb − score_p ≥ 8
+  weak_specialization_max: 49    # primary ≤ this on a relevant area → weak specialist
+  hard_threshold: 70             # difficulty on a relevant area ≥ this for mis-spec path
+  capacity_margin: 5             # kept for diagnostics / future planners
+  prefer_fallback_overall: 75    # kept for diagnostics; not sole switch trigger
+  warn_hy3_days: 3               # CLI warning window (days before free_until)
+  expired_score_cap: 49          # cap model area scores after free_until (auto-scorer)
+  logic_weight: 0.45
+  error_handling_weight: 0.35
+  context_weight: 0.20
+  large_context_tokens: 12000
+  large_context_boost: 15
+
+# Per-role: which systems.md areas matter + threshold overrides (§4.3 role table)
+roles:
+  vibe_coding.architect:
+    relevant_areas: [reason, code, synth]
+    hard_threshold: 72
+    # Prefer fallback: Agnes 429/quota/empty; schema fail twice (caller passes degraded)
+    # Prefer keep: high volume /do + vibe (Agnes free fair-use)
+  vibe_coding.coder:
+    relevant_areas: [code, reason]
+    hard_threshold: 70
+    # Prefer fallback: Mistral Experiment 429 / empty artifact
+    # Prefer keep: clean TechnicalSpec → Codestral specialization
+  vibe_coding.debugger:
+    relevant_areas: [code, reason]
+    hard_threshold: 68
+    # Prefer fallback: Groq 120b RPD exhausted / 429 / empty
+    # Prefer keep: hard traceback multi-hop fix
+  deep_research.safety_filter:
+    relevant_areas: [safety]
+    hard_threshold: 60
+    # Prefer keep: specialty Safeguard gate; never put general models here by default
+  deep_research.context_compressor:
+    relevant_areas: [reason, synth]
+    hard_threshold: 70
+  deep_research.web_search:
+    # No role fallback in model_router.yaml — selector never invents one
+    relevant_areas: [ground]
+    hard_threshold: 90
+    # Never replace compound-mini; no live search → abort (graph), not model swap
+  deep_research.grounding:
+    relevant_areas: [ground, synth, reason]
+    hard_threshold: 65
+    # Prefer fallback: Cohere trial empty / 429 / ToS; keep Command A+ as default RAG
+  deep_research.synthesizer:
+    relevant_areas: [synth, reason]
+    hard_threshold: 70
+  cli.chat:
+    relevant_areas: [reason, synth, code]
+    hard_threshold: 72
+  cli.planner:
+    relevant_areas: [reason, synth]
+    hard_threshold: 70
+
+# ---------------------------------------------------------------------------
+# Reasoning / thinking effort (systems.md §4.5)
+# Free-tier quotas are per CALL, not per token — raising effort does NOT cost
+# extra RPD. Prefer higher effort on hard tasks when the model supports it.
+# ---------------------------------------------------------------------------
+reasoning:
+  enabled: true
+  # Map DifficultyAssessment relevant_max / overall → abstract effort band
+  difficulty_bands:
+    - max_exclusive: 50
+      effort: low
+    - max_exclusive: 75
+      effort: medium
+    - max_exclusive: 101
+      effort: high
+  effort_rank: [low, medium, high]
+  # Default API presentation: hide CoT from message.content (JSON agents)
+  default_include_reasoning: false
+  # Per-role floors/ceilings on abstract effort (applied after difficulty band)
+  role_effort:
+    vibe_coding.architect:
+      min_effort: low
+    vibe_coding.coder:
+      min_effort: low
+    vibe_coding.debugger:
+      min_effort: medium   # fix loops benefit from deeper reasoning
+    deep_research.safety_filter:
+      max_effort: low      # binary allow/deny — keep latency low
+    deep_research.context_compressor:
+      min_effort: low
+    deep_research.web_search:
+      max_effort: low      # compound-mini: search tools, not long CoT
+    deep_research.grounding:
+      min_effort: low      # RAG quality ≠ GPT-OSS effort API
+    deep_research.synthesizer:
+      min_effort: medium
+    cli.chat:
+      min_effort: low
+    cli.planner:
+      min_effort: medium
+  # Models that accept Groq/OpenAI-compatible reasoning kwargs.
+  # style:
+  #   groq_gpt_oss  → reasoning_effort=low|medium|high + include_reasoning
+  #   groq_qwen     → reasoning_effort=none|default + reasoning_format
+  # Unknown models → no extra kwargs (safe for cascade to Agnes/Codestral/etc.)
+  model_capabilities:
+    groq/openai/gpt-oss-120b:
+      style: groq_gpt_oss
+    groq/openai/gpt-oss-20b:
+      style: groq_gpt_oss
+    groq/openai/gpt-oss-safeguard-20b:
+      style: groq_gpt_oss
+    groq/qwen/qwen3.6-27b:
+      style: groq_qwen
+    # Catalog leaf if cascade lands here with same OpenAI-compat surface
+    cerebras/gpt-oss-120b:
+      style: groq_gpt_oss
+

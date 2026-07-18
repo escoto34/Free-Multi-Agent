@@ -1,11 +1,43 @@
 # Systems orchestration — free-durable profile
 
 **Document status:** mid-2026 research snapshot (last updated 2026-07-17)  
-**Live config:** `config/model_router.yaml`  
+**Live config:** `config/model_router.yaml` (loaded by `core/agent_config.py`)  
 **Factory defaults:** `config/defaults_model_router.yaml`  
-**Quota soft-caps:** `core/quotas.py` (must stay ≤ real provider limits)
+**Quota soft-caps:** `core/quotas.py` (must stay ≤ real provider limits)  
+**Benchmarks + selection + reasoning:** `config/model_benchmarks.yaml`
 
-This document explains **why** each free-tier model sits in each System A / System B / CLI role: benchmarks (relative quality), API rate limits, and orchestration constraints (shared buckets, cascade design, calls per run).
+This document explains **why** each free-tier model sits in each System A / System B / CLI role: benchmarks (relative quality), a reusable **0–100 scoring rubric**, API rate limits, orchestration constraints (shared buckets, cascade design, calls per run), **how primary vs fallback is chosen at runtime**, and **how reasoning/thinking effort is applied inside each call**.
+
+> **Runtime modules (implemented):**  
+> `core/difficulty_scorer.py` · `core/model_selector.py` · `core/reasoning_params.py` ·  
+> `core/handoff.py` · `core/agent_runtime.py` · `core/router.py` · `core/quotas.py`
+
+---
+
+## 0. Live role inventory (primary + fallback)
+
+Source of truth: `config/model_router.yaml` via `get_agent_config(...)` in `core/agent_config.py`.  
+Roles requested for scoring: System A (`architect`, `coder`, `debugger`) and System B (`safety_filter`, `context_compressor`, `web_search`, `grounding`, `synthesizer`).
+
+| Pipeline | Role | Primary `provider` / `model` | Fallback `provider` / `model` |
+|----------|------|------------------------------|-------------------------------|
+| **A — Vibe** | `architect` | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
+| **A — Vibe** | `coder` | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` |
+| **A — Vibe** | `debugger` | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
+| **B — Research** | `safety_filter` | `groq` / `openai/gpt-oss-safeguard-20b` | `gemini` / `gemini-2.0-flash` |
+| **B — Research** | `context_compressor` | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
+| **B — Research** | `web_search` | `groq` / `groq/compound-mini` | **none** (hard-fail if no live search) |
+| **B — Research** | `grounding` | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` |
+| **B — Research** | `synthesizer` | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
+
+**Unique models in the live hot path (primary or role-level fallback):**  
+`agnes-2.0-flash`, `gemini-2.0-flash`, `codestral-latest`, `openai/gpt-oss-120b`, `openai/gpt-oss-safeguard-20b`, `groq/compound-mini`, `command-a-plus-05-2026`, `mistral-small-latest`.
+
+**Catalog-only (not currently assigned as primary/fallback to those roles):**  
+`tencent/hy3:free` remains in the OpenRouter free catalog and is scored below for historical/optional use.  
+**⚠ `tencent/hy3:free` expires 2026-07-21** — treat as **temporal; verify availability before every run**. Do not assume it is durable free capacity.
+
+CLI (`chat`, `planner`) uses Agnes → Groq 120b; see §7. Provider-level `fallback_cascade` is §8.
 
 ---
 
@@ -142,26 +174,216 @@ Limits below are **public free/trial reference values** as of ~2026-06/07. Provi
 
 ---
 
-## 4. Relative benchmarks (free-relevant models)
+## 4. Scoring rubric and model benchmarks (0–100)
 
-Public leaderboards move weekly. Relative **role-relevant** picture used for routing (not absolute scores):
+**Machine-readable twin:** `config/model_benchmarks.yaml` (scores + per-role selection thresholds + reasoning policy).  
+**Runtime:**
+
+| Concern | Module |
+|---------|--------|
+| Score task 0–100 (structured) | `core/difficulty_scorer.py` → `DifficultyAssessment` |
+| Primary vs fallback model | `core/model_selector.py` → `select_for_role` |
+| Reasoning / thinking effort on the **same call** | `core/reasoning_params.py` → `resolve_reasoning_kwargs` |
+| Inject both into LLM call | `core/agent_runtime.py` → `run_structured_agent` / `run_role_raw` |
+| Cascade-safe kwargs + quota per **call** | `core/router.py` + `core/quotas.py` |
+| Audit model switch | `core.handoff.transfer_control` / `record_model_selection_handoff` |
+
+Public leaderboards move weekly. Scores below are a **reusable MultiAgent rubric** for automatic scoring systems: they map *role-relevant* capability on free/trial tiers, not absolute frontier rank vs paid GPT-5 / Claude Opus class.
+
+### Critical quota fact (calls ≠ tokens)
+
+Free/trial soft-caps in this stack are almost always **requests per day (RPD / calls)**, not token budgets:
+
+| What | Costs an extra daily call? |
+|------|----------------------------|
+| Cascade to another model after 429 | **Yes** (+1 on the next model) |
+| Retry same model after 429 | **Yes** each attempt that reaches the API |
+| Raise `reasoning_effort` low→high on GPT-OSS | **No** — same call, more tokens/latency only |
+| `include_reasoning=true` | **No** — same call |
+
+**Implication:** on hard debugger/synth work, prefer **higher reasoning effort** on the model already selected rather than inventing extra hops. Effort is free in RPD terms; model switches are not.
+
+### 4.1 Rubric definition (0–100 per area)
+
+Five areas map to this repo’s pipelines:
+
+| Code | Area | What we measure |
+|------|------|-----------------|
+| **(a) code** | Generación / depuración de código | HumanEval / LiveCodeBench / SWE-bench-class edit quality, multi-file edits, fix-from-tracebacks |
+| **(b) reason** | Razonamiento y planificación | MMLU-Pro / GPQA / AIME-class hard reasoning, multi-step plans, structured specs (architect / compressor / planner) |
+| **(c) ground** | Búsqueda / grounding con citas | Live web retrieval, citation faithfulness, RAG anti-hallucination (documents= style) |
+| **(d) synth** | Síntesis / redacción | Long coherent reports, section structure, bilingual clarity, long-context assembly |
+| **(e) safety** | Seguridad / filtrado | Policy classification, refusal/allow decisions, low false-negative risk for unsafe research topics |
+
+**Range bands (reusable by an auto-scorer):**
+
+| Score | Band | Meaning for MultiAgent |
+|------:|------|------------------------|
+| **0–30** | Unreliable | Do **not** use unsupervised for this area. Expect failure, fabrication, or wrong modality. |
+| **31–49** | Weak | Only with heavy host guards (schema, scrub, unit tests) or as last-resort cascade. |
+| **50–69** | Adequate | Usable for the area with supervision / pipeline checks; not best-in-stack. |
+| **70–84** | Strong | Prefer as role primary when quota allows; good default free quality. |
+| **85–100** | Production-class *(within free/trial stack)* | Best-in-stack for that area; still subject to rate limits and ToS, not paid frontier SLA. |
+
+**Scoring rules for future automation:**
+
+1. Prefer **public** numbers (model cards, Artificial Analysis, Claw-Eval, RealtimeEval, vendor technical reports) when available.  
+2. If only relative evidence exists, map rank within free/open class into the 50–90 band (never invent exact HumanEval % you did not read).  
+3. Mark **evidence** as `public` | `vendor` | `inferred` | `sparse`.  
+4. Cap any score at **49** if the model is **unavailable / expired** for that run (auto-scorer should re-probe).  
+5. Specialization beats generalism: a safety-tuned model may score high on (e) and mid/low on (a)–(d) by design.
+
+### 4.2 Benchmark scores by model × area
+
+Scores are **relative within this free-durable stack** (snapshot mid-2026). They are for routing documentation and future auto-scoring — not a claim of absolute frontier rank.
+
+| Model (provider ID) | (a) code | (b) reason | (c) ground | (d) synth | (e) safety | Evidence notes (primary sources / proxies) |
+|---------------------|--------:|----------:|----------:|---------:|----------:|--------------------------------------------|
+| **`mistral` / `codestral-latest`** | **88** | 62 | 40 | 55 | 35 | Vendor: Codestral-2501 HumanEval **86.6%**, strong MultiPL-E / fill-in-middle; coding specialist, not RAG/safety. `public`+`vendor` |
+| **`groq` / `openai/gpt-oss-120b`** | **82** | **90** | 48 | **85** | 45 | Open weights reasoning MoE (~117B / ~5.1B active); AA Intelligence Index competitive open class; HumanEval-class ~high 80s in secondary tables; strong debug/synth, no native search API. `public` |
+| **`agnes` / `agnes-2.0-flash`** | **78** | **76** | 42 | **80** | 40 | Claw-Eval ~**51.8%** Pass^3 (top tier free agents, May 2026 tables); large context, tool-calling, coding/agents marketing + independent agent benches. `public`+`vendor` |
+| **`gemini` / `gemini-2.0-flash`** | 70 | **78** | 55 | 75 | 50 | Flash-class structured JSON / long-context; solid MMLU-Pro family proxies; good plan/compress fallback; not Codestral-level pure code; not Cohere-level citation RAG. `public`+`inferred` |
+| **`cohere` / `command-a-plus-05-2026`** | 58 | 72 | **93** | 78 | 48 | Cohere Command A technical report: **best-in-class enterprise RAG / grounding / tool use**; solid code understanding but not our free coding primary. Trial ToS non-commercial. `vendor`+`public` |
+| **`mistral` / `mistral-small-latest`** | 58 | 62 | 55 | 65 | 40 | Mid free generalist (Small line; Small 4 claims competitive LiveCodeBench vs OSS 120B in vendor blogs — treat as upper bound if alias drifts). Grounding fallback only. `vendor`+`inferred` |
+| **`groq` / `groq/compound-mini`** | 50 | 58 | **88** | 52 | 30 | **System** (GPT-OSS + Llama + tools), not a bare LLM. Built-in **Tavily web search**; RealtimeEval **> GPT-4o-search-preview** (Groq). Single tool call / low latency. Unique free live-search path. `vendor`+`public` |
+| **`groq` / `openai/gpt-oss-safeguard-20b`** | 35 | 55 | 30 | 40 | **92** | OpenAI open safety classifier (post-trained from gpt-oss); BYO policy; purpose-built for Trust & Safety — **not** a general coder. `vendor`+`public` |
+| **`openrouter` / `tencent/hy3:free`** ⚠ | 55 | 60 | 38 | 58 | 35 | **Temporal promo.** **Expires 2026-07-21.** Sparse independent benches; historically general free chat. **Verify availability before every execution.** Cap auto-score ≤49 if 404/expired. `sparse` |
+
+**Quick capability matrix (stack defaults):**
 
 | Capability | Strong free options | Weaker / avoid as primary |
 |------------|---------------------|---------------------------|
-| **Coding (generate/edit)** | Codestral; Agnes 2.0 Flash; Gemma 4 31B; GPT-OSS-120B | Generic small chat models; burning OR free pool |
-| **Agent / tool / multi-step** | Agnes 2.0 Flash (Claw-Eval strong); GPT-OSS-120B tool-use often solid | Models without tool training |
-| **Reasoning / debug** | GPT-OSS-120B (Groq); Gemma 4 31B (Cerebras); Gemini Flash | Ultra-light Flash-Lite alone for hard bugs |
-| **Structured JSON** | Gemini Flash; Agnes; Mistral Small; GPT-OSS | Verbose ungrounded chat models |
-| **RAG / anti-hallucination** | Cohere Command A+ / R+ (native documents path) | Pure generative synth without search |
-| **Safety classify** | GPT-OSS Safeguard 20B | Random general chat for policy |
+| **(a) Coding** | Codestral; Agnes; GPT-OSS-120B | Safeguard-20B; pure search systems |
+| **(b) Reasoning / plan** | GPT-OSS-120B; Gemini Flash; Agnes | Safeguard-only; expired hy3 |
+| **(c) Search / ground** | compound-mini (live search); Command A+ (RAG/citas) | Models that invent citations without corpus |
+| **(d) Synthesis** | GPT-OSS-120B; Agnes (context); Command A+; Gemini | Mini search system as sole writer |
+| **(e) Safety** | GPT-OSS Safeguard 20B | Random general chat for policy gates |
 | **Live web search** | **Only** `groq/compound-mini` in this free stack | Models that “pretend” to search |
-| **Long report synthesis** | GPT-OSS-120B; Agnes (large context); Gemini Flash | Models with tiny max output |
 
-**Agnes 2.0 Flash:** free multimodal gateway text model; strong agent/coding/tool story at $0; ~20 RPM free — ideal volume primary.  
-**GPT-OSS-120B:** open frontier-class reasoning on Groq at ~1k RPD/model — ideal debug + synthesizer primary.  
-**Gemma 4 31B:** competitive open intelligence/coding indices vs GPT-OSS in independent tables; great Cerebras fallback when quality needed under low RPM.  
-**Codestral:** purpose-built code model on Mistral free Experiment.  
-**Command A+:** best trial-tier grounding partner for System B.
+### 4.3 Recomendación primario vs fallback por rol
+
+Política **implementada** en `core/model_selector.py` + umbrales en `config/model_benchmarks.yaml`  
+(`score_advantage_threshold: 8`, `weak_specialization_max: 49`). El planeador emite un  
+`DifficultyAssessment` estructurado; el grafo/runtime llama `select_for_role(...)`.
+
+| Role | Primary (scores that matter) | Fallback | Prefer **fallback** when… | Prefer **keep primary** when… |
+|------|------------------------------|----------|---------------------------|-------------------------------|
+| **architect** | Agnes (reason **76**, synth **80**, code **78**) | Gemini 2.0 Flash (reason **78**, structured JSON strong) | Agnes 429 / soft quota / empty (`primary_status=degraded…`); mis-specialized primary (weak ≤49 + Δ≥8) | Healthy primary; high volume of `/do` + vibe (Agnes fair-use); Gemini only edges reason by Δ=2 |
+| **coder** | Codestral (code **88**) | Agnes (code **78**) | Mistral 429 / empty artifact / quota; never switch only because Agnes is “good enough” | Healthy Codestral on clean `TechnicalSpec` — best free coding specialist |
+| **debugger** | GPT-OSS-120B (code **82**, reason **90**) | Agnes (code **78**, reason **76**) | Groq 120b RPD exhausted / 429 / empty | Healthy 120b + hard traceback — raise **reasoning_effort**, do not hop early |
+| **safety_filter** | Safeguard-20B (safety **92**) | Gemini Flash (safety **50**) | Safeguard 429 / unavailable | Default every research run — specialty gate |
+| **context_compressor** | Agnes (reason **76**, synth **80**) | Gemini Flash (reason **78**) | Agnes quota / empty JSON | High research volume on Agnes |
+| **web_search** | compound-mini (ground **88**) | *none* | **Never model-fallback** — no live search → **abort run** | Always when research needs live web |
+| **grounding** | Command A+ (ground **93**, synth **78**) | Mistral Small (ground **55**, synth **65**) | Cohere trial empty / 429 / ToS | Default cited claims; scarce bucket |
+| **synthesizer** | GPT-OSS-120B (synth **85**, reason **90**) | Agnes (synth **80**, large context) | Groq 120b exhausted / 429 / empty | Healthy 120b + long report — raise **reasoning_effort** |
+
+**Runtime selection rules (code):**
+
+1. **Expired promo** (`free_until` past, e.g. hy3 after **2026-07-21**) → role/catalog fallback; scores capped ≤49.  
+2. **`primary_status` degraded** (`quota_exhausted` | `rate_limited_429` | `empty_completion` | `unavailable` | `degraded`) → role fallback if configured.  
+3. **Mis-specialized:** for a relevant area, `score_fb − score_p ≥ score_advantage_threshold` (default **8**) **and** primary score ≤ `weak_specialization_max` (default **49**) — e.g. Safeguard forced onto coding.  
+4. Else **keep primary** (even if fallback edges higher by a few points on a secondary area).  
+5. Model switches **must** go through `record_model_selection_handoff` → `transfer_control` (user input preserved + audit).
+
+**Also never:**
+
+- Promote `tencent/hy3:free` as free-durable default primary/fallback.  
+- Replace `compound-mini` for web_search.  
+- Put Command A+ on architect/coder/debugger/synth primary.
+
+### 4.4 Cómo se elige y se usa el modelo en un run (end-to-end)
+
+```text
+User task
+   │
+   ▼
+DifficultyAssessment  (core/difficulty_scorer.py)
+   │  areas: code, reason, ground, synth, safety  (0–100)
+   │  + overall, logic_complexity, estimated_context_tokens
+   ▼
+select_for_role(role, assessment)  (core/model_selector.py)
+   │  reads model_router.yaml primary/fallback
+   │  reads model_benchmarks.yaml scores + thresholds
+   │  → ModelSelection { provider, model, used_fallback, reason }
+   ▼
+[if used_fallback / forced_expiry]
+   record_model_selection_handoff → transfer_control  (audit trail)
+   ▼
+resolve_reasoning_kwargs(provider, model, assessment, role)
+   │  only if model is in reasoning.model_capabilities
+   │  → e.g. reasoning_effort=high, include_reasoning=false
+   ▼
+router.call_agent  (1 quota call on success)
+   │  sanitize_call_kwargs per hop (cascade strips unsupported effort)
+   ▼
+Worker agent (architect / coder / …) returns domain schema
+```
+
+**Who calls what:**
+
+| Entry | Selection | Reasoning kwargs |
+|-------|-----------|------------------|
+| `run_structured_agent` / `run_role_raw` | yes | yes (default) |
+| `invoke_router(..., assessment=, role_path=)` | no (caller fixed provider/model) | yes if assessment provided |
+| Graph nodes | `select_for_role` + handoff | via agents → runtime |
+| Direct `call_agent` without runtime | none | only if caller passes kwargs |
+
+**State fields (LangGraph):** `difficulty_by_role`, `last_model_selection`, `handoff_history`.
+
+### 4.5 Reasoning / thinking effort (same call, no extra RPD)
+
+**Module:** `core/reasoning_params.py`  
+**Config:** `config/model_benchmarks.yaml` → `reasoning:`
+
+#### When to raise effort vs when to change model
+
+| Situation | Prefer |
+|-----------|--------|
+| Hard reasoning/debug/synth, primary healthy, model supports effort | **Raise `reasoning_effort`** (low→medium→high) |
+| Primary 429 / quota / empty / expired | **Fallback model** (costs another call) |
+| Easy task / safety binary classify | **Keep effort low** (latency + less noise) |
+| Model has no capability entry (Agnes, Codestral, Gemini, Cohere, compound-mini) | **No effort kwargs** — quality = model choice only |
+
+#### Difficulty → abstract effort bands
+
+| Relevant difficulty score | Effort |
+|---------------------------|--------|
+| &lt; 50 | `low` |
+| 50–74 | `medium` |
+| ≥ 75 | `high` |
+
+Score used = max over the role’s `relevant_areas` (else `overall`).  
+Then **role clamps** (YAML `role_effort`):
+
+| Role | Clamp | Why |
+|------|-------|-----|
+| `vibe_coding.debugger` | min `medium` | Fix loops need deeper CoT |
+| `deep_research.synthesizer` | min `medium` | Long structured reports |
+| `cli.planner` | min `medium` | Multi-step plan quality |
+| `deep_research.safety_filter` | max `low` | Fast allow/deny |
+| `deep_research.web_search` | max `low` | Tool/search system, not long CoT |
+
+#### Provider-native kwargs (only capable models)
+
+| Style | Models | API params |
+|-------|--------|------------|
+| `groq_gpt_oss` | `groq/openai/gpt-oss-120b`, `…-20b`, `…-safeguard-20b`; `cerebras/gpt-oss-120b` | `reasoning_effort`: `low`\|`medium`\|`high`; `include_reasoning`: bool |
+| `groq_qwen` | `groq/qwen/qwen3.6-27b` | abstract low→`none`, medium/high→`default`; `reasoning_format`: `hidden`\|`parsed` |
+
+**Default for MultiAgent agents:** `include_reasoning: false` so `message.content` stays clean JSON/prose for Pydantic (CoT still runs server-side when effort &gt; none).  
+Do **not** combine `include_reasoning` with `reasoning_format` on GPT-OSS (mutually exclusive on Groq).
+
+#### Cascade safety
+
+If hop 1 is GPT-OSS with `reasoning_effort=high` and hop 2 is Agnes, `sanitize_call_kwargs` **strips** reasoning keys before the second provider sees them (avoids HTTP 400). If hop 2 is also GPT-OSS, effort is **re-mapped** for that model + difficulty.
+
+#### What is **not** thinking mode
+
+- CLI progress text `thinking (round N)…` in agent chat = tool-loop UI, not API reasoning.  
+- Cohere response blocks of type `thinking` = response shape parsing only (Command A+), not a request param we set.  
+- Prompt-only “think step by step” is **not** a substitute for `reasoning_effort` on GPT-OSS when the API supports it.
+
+**hy3 explicit policy:** include in benchmark tables for continuity; **do not** assign as default primary/fallback for A/B roles while free-durable defaults hold. If used under an optional `openrouter-boosted` profile, re-check availability **every execution** until after 2026-07-21 (then remove or replace). Cap scores ≤49 when expired.
 
 ---
 
@@ -349,6 +571,16 @@ multiagent quota
 | Cerebras free 5 RPM / 1M TPD | inference-docs.cerebras.ai |
 | Gemini free tier | ai.google.dev Gemini rate limits + AI Studio |
 | Agnes free models & ~20 RPM | wiki.agnes-ai.com, AgnesAI-Models GitHub (2026-06-28) |
-| Relative model quality | Artificial Analysis comparisons, Claw-Eval mentions, independent coding scorecards 2026 |
+| GPT-OSS-120B intelligence / speed | artificialanalysis.ai/models/gpt-oss-120b |
+| GPT-OSS Safeguard 20B | console.groq.com/docs/model/openai/gpt-oss-safeguard-20b ; OpenAI open safety posts |
+| Codestral HumanEval etc. | mistral.ai/news/codestral-2501 (HumanEval 86.6% for Codestral-2501) |
+| Command A RAG / grounding | cohere.com Command A technical report (arXiv 2504.00698 family) |
+| Compound Mini + RealtimeEval / Tavily | console.groq.com Compound / web-search docs |
+| Claw-Eval agent scores | claw-eval / benchlm Claw-Eval tables (Agnes-2.0-flash ~51.8% Pass^3) |
+| Relative model quality | Artificial Analysis, Claw-Eval, vendor cards, independent coding scorecards 2026 |
+| Role → model binding | `config/model_router.yaml` + `core/agent_config.get_agent_config` |
+| Difficulty + primary/fallback | `config/model_benchmarks.yaml` + `core/difficulty_scorer.py` + `core/model_selector.py` |
+| Reasoning effort (GPT-OSS / Qwen) | [Groq Reasoning docs](https://console.groq.com/docs/reasoning) + `core/reasoning_params.py` |
+| Handoff audit | `docs/handoff_protocol.md` + `core/handoff.py` |
 
-Re-validate limits in each provider console before production-ish unattended runs; update this file and YAML soft-caps together when free tiers change.
+Re-validate limits and **promo expiry** (`tencent/hy3:free` → **2026-07-21**) in each provider console before production-ish unattended runs; update this file, YAML soft-caps, and reasoning capability entries together when free tiers change.
