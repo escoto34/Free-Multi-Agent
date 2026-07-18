@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from agents.vibe_coding.web_quality import WEB_LANDING_QUALITY_RULES
 from core.agent_runtime import run_structured_agent
 from schemas.vibe_coding import CodeArtifact, TechnicalSpec
 
@@ -39,11 +40,20 @@ Your job is to implement the Technical Specification with MINIMAL disruption.
 10. Prefer real remote logo URLs from research over placeholder image files.
     Do not write fake .png/.jpg that are plain text. Use inline SVG if no URL.
 11. If research lists a gap (no email, no hours), do not invent those fields in the UI.
+    No type="email" inputs, no mailto:, no placeholder "Correo Electrónico" when
+    email was not found — use WhatsApp/phone CTAs instead.
 12. Static marketing pages: keep dependencies minimal; tests as simple pytest
     file reads unless the spec requires otherwise.
 13. Do NOT create Next.js / package.json / Jest projects for a brand landing page
     unless the user explicitly asked for that stack. Prefer index.html + css + js
     in one folder with pytest content tests.
+14. Content tests MUST NOT use `assert "@" not in html` (fails on CSS @media).
+    Use mailto: checks and/or email-shaped regex. Prefer pathlib relative to the
+    test file or open("site-folder/index.html") from repo root.
+15. Ship a complete usable landing (hero, services, contact, responsive CSS),
+    not a bare stub. Match the subject's language (often Spanish for LATAM brands).
+
+""" + WEB_LANDING_QUALITY_RULES + """
 
 You MUST output your response strictly as a JSON object matching this schema:
 {
@@ -88,8 +98,20 @@ def run_coder(
         f"Test cases to pass:\n{spec.test_cases}\n\n"
         f"{_format_existing_block(existing_files)}"
     )
+    system = SYSTEM_PROMPT
+    try:
+        from core.skills import build_vibe_skills_block
+
+        # Prefer full task_text (includes GROUNDED FACTS); fall back to architecture.
+        skills_block = build_vibe_skills_block(
+            (task_text or "") + "\n" + (spec.architecture or "")
+        )
+        if skills_block:
+            system = f"{SYSTEM_PROMPT}\n\n{skills_block}"
+    except Exception:
+        pass
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {"role": "user", "content": prompt_payload},
     ]
     return run_structured_agent(

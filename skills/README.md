@@ -57,15 +57,15 @@ skills:
 ## CLI
 
 ```bash
-# Register (validates format first)
+# Register (validates format first) — OFF by default
 multiagent skills add /path/to/ponytail
-multiagent skills add ./skills/example-ponytail --disabled
+multiagent skills add ./skills/example-ponytail --enable   # opt-in on register
 
 # List / show
 multiagent skills list
 multiagent skills show ponytail
 
-# Toggle from any directory
+# Toggle from any directory (required before a skill injects)
 multiagent skills enable ponytail
 multiagent skills disable ponytail
 
@@ -86,9 +86,48 @@ Inside the TUI (`multiagent` chat):
 
 ## Runtime behaviour
 
-When a skill is **enabled** and **valid**, its body is injected into the chat
-system prompt (truncated for token budget). Disabled skills stay in the registry
-but are not injected.
+**Default is off.** `multiagent skills add` registers skills as disabled; nothing
+is injected until `multiagent skills enable <name>` (or `add … --enable`).
+
+When a skill is **enabled** and **valid**:
+
+| Target | When it injects |
+|--------|-----------------|
+| **Chat** | Enabled skills with `pipelines` including `chat` (default) |
+| **Vibe** (architect / coder / debugger) | Enabled skills with `pipelines` including `vibe_coding` **and** whose optional `match` regex hits the task/idea |
+
+Disabled skills stay in the registry but are not injected.
+
+### Optional frontmatter for pipeline skills
+
+```yaml
+---
+name: vibe-landing
+description: Static brand landings for vibe-coding.
+version: "1.0"
+pipelines: [chat, vibe_coding]
+match: landing|website|html|p[aá]gina|brand\s*site
+---
+```
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `pipelines` | `[chat]` | Where the skill may inject: `chat`, `vibe_coding` |
+| `match` | none | If set, vibe only injects when the task text matches this regex |
+
+Bundled examples (register once):
+
+```bash
+multiagent skills add ./skills/vibe-landing
+multiagent skills add ./skills/vibe-content-tests
+# still off — opt in when you want them:
+multiagent skills enable vibe-landing
+multiagent skills enable vibe-content-tests
+```
+
+- **`vibe-landing`** — structure, grounded brand facts, WhatsApp CTAs, quality bar  
+- **`vibe-content-tests`** — safe pytest content checks (no bare `"@" not in html`)
 
 Free-text chat still uses graphify for codebase facts; skills add *policy /
-workflow* on top.
+workflow* on top. For landings, host code also enforces `web_quality` lint
+(see `docs/vibe_web_failures.md`).

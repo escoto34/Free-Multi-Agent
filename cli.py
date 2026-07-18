@@ -416,19 +416,32 @@ def skills_list() -> None:
 
 @skills.command(name="add")
 @click.argument("path", type=click.Path(exists=True))
-@click.option("--disabled", is_flag=True, help="Register but leave disabled.")
-def skills_add(path: str, disabled: bool) -> None:
-    """Register a skill folder (must contain valid SKILL.md)."""
+@click.option(
+    "--enable",
+    "enable",
+    is_flag=True,
+    help="Register and enable immediately (default is disabled).",
+)
+@click.option(
+    "--disabled",
+    is_flag=True,
+    help="Deprecated alias: register disabled (already the default).",
+)
+def skills_add(path: str, enable: bool, disabled: bool) -> None:
+    """Register a skill folder (must contain valid SKILL.md). Off by default."""
     from core.skills import add_skill
 
+    # Default OFF. --enable opts in; --disabled kept for older scripts.
+    enabled = bool(enable) and not disabled
     try:
-        meta = add_skill(path, enabled=not disabled)
+        meta = add_skill(path, enabled=enabled)
     except Exception as exc:
         click.secho(f"❌ {exc}", fg="red", err=True)
         sys.exit(1)
     state = "enabled" if meta.enabled else "disabled"
     click.secho(f"✔ Registered {meta.name!r} ({state}) → {meta.path}", fg="green")
-
+    if not meta.enabled:
+        click.echo(f"  Enable with: multiagent skills enable {meta.name}")
 
 @skills.command(name="enable")
 @click.argument("name")

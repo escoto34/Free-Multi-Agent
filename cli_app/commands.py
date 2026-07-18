@@ -81,7 +81,7 @@ Slash commands (F1 opens this panel · type /help anytime)
 
   Skills (global — ~/.config/multiagent/skills.yaml)
     /skills                   List registered skills (ON/off)
-    /skills add <path>        Register skill (must contain SKILL.md)
+    /skills add <path>        Register skill OFF by default ([--enable] to turn on)
     /skills enable <name>     Activate skill
     /skills disable <name>    Deactivate without removing
     /skills show <name>       Path + description + body preview
@@ -658,16 +658,26 @@ def _skills(args: list[str], _session: ConversationSession) -> CommandResult:
     try:
         if sub == "add" and rest:
             path = rest[0]
-            enabled = "--disabled" not in rest
+            # Default OFF. Opt in with --enable / --enabled.
+            enabled = "--enable" in rest or "--enabled" in rest
+            if "--disabled" in rest:
+                enabled = False
             meta = add_skill(path, enabled=enabled)
             state = "enabled" if meta.enabled else "disabled"
+            hint = (
+                f"Toggle: /skills enable {meta.name} | /skills disable {meta.name}"
+                if meta.enabled
+                else (
+                    f"Registered off by default. Enable: /skills enable {meta.name}"
+                )
+            )
             return CommandResult(
                 ok=True,
                 text=(
                     f"Registered skill {meta.name!r} ({state})\n"
                     f"  path: {meta.path}\n"
                     f"  {meta.description[:160]}\n"
-                    f"Toggle: /skills enable {meta.name} | /skills disable {meta.name}"
+                    f"{hint}"
                 ),
             )
 
@@ -719,8 +729,9 @@ def _skills(args: list[str], _session: ConversationSession) -> CommandResult:
         text=(
             "Usage:\n"
             "  /skills\n"
-            "  /skills add <path> [--disabled]\n"
-            "  /skills enable|disable|remove|show <name>"
+            "  /skills add <path> [--enable]\n"
+            "  /skills enable|disable|remove|show <name>\n"
+            "  (new skills are disabled by default)"
         ),
     )
 

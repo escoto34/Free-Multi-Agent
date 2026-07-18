@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from agents.vibe_coding.web_quality import lint_vibe_web_artifact
 from schemas.vibe_coding import CodeArtifact, TechnicalSpec
 
 # Host product test tree — never run this as the vibe suite by default
@@ -54,7 +55,7 @@ def select_pytest_targets(
             return
         if not is_pytest_path(p):
             # allow directory only if it is NOT the host tests/ and looks nested
-            # e.g. credental-site/tests/ — still too broad; require files
+            # e.g. site/tests/ as a bare directory — still too broad; require files
             return
         seen.add(p)
         candidates.append(p)
@@ -158,20 +159,19 @@ def run_static_content_checks(
         return False, "STATIC CHECK FAIL: no HTML/CSS/JS content in artifact."
 
     issues: list[str] = []
-    # Invented wrong-city map heuristic
-    if "empire state" in blob.lower() or (
-        "maps/embed" in blob.lower()
-        and "honduras" not in blob.lower()
-        and "san pedro" not in blob.lower()
-        and "trejo" not in blob.lower()
-        and not re.search(r"maps\.google\.[^\"']+q=", blob, re.I)
+    # Invented wrong-city map heuristic (domain-agnostic placeholders)
+    # Classic stock embeds often point at NYC / Empire State; flag those only.
+    blob_l = blob.lower()
+    if (
+        "empire state" in blob_l
+        or "-73.98" in blob
+        or "40.748" in blob
+        or re.search(r"maps\.google\.[^\"']*(?:empire|times\+square|new\+york)", blob_l)
     ):
-        # Only flag classic NYC embed fingerprint
-        if "-73.98" in blob or "40.748" in blob or "empire" in blob.lower():
-            issues.append(
-                "Map embed looks like a wrong-city placeholder (e.g. NYC). "
-                "Use verified address text or a maps search URL from research."
-            )
+        issues.append(
+            "Map embed looks like a stock wrong-city placeholder. "
+            "Use verified address text or a maps search URL built from research."
+        )
 
     must = _idea_must_strings(idea)
     missing = [s for s in must if s.lower() not in blob.lower()]
@@ -312,6 +312,19 @@ def execute_vibe_tests(
             "RESULT: FAIL (stack mismatch with test runtime)\n"
         )
         overall_ok = False
+
+    # Fail fast on known brand-landing anti-patterns (fragile @ tests, invented email UI)
+    if artifact and (
+        artifact_is_static_site(artifact)
+        or any(
+            p.replace("\\", "/").lower().endswith((".html", ".htm", ".css"))
+            for p in (artifact.files or {})
+        )
+    ):
+        w_ok, w_log = lint_vibe_web_artifact(artifact, idea)
+        parts.append(w_log)
+        if not w_ok:
+            overall_ok = False
 
     targets = select_pytest_targets(
         files_to_create=list(spec.files_to_create or []),

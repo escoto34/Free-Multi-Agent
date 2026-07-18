@@ -209,6 +209,16 @@ def format_grounded_constraints_block(
         "9. Static sites: prefer zero backend; tests should be simple path/content",
         "   checks (pytest reading files), not Selenium/Chrome unless requested.",
         "10. Copyright year: use a neutral current-era year or omit; do not invent founding years.",
+        "11. Content tests MUST NOT use: assert \"@\" not in html  (CSS @media has @).",
+        "    For \"no email\": assert \"mailto:\" not in html and/or match email-shaped",
+        "    regexes — never a bare \"@\" membership check.",
+        "12. If EMAILS section is empty / gap: no type=\"email\" fields, no mailto:,",
+        "    no invented addresses. Primary CTA = WhatsApp (wa.me) and/or phones below.",
+        "13. Call the deliverable a static single-page landing (HTML/CSS/JS), not a",
+        "    React/Next \"SPA\". Host test runtime is pytest-only.",
+        "14. Page quality bar: sticky header+logo, hero with CTA, services from research,",
+        "    contact block, responsive CSS — not a 40-line stub.",
+        "15. If a content test fails only because of @media, fix the test — do not strip CSS.",
         "",
     ]
 

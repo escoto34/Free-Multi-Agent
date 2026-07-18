@@ -40,12 +40,14 @@ Rules:
 - Order: usually research first, then vibe with uses_prior=true so code is informed.
 - When the user wants a website / landing page / brand site from research and does
   NOT name a framework (React, Next.js, Vue, etc.), the vibe step prompt MUST say:
-  static HTML/CSS/JS in a dedicated folder + pytest content checks. Do NOT invent
-  a full-stack Next.js/Jest plan — the host only runs pytest.
+  static HTML/CSS/JS single-page landing in a dedicated folder + pytest content
+  checks. Do NOT invent a full-stack Next.js/Jest plan — the host only runs pytest.
+  Say "static landing page", NOT "SPA" / "single-page application" (models confuse
+  that with React SPA stacks).
 - CRITICAL: copy every user-named website/domain (e.g. brand.com, https://…)
   verbatim into the research step prompt. Deep research PRIMARY-fetches only
   URLs present in that step text. Dropping the official domain empties sources.
-- Do NOT invent USP, financing slogans, competitor clinic names, doctor names,
+- Do NOT invent USP, financing slogans, competitor names, staff names,
   brand hex colors, phone numbers, or service lists in either step prompt unless
   the user already stated them. Leave facts for research; vibe must rely on prior
   research context for contact/brand assets.
@@ -53,6 +55,11 @@ Rules:
   request brand colors, logo URLs, WhatsApp/social links, address, and services
   from the official site (and social). Vibe prompt should say: use only grounded
   facts from prior research; no invented contact or palette.
+- Marketing/landing vibe prompts MUST NOT require an email contact form unless
+  the user or research already provided an email. Prefer WhatsApp/phone CTAs.
+  Optional name+message UI is OK without an email field. Content tests must not
+  use assert "@" not in html (breaks on CSS @media). Require usable sections:
+  hero, services, contact, responsive layout, grounded brand assets.
 - Split only when parts truly need different pipelines (research vs vibe), not when
   one deep-research multi-facet search can cover the whole investigation.
 - Pure Q&A about this MultiAgent tool itself → still pick research or vibe only if

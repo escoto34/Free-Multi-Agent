@@ -35,7 +35,7 @@ def ensure_origin_urls_in_research_prompt(
     """Re-inject user-named official domains the planner may have dropped.
 
     System B only HTTP-fetches PRIMARY sources from the *research step* text.
-    If the planner rewrites the brief and omits e.g. ``credentalhn.com``, the
+    If the planner rewrites the brief and omits e.g. ``brand.example.com``, the
     pipeline reports empty sources even when the original /do named the site.
     """
     if not (origin_prompt or "").strip():
@@ -197,6 +197,10 @@ def execute_plan(
                     "=== PRIOR RESEARCH CONTEXT (authoritative for facts) ===\n"
                     "Implement using GROUNDED FACTS first. Never invent contact,\n"
                     "brand colors, maps, doctor bios, or reviews not listed there.\n"
+                    "Static landing (HTML/CSS/JS) unless the user named a framework.\n"
+                    "Do NOT require an email form if EMAILS are none/gap — use wa.me.\n"
+                    "Content tests: never assert bare \"@\" absent (CSS @media has @);\n"
+                    "use mailto: / email-regex. Ship a usable hero+services+contact page.\n"
                     f"{prior}\n"
                     "=== END PRIOR RESEARCH CONTEXT ==="
                 )

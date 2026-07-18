@@ -52,6 +52,14 @@ GLOBAL_SKILLS_FILE = GLOBAL_CONFIG_DIR / "skills.yaml"
 # Cap how much skill body we inject per turn (token hygiene).
 DEFAULT_INJECT_MAX_CHARS = 4000
 DEFAULT_TOTAL_INJECT_MAX = 8000
+# Vibe agents already have long system prompts; keep skill inject tighter.
+DEFAULT_VIBE_PER_SKILL_MAX = 2800
+DEFAULT_VIBE_TOTAL_MAX = 5500
+
+# Optional frontmatter:
+#   pipelines: [chat, vibe_coding]   # where this skill may inject (default: chat)
+#   match: regex                     # if set, task/idea must match (case-insensitive)
+_DEFAULT_PIPELINES = ("chat",)
 
 
 @dataclass
@@ -64,11 +72,34 @@ class SkillMeta:
     body: str
     valid: bool
     error: Optional[str] = None
+    pipelines: tuple[str, ...] = _DEFAULT_PIPELINES
+    match: Optional[str] = None
 
     def summary_line(self) -> str:
         flag = "ON " if self.enabled else "off"
         status = "ok" if self.valid else f"INVALID: {self.error}"
-        return f"[{flag}] {self.name:20} {status:24} {self.path}"
+        pipes = ",".join(self.pipelines) if self.pipelines else "-"
+        return f"[{flag}] {self.name:20} {status:24} pipes={pipes:16} {self.path}"
+
+    def applies_to_pipeline(self, pipeline: str) -> bool:
+        p = (pipeline or "chat").strip().lower()
+        # Accept aliases
+        aliases = {p, p.replace("-", "_")}
+        if p in ("vibe", "vibe_coding", "system_a"):
+            aliases.update({"vibe", "vibe_coding", "system_a"})
+        if p in ("chat", "cli"):
+            aliases.update({"chat", "cli"})
+        return any(x in self.pipelines for x in aliases)
+
+    def matches_task(self, task_text: str) -> bool:
+        """If *match* is set, require a regex hit; otherwise always match."""
+        if not self.match:
+            return True
+        try:
+            return bool(re.search(self.match, task_text or "", re.I | re.DOTALL))
+        except re.error:
+            # Bad pattern in skill — fail closed for targeted inject
+            return False
 
 
 def _ensure_global_file() -> Path:
@@ -162,7 +193,53 @@ def parse_skill_md(skill_md: Path) -> tuple[dict[str, Any], str]:
     meta["name"] = name
     meta["description"] = desc
     meta["version"] = str(meta.get("version") or "1.0")
+    meta["pipelines"] = _normalize_pipelines(meta.get("pipelines"))
+    match_raw = meta.get("match")
+    meta["match"] = (
+        str(match_raw).strip() if match_raw is not None and str(match_raw).strip() else None
+    )
     return meta, body
+
+
+def _normalize_pipelines(raw: Any) -> tuple[str, ...]:
+    if raw is None:
+        return _DEFAULT_PIPELINES
+    if isinstance(raw, str):
+        items = [raw]
+    elif isinstance(raw, (list, tuple)):
+        items = list(raw)
+    else:
+        return _DEFAULT_PIPELINES
+    out: list[str] = []
+    for x in items:
+        s = str(x).strip().lower().replace("-", "_")
+        if not s:
+            continue
+        if s in ("vibe", "system_a", "systema"):
+            s = "vibe_coding"
+        if s not in out:
+            out.append(s)
+    return tuple(out) if out else _DEFAULT_PIPELINES
+
+
+def _meta_from_parse(
+    meta: dict[str, Any],
+    body: str,
+    *,
+    path: Path,
+    enabled: bool = False,
+) -> SkillMeta:
+    return SkillMeta(
+        name=meta["name"],
+        description=meta["description"],
+        version=meta["version"],
+        path=path,
+        enabled=enabled,
+        body=body,
+        valid=True,
+        pipelines=tuple(meta.get("pipelines") or _DEFAULT_PIPELINES),
+        match=meta.get("match"),
+    )
 
 
 def validate_skill_path(path: str | Path) -> SkillMeta:
@@ -170,15 +247,8 @@ def validate_skill_path(path: str | Path) -> SkillMeta:
     try:
         skill_md = resolve_skill_md(path)
         meta, body = parse_skill_md(skill_md)
-        return SkillMeta(
-            name=meta["name"],
-            description=meta["description"],
-            version=meta["version"],
-            path=skill_md.parent if skill_md.name == "SKILL.md" else skill_md,
-            enabled=False,
-            body=body,
-            valid=True,
-        )
+        root = skill_md.parent if skill_md.name == "SKILL.md" else skill_md
+        return _meta_from_parse(meta, body, path=root, enabled=False)
     except Exception as exc:
         p = Path(path).expanduser()
         return SkillMeta(
@@ -196,11 +266,15 @@ def validate_skill_path(path: str | Path) -> SkillMeta:
 def add_skill(
     path: str | Path,
     *,
-    enabled: bool = True,
+    enabled: bool = False,
     name_override: Optional[str] = None,
     registry_path: Optional[Path] = None,
 ) -> SkillMeta:
-    """Register a skill by absolute path. Name comes from SKILL.md frontmatter."""
+    """Register a skill by absolute path. Name comes from SKILL.md frontmatter.
+
+    Skills default to **disabled** so operators opt in with
+    ``multiagent skills enable <name>`` (or ``add … --enable``).
+    """
     skill_md = resolve_skill_md(path)
     meta, body = parse_skill_md(skill_md)
     name = (name_override or meta["name"]).lower()
@@ -215,15 +289,7 @@ def add_skill(
         "skill_md": str(skill_md.resolve()),
     }
     save_registry(skills, registry_path)
-    return SkillMeta(
-        name=name,
-        description=meta["description"],
-        version=meta["version"],
-        path=root,
-        enabled=bool(enabled),
-        body=body,
-        valid=True,
-    )
+    return _meta_from_parse(meta, body, path=root, enabled=bool(enabled))
 
 
 def remove_skill(name: str, *, registry_path: Optional[Path] = None) -> bool:
@@ -268,6 +334,7 @@ def load_skill(
     entry = skills[key]
     path = entry.get("path") or entry.get("skill_md")
     meta = validate_skill_path(path)
+    # Missing key → disabled (safe default; never auto-activate)
     meta.enabled = bool(entry.get("enabled", False))
     if meta.valid and meta.name != key:
         # Allow registry key to differ slightly but prefer registry name
@@ -287,8 +354,40 @@ def list_skills(*, registry_path: Optional[Path] = None) -> list[SkillMeta]:
     return out
 
 
+def disable_all_skills(*, registry_path: Optional[Path] = None) -> int:
+    """Set every registered skill to disabled. Returns how many were changed."""
+    skills = load_registry(registry_path)
+    changed = 0
+    for _name, entry in skills.items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("enabled", False):
+            entry["enabled"] = False
+            changed += 1
+    if changed:
+        save_registry(skills, registry_path)
+    return changed
+
+
 def active_skills(*, registry_path: Optional[Path] = None) -> list[SkillMeta]:
     return [s for s in list_skills(registry_path=registry_path) if s.enabled and s.valid]
+
+
+def select_skills_for_pipeline(
+    pipeline: str,
+    *,
+    task_text: str = "",
+    registry_path: Optional[Path] = None,
+) -> list[SkillMeta]:
+    """Enabled valid skills that target *pipeline* and match *task_text*."""
+    out: list[SkillMeta] = []
+    for skill in active_skills(registry_path=registry_path):
+        if not skill.applies_to_pipeline(pipeline):
+            continue
+        if not skill.matches_task(task_text):
+            continue
+        out.append(skill)
+    return out
 
 
 def build_skills_system_block(
@@ -296,16 +395,48 @@ def build_skills_system_block(
     registry_path: Optional[Path] = None,
     per_skill_max: int = DEFAULT_INJECT_MAX_CHARS,
     total_max: int = DEFAULT_TOTAL_INJECT_MAX,
+    pipeline: str = "chat",
+    task_text: str = "",
+    require_task_match: bool = False,
 ) -> str:
-    """Markdown block to inject into the chat system prompt for enabled skills."""
-    active = active_skills(registry_path=registry_path)
+    """Markdown block to inject into system prompts for enabled skills.
+
+    *pipeline*: ``chat`` (default) or ``vibe_coding``.
+    When *require_task_match* is True, only skills whose optional ``match``
+    regex hits *task_text* are included (recommended for vibe so landing
+    skills do not pollute pure library coding runs).
+    """
+    if require_task_match or (task_text and pipeline.replace("-", "_") in (
+        "vibe_coding",
+        "vibe",
+    )):
+        active = select_skills_for_pipeline(
+            pipeline, task_text=task_text, registry_path=registry_path
+        )
+    else:
+        # Chat: inject all enabled skills that target chat (or have no restriction)
+        active = [
+            s
+            for s in active_skills(registry_path=registry_path)
+            if s.applies_to_pipeline(pipeline)
+        ]
+        # Backward compatible: skills with only default chat pipeline still inject
+        if not active and pipeline in ("chat", "cli"):
+            active = active_skills(registry_path=registry_path)
+
     if not active:
         return ""
 
+    header = (
+        "## Active external skills (vibe-coding)"
+        if pipeline.replace("-", "_") in ("vibe_coding", "vibe")
+        else "## Active external skills"
+    )
     parts: list[str] = [
-        "## Active external skills",
-        "Follow these skill instructions when the user request matches their description.",
+        header,
+        "Follow these skill instructions when they apply to the current task.",
         "Skills are operator-installed plugins; prefer them over guessing.",
+        "When skills conflict with GROUNDED FACTS FROM PRIOR RESEARCH, facts win.",
         "",
     ]
     used = 0
@@ -329,3 +460,21 @@ def build_skills_system_block(
         used += len(chunk)
 
     return "\n".join(parts).strip()
+
+
+def build_vibe_skills_block(
+    task_text: str,
+    *,
+    registry_path: Optional[Path] = None,
+    per_skill_max: int = DEFAULT_VIBE_PER_SKILL_MAX,
+    total_max: int = DEFAULT_VIBE_TOTAL_MAX,
+) -> str:
+    """Skills inject for System A architect/coder/debugger (task-matched)."""
+    return build_skills_system_block(
+        registry_path=registry_path,
+        per_skill_max=per_skill_max,
+        total_max=total_max,
+        pipeline="vibe_coding",
+        task_text=task_text or "",
+        require_task_match=True,
+    )

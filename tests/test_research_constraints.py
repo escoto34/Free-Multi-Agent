@@ -43,3 +43,15 @@ def test_empty_report_still_emits_rules():
     block = format_grounded_constraints_block("", [])
     assert "GROUNDED FACTS" in block
     assert "(none found in research" in block
+
+
+def test_constraints_include_content_test_and_landing_rules():
+    block = format_grounded_constraints_block(
+        "Brand #004aad WhatsApp https://wa.me/15551234567 Email: Not found",
+        ["https://example.com"],
+    )
+    assert 'assert "@"' in block or "not in html" in block.lower()
+    assert "@media" in block.lower() or "CSS" in block
+    assert "type=" in block or "email" in block.lower()
+    assert "static" in block.lower()
+    assert "wa.me" in block.lower()

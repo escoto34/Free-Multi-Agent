@@ -7,6 +7,7 @@ Prefers surgical file lists so the Coder does not rewrite the whole repo.
 
 from __future__ import annotations
 
+from agents.vibe_coding.web_quality import WEB_LANDING_QUALITY_RULES
 from core.agent_runtime import run_structured_agent
 from schemas.vibe_coding import TechnicalSpec
 
@@ -33,15 +34,25 @@ When the idea includes GROUNDED FACTS FROM PRIOR RESEARCH or a research report:
 - architecture MUST name concrete hex colors, WhatsApp/social URLs, logo URLs, and
   address strings taken from those facts (copy them).
 - architecture MUST forbid inventing emails/phones/maps/doctor bios not in the facts.
-- For marketing / clinic / brand websites: DEFAULT to a self-contained static site
-  (HTML + CSS + minimal JS) in a dedicated folder (e.g. brand-site/index.html).
+- For marketing / brand websites: DEFAULT to a self-contained static site
+  (HTML + CSS + minimal JS) in a dedicated folder (e.g. site/index.html).
+- Call it a "static single-page landing", NOT a "SPA" / Next.js app, unless the user
+  explicitly asked for a JS-framework SPA.
 - Do NOT choose Next.js, React, Vue, Angular, Tailwind-as-npm, or Jest unless the
   user explicitly requested that stack. The host test runner is pytest-only.
-- Put pytest checks next to the site, e.g. brand-site/tests/test_content.py, that
+- Put pytest checks next to the site, e.g. site/tests/test_content.py, that
   assert grounded hex colors, wa.me links, logo URL, and address substrings appear
   in the generated HTML/CSS. Never rely on Selenium/Chrome.
+- test_cases MUST describe GOOD assertions (substring / regex). Explicitly FORBID
+  fragile checks like assert "@" not in html (CSS @media contains @).
+- If EMAILS are missing in research: plan WhatsApp/phone CTAs, not email forms;
+  test_cases should check mailto: absence via safe patterns, not bare "@".
 - Do not plan fake binary image files; use remote asset URLs from research or inline SVG.
+- architecture must describe a usable landing (hero, services, contact, responsive),
+  not a minimal stub.
 - files_to_create must list every path including the pytest file(s).
+
+""" + WEB_LANDING_QUALITY_RULES + """
 
 Ensure your response is valid JSON only. Do not wrap in markdown code blocks like ```json ... ```. Just return raw JSON.
 """
@@ -49,8 +60,17 @@ Ensure your response is valid JSON only. Do not wrap in markdown code blocks lik
 
 def run_architect(idea: str, router_instance=None) -> TechnicalSpec:
     """Design the technical specification for the given idea."""
+    system = SYSTEM_PROMPT
+    try:
+        from core.skills import build_vibe_skills_block
+
+        skills_block = build_vibe_skills_block(idea or "")
+        if skills_block:
+            system = f"{SYSTEM_PROMPT}\n\n{skills_block}"
+    except Exception:
+        pass
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {
             "role": "user",
             "content": (

@@ -302,50 +302,50 @@ def test_extract_emails():
 def test_merge_host_verified_primary_fixes_empty_denial():
     """When PRIMARY OK succeeded, report must not end as Sources: [] / not found."""
     primary_body = (
-        "CREDental clinic text.\n"
+        "Acme Brand business text.\n"
         "--- STRUCTURED EXTRACTS (literal from HTML; not model-invented) ---\n"
         "Hex colors found in page CSS/inline styles: #004aad, #cb6ce6, #25D366\n"
         "Contact / social links found in HTML:\n"
-        "  - https://wa.me/50432433050\n"
-        "  - https://instagram.com/credental_oficial\n"
+        "  - https://wa.me/15551234567\n"
+        "  - https://instagram.com/acme_oficial\n"
         "Image assets (logo/brand candidates):\n"
-        "  - https://credentalhn.com/imagenes/logo.png\n"
+        "  - https://acmebrand.io/images/logo.png\n"
         "--- END STRUCTURED EXTRACTS ---"
     )
     corpus = (
         "=== PRIMARY SOURCES ===\n"
-        f"--- PRIMARY OK | URL: https://credentalhn.com | HTTP 200 ---\n"
+        f"--- PRIMARY OK | URL: https://acmebrand.io | HTTP 200 ---\n"
         f"{primary_body}\n"
-        f"--- END PRIMARY https://credentalhn.com ---\n"
+        f"--- END PRIMARY https://acmebrand.io ---\n"
         "=== END PRIMARY SOURCES ===\n"
         "=== LIVE DUMP ===\n(no useful hits)\n"
     )
     denial = (
-        "No official website was found. Credental cannot be verified. "
-        "Sources yielded no direct hits for the clinic."
+        "No official website was found. Acme Brand cannot be verified. "
+        "Sources yielded no direct hits for the business."
     )
     content, sources = merge_host_verified_primary(denial, [], corpus)
-    assert "credentalhn.com" in content.lower()
+    assert "acmebrand.io" in content.lower()
     assert "Host-verified primary" in content
-    assert "#004aad" in content or "wa.me/50432433050" in content
-    assert any("credentalhn.com" in s for s in sources)
-    assert extract_primary_ok_blocks(corpus)[0][0] == "https://credentalhn.com"
+    assert "#004aad" in content or "wa.me/15551234567" in content
+    assert any("acmebrand.io" in s for s in sources)
+    assert extract_primary_ok_blocks(corpus)[0][0] == "https://acmebrand.io"
 
 
 def test_source_urls_with_markdown_backticks_still_verify():
     """Models often emit sources as ``https://wa.me/…` with trailing backticks."""
     from core.search_guards import normalize_source_url, scrub_ungrounded_claims, source_url_is_verified
 
-    corpus = "PRIMARY https://wa.me/50432433050 and https://credentalhn.com/logo.png"
-    dirty = "https://wa.me/50432433050`"
-    assert normalize_source_url(dirty) == "https://wa.me/50432433050"
+    corpus = "PRIMARY https://wa.me/15551234567 and https://acmebrand.io/logo.png"
+    dirty = "https://wa.me/15551234567`"
+    assert normalize_source_url(dirty) == "https://wa.me/15551234567"
     assert source_url_is_verified(dirty, corpus)
     cleaned, sources, notes = scrub_ungrounded_claims(
         "Contact via WhatsApp.",
         corpus,
-        sources=[dirty, "https://credentalhn.com/logo.png`"],
+        sources=[dirty, "https://acmebrand.io/logo.png`"],
     )
-    assert "https://wa.me/50432433050" in sources
+    assert "https://wa.me/15551234567" in sources
     assert any("logo.png" in s for s in sources)
     assert not any("Dropped source" in n and "wa.me" in n for n in notes)
     assert cleaned  # still a report body

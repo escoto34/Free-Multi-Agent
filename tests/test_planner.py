@@ -181,19 +181,19 @@ def test_execute_plan_research_then_vibe_with_long_prior(monkeypatch):
 
 def test_ensure_origin_urls_reinjects_dropped_domain():
     step = (
-        "Deep-dive Credental in Colonia Trejo, San Pedro Sula. "
+        "Deep-dive Acme Brand in Example City. "
         "Find address, social, and competitors."
     )
     origin = (
-        "investiga Credental clinica dental Honduras Colonia Trejo "
-        "pagina web actual: credentalhn.com imagen de marca"
+        "research Acme Brand local business Example City "
+        "official website: acmebrand.io brand image"
     )
     out = ensure_origin_urls_in_research_prompt(step, origin)
-    assert "credentalhn.com" in out
+    assert "acmebrand.io" in out
     assert "USER-NAMED OFFICIAL" in out
     # Already present → no duplicate enrichment block
     same = ensure_origin_urls_in_research_prompt(
-        step + " official site credentalhn.com", origin
+        step + " official site acmebrand.io", origin
     )
     assert "USER-NAMED OFFICIAL" not in same
 
@@ -205,8 +205,8 @@ def test_execute_plan_injects_origin_url_into_research(monkeypatch):
     def fake_research(prompt: str):
         research_prompts.append(prompt)
         return {
-            "content": "Clinic found at official site.",
-            "sources": ["https://credentalhn.com"],
+            "content": "Business found at official site.",
+            "sources": ["https://acmebrand.io"],
             "is_safe": True,
             "error": None,
         }
@@ -219,14 +219,14 @@ def test_execute_plan_injects_origin_url_into_research(monkeypatch):
             PipelineStep(
                 action="research",
                 # Planner rewrote without the domain
-                prompt="Investigate Credental dental clinic Colonia Trejo SPS",
+                prompt="Investigate Acme Brand local business Example City",
                 uses_prior=False,
             ),
         ],
     )
-    origin = "Credental Colonia Trejo website credentalhn.com brand image"
+    origin = "Acme Brand Example City website acmebrand.io brand image"
     result = execute_plan(plan, origin_prompt=origin)
     assert result["ok"] is True
     assert len(research_prompts) == 1
-    assert "credentalhn.com" in research_prompts[0]
+    assert "acmebrand.io" in research_prompts[0]
     assert "USER-NAMED OFFICIAL" in research_prompts[0]

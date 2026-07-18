@@ -1,29 +1,18 @@
 # Free-Multi-Agent
 
-Local multi-agent tooling on **free/trial LLM APIs**. One install, one `.env`, no config files in other repos.
+Local multi-agent tooling on **free/trial LLM APIs**. One install, one `.env` — no MultiAgent config needed in other projects.
 
 | Piece | What it does |
 |-------|----------------|
-| **Interactive TUI** (`multiagent`) | Chat with host tools, graphify context, model/keys config |
-| **System A — Vibe Coding** | Architect → Coder → tests → Debugger + Git checkpoint/rollback |
-| **System B — Deep Research** | Safety → compress (+ research typology) → web search → ground → synthesize |
-| **Planner** (`/do`) | Splits a task into ordered vibe and/or research steps |
-| **Terminal toolbox** | Curated modern CLI catalog: doctor, suggest, runtime backends (`eza`/`rg`/`fd`/…) |
-| **Smart model routing** | Difficulty scores → primary/fallback + reasoning effort on capable models |
-| **Swarm-style handoffs** | Explicit control transfer with full audit trail (`handoff_history`) |
+| **TUI** (`multiagent`) | Chat with host tools (files, terminal, graphify, toolbox) |
+| **`/do <task>`** | Planner splits work into **vibe-coding** and/or **deep-research** |
+| **System A — Vibe** | Architect → Coder → tests → Debugger (Git checkpoint / rollback) |
+| **System B — Research** | Safety → compress → web search → ground → synthesize |
+| **Toolbox** | Suggest / doctor modern CLIs (`eza`, `rg`, `fd`, …) when installed |
+| **Skills** | Optional `SKILL.md` packs (registered globally; **off by default**) |
 
-**Orchestration rationale** (benchmarks, rate limits, selection rules, reasoning policy, why each model per role): **[`systems.md`](systems.md)**.
-
-| Config / docs | Purpose |
-|---------------|---------|
-| `config/model_router.yaml` | Live provider/model/fallback per role |
-| `config/defaults_model_router.yaml` | Factory reset snapshot |
-| `config/model_benchmarks.yaml` | Scores 0–100, selection thresholds, reasoning effort bands |
-| `config/cli_toolbox.yaml` | Terminal toolbox catalog |
-| `docs/handoff_protocol.md` | Agent handoff protocol + diagrams |
-| `systems.md` | Full free-durable design source of truth |
-
-Agents load provider/model/fallback at runtime via `core/agent_config.py` — edit YAML (or `/config`) and the next run uses it. Soft daily call caps live in `core/quotas.py` (must stay ≤ real provider limits).
+**Why each model is assigned, quotas, selection rules, and reasoning policy:**  
+see **[`systems.md`](systems.md)** (design source of truth — not required for daily use).
 
 ---
 
@@ -32,307 +21,121 @@ Agents load provider/model/fallback at runtime via `core/agent_config.py` — ed
 ```bash
 git clone <repo-url> && cd MultiAgent
 python3 -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-# or: pip install -e ".[dev]"
-cp .env.example .env                               # fill keys (or use TUI /keys)
+pip install -e ".[dev]"                            # or: pip install -r requirements.txt
+cp .env.example .env                               # then fill keys (or use multiagent keys set)
 
 ./bin/install-launcher.sh                          # optional: multiagent on PATH
-multiagent                                         # TUI from any directory
-# or: python cli.py chat
+multiagent                                         # opens the TUI
 ```
 
-### Free-durable keys (defaults)
+### API keys
 
-| Env | Needed for |
-|-----|------------|
-| `AGNES_API_KEY` | chat, planner, architect, compressor (+ many fallbacks) |
-| `MISTRAL_API_KEY` | coder (`codestral-latest`); grounding fallback |
-| `GROQ_API_KEY` | debugger, safety, web search, synthesizer |
-| `COHERE_API_KEY` | research grounding only |
-| `GEMINI_API_KEY` | cascade / role fallbacks |
-| `CEREBRAS_API_KEY` | quality cascade leaf (~5 RPM) |
-| `OPENROUTER_API_KEY` | optional catalog only (off hot path) |
-| Ollama | no key (optional local override) |
+Keys live only in this install’s `.env` (never print full values).
+
+| Env | Used for (free-durable defaults) |
+|-----|----------------------------------|
+| `AGNES_API_KEY` | Chat, planner, architect, compressor (+ many fallbacks) |
+| `MISTRAL_API_KEY` | Coder (`codestral-latest`); grounding fallback |
+| `GROQ_API_KEY` | Debugger, safety, web search, synthesizer |
+| `COHERE_API_KEY` | Research **grounding only** (scarce trial bucket) |
+| `GEMINI_API_KEY` | Role / cascade fallbacks |
+| `CEREBRAS_API_KEY` | Cascade leaf (~5 RPM) — optional |
+| `OPENROUTER_API_KEY` | Optional catalog only (not on the default hot path) |
+| Ollama | No key — optional local override |
 
 ```bash
-multiagent keys set agnes    # https://platform.agnes-ai.com
+multiagent keys set agnes      # https://platform.agnes-ai.com
 multiagent keys set mistral
 multiagent keys set groq
-multiagent keys set cohere
-multiagent config show
+multiagent keys set cohere     # if you run research
 multiagent providers
-multiagent quota             # usage + estimated remaining runs
+multiagent config show
+multiagent quota               # usage + estimated remaining full A/B runs
 ```
 
-**Keys stay only in MultiAgent’s `.env`.** Consumer projects do not need MultiAgent files.
+**Working directory:** Git commits/rollbacks for vibe and chat file tools use the directory where you launched `multiagent`, not the install tree.
 
-System A commits/rollbacks use the **Git repo of your current working directory**. Chat file tools also target that **launch cwd**, not the MultiAgent install tree.
-
-Optional (better chat UX): install CLIs from the **core** toolbox profile (`eza`, `bat`, `rg`, `fd`, …):
+Optional better host UX:
 
 ```bash
-multiagent tools doctor --profile core
+multiagent tools doctor --profile core   # eza, bat, rg, fd, …
 ```
 
 ---
 
-## Interactive TUI
+## Using the TUI
 
 ```bash
-multiagent                 # chat (default)
-multiagent --help
-multiagent providers
-multiagent keys set groq
-multiagent config show
-multiagent quota
-multiagent tools doctor
+multiagent                 # default command = chat TUI
 ```
 
-### Keys & chrome
-
-| Action | Binding / UI |
-|--------|----------------|
+| Action | Binding |
+|--------|---------|
 | Send | Enter |
-| Newline in prompt | Shift+Enter |
+| Newline | Shift+Enter |
 | Compact session | Ctrl+K |
-| Config side panel | Ctrl+O (or Ctrl+P); Esc closes |
-| Help panel | F1 |
-| Copy selection | drag text → Ctrl+C (no selection → quit) |
+| Config panel | Ctrl+O (or Ctrl+P); Esc closes |
+| Help | F1 |
 | Quit | Ctrl+Q |
 
-Config and help are mutually exclusive side panels; they **resize the chat** (push content). Drag the left edge to change width (max ½ screen).
+Free-text chat can list/read/edit files, run terminal commands, and query the local knowledge graph. **Mutating** tools ask for approval (`accept` / `reject` / `always`, or `/approve always` · `/approve off`).
 
-Session meter (ctx / graphify / skills) lives under **config → models**, not in the chat footer.
-
-### Chat (tool-using agent)
-
-Free-text chat is **not** pure autocomplete. The host:
-
-1. Seeds context (graphify + directory/file hits when relevant; toolbox brief when relevant).
-2. Lets the model call host tools (`list_dir`, `read_file`, `write_file`, `edit_file`, `run_terminal` / `bash`, `grep`, `glob`, `create_venv`, `pip_install`, `graphify_query`, `graphify_update`, `toolbox_query`, …).
-3. Asks approval for **mutating** tools **one command at a time**.
-
-You do **not** need to name tools. Example: *“mira `docs/` y edita el tercer `.txt`”* → `list_dir` → `read_file` → `edit_file` (edit needs approval unless `/approve always`).
-
-Approval bar (compact vertical list):
+### Slash commands
 
 ```text
-**ls -la agents**     ← command header
-`accept`
-`reject`
-`always`              ← always-approve until /approve off
-```
+/do <task>                 Run the planner (vibe and/or research)
+/planner | /planner set    Show / set planner model
+/research-resume <id> …    Resume a research checkpoint
 
-Also: `a` / `r` / `!`, or `/approve always` · `/approve off`.
-
-Important paths:
-
-- **`agents/`** — Python package (planner, deep_research, vibe_coding)
-- **`.agents/`** — editor rules only (not the package)
-- Writes go to **launch cwd**; MultiAgent package graph lives under the install’s `graphify-out/`
-
-### Slash commands (inside TUI)
-
-```text
-/do <task>                      Planner chooses vibe-coding and/or deep-research
-/planner | /planner set <p> <m> Show / set planner model
-/research-resume <id> <topic>   Resume System B checkpoint
-
-/config                         Open config panel
-/config set <sys.role> <prov> <model>
-/config fallback <sys.role> <provider> <model>
-/config clear-fallback <sys.role>
-/config cycles <N> | limit <tokens> | reset | text
-
-/keys | /keys set <provider> <key>
-/providers
-/skills …                       Global SKILL.md packs (~/.config/multiagent/)
-/tools …                        Terminal toolbox (doctor / suggest / search / alt)
+/config …                  Models, fallbacks, cycles, reset
+/keys | /providers
+/skills …                  External skill packs (see below)
+/tools …                   Terminal toolbox
 /approve [always|off]
 
-/compact [--llm] | /clear | /status
+/compact | /clear | /status
 /quota | /history [N]
 /graphify [question]
 /help | /exit
 ```
 
-Direct `/vibe` and `/research` were removed; use **`/do`** so the planner picks pipelines.
+There are no standalone `/vibe` or `/research` commands — use **`/do`**.
 
-### Outer CLI
+### Outer CLI (no TUI)
 
 ```bash
 multiagent config show|set|reset
 multiagent keys set|status
 multiagent providers
-multiagent skills list|add|enable|…
-multiagent tools doctor [--profile core] [--missing-only]
-multiagent tools suggest "search code"
-multiagent tools search yaml
-multiagent tools show eza
-multiagent tools list [--check] [category]
-multiagent tools alt ls
-multiagent tools profiles
-multiagent quota                 # live usage + estimated remaining A/B runs
+multiagent skills list|add|enable|disable|…
+multiagent tools doctor|suggest|search|…
+multiagent quota
 multiagent history --limit 20
 ```
 
-Pipelines run **inside the TUI** via `/do` (not as outer `vibe`/`research` subcommands).
+---
+
+## Pipelines (`/do`)
+
+### Vibe coding
+
+Implements code in the **current Git repo**: Architect → Coder → scoped tests → Debugger (retry cycles from config). On success it can commit; on exhaustion it rolls back (after stashing any pre-existing dirty work).
+
+For marketing / brand landings after research, the host prefers **static HTML/CSS/JS** + pytest content checks (not Next/Jest unless you ask). Research is chained as **grounded facts** so contact/brand details are not invented. Details: [`docs/vibe_web_failures.md`](docs/vibe_web_failures.md).
+
+### Deep research
+
+Safety gate → context compress (with research typology) → live web search → grounding → synthesis. Checkpoints live under `data/` (gitignored). User-named official domains are fetched as primary sources when present in the task.
+
+### Planner
+
+Chooses step order (often research, then vibe with prior context). Non-English tasks may be translated for the pipelines; chat still answers in your language.
 
 ---
 
-## Terminal toolbox
+## Default roles
 
-Catalog: `config/cli_toolbox.yaml` · Logic: `core/toolbox.py` · Tests: `tests/test_toolbox.py`
-
-### Surfaces
-
-| Surface | Examples |
-|---------|----------|
-| Slash (TUI) | `/tools`, `/tools doctor git`, `/tools suggest safe delete`, `/tools alt ls` |
-| Outer CLI | `multiagent tools doctor -p core`, `multiagent tools search yaml` |
-| Chat host tool | `toolbox_query` with `mode`: `suggest` · `doctor` · `search` · `show` · `alt` · `runtime` |
-
-When a tool is on `PATH`, host tools prefer it automatically.
-
-### Runtime (automatic)
-
-| Host tool | Prefers if installed | Fallback |
-|-----------|----------------------|----------|
-| `list_dir` | `eza` / `tre` | Python listing |
-| `grep` | `rg` (ripgrep) | Python walk |
-| `glob` | `fd` | `pathlib.glob` |
-| `read_file` | `bat -p` (no ANSI) | plain read |
-| `run_terminal` | soft-upgrade `ls`→`eza`, `cat`→`bat`, `grep`→`rg`, … | original command |
-
-Outputs are tagged, e.g. `[via eza]`. Disable upgrades with `"raw": true` / `"no_upgrade": true` on `run_terminal`. Destructive classics such as `rm` are **not** auto-rewritten.
-
-### Doctor profiles
-
-`core` · `git` · `docker` · `k8s` · `disk` · `net` · `monitor` · `data` · `security` · `ai` · `modern-rust` · `all`
-
-```bash
-multiagent tools doctor -p core
-multiagent tools doctor -p git
-multiagent tools suggest "docker image layers"
-multiagent tools alt grep
-```
-
----
-
-## Pipelines
-
-### System A — Vibe Coding
-
-**Architect → Coder → Test Executor → Debugger** (YAML: `vibe_coding.*`, `max_fix_cycles`).
-
-Safeguards (`graphs/vibe_coding_graph.py`):
-
-- Path traversal blocked; all-or-nothing + atomic writes  
-- Dirty tree: pre-run WIP stash, restore after commit/rollback  
-- Merge into existing files when possible (preserve helpers)  
-- Difficulty plan up front; coder/debugger may handoff model switches into `handoff_history`  
-- Failed run snapshot under `data/vibe_last_failed/` (gitignored)
-
-### System B — Deep Research
-
-**Safety → Context compress (+ research typology) → Web search → Grounding → Synthesis** (+ SQLite checkpoints under `data/checkpoints.db`).
-
-Each topic is classified by **purpose** (basic/applied), **depth** (exploratory/descriptive/explanatory), **data approach** (quant/qual/mixed), and **design** (experimental/non-experimental). Search facets and report structure adapt to that profile (see **[systems.md](systems.md)**).
-
-Safeguards:
-
-- Query size limits; abort if search admits “no live search”  
-- Primary URL fetch when the user names a domain + multi-facet open-web search  
-- Citation URLs verified against that run’s search/primary corpus  
-- Router treats empty HTTP 200 as failure and cascades fallbacks  
-- Entity-focused multi-facet search to reduce subject bleed  
-- Formal handoffs between nodes (query + intermediates preserved)
-
-### Planner (`/do`)
-
-User-chosen model (`cli.planner` or `/planner set`). Non-English tasks can be translated to English for A/B; chat still answers in the user’s language. Planner path also gets difficulty-aware **reasoning effort** when the selected model supports it (e.g. Groq GPT-OSS).
-
-Full role rationale → **[systems.md](systems.md)**.
-
----
-
-## Model selection, difficulty & reasoning
-
-Free-tier limits in this stack are almost always **per call (RPD)**, not per token. Raising reasoning effort on a supported model does **not** burn an extra daily call; cascading to another model does.
-
-### Runtime flow
-
-```text
-task text
-  → DifficultyAssessment (core/difficulty_scorer.py)
-  → select_for_role (core/model_selector.py)  # primary vs fallback
-  → [if switch] record_model_selection_handoff → transfer_control
-  → resolve_reasoning_kwargs (core/reasoning_params.py)  # same call
-  → router.call_agent  # 1 quota tick on success; sanitize kwargs on cascade
-```
-
-| Module | Responsibility |
-|--------|----------------|
-| `core/difficulty_scorer.py` | Structured 0–100 scores: `code`, `reason`, `ground`, `synth`, `safety` |
-| `core/model_selector.py` | Primary vs fallback from YAML scores + health signals |
-| `core/reasoning_params.py` | `reasoning_effort` / `include_reasoning` for capable models |
-| `core/agent_runtime.py` | Wires selection + reasoning into every agent call |
-| `core/handoff.py` | Official node-to-node transfer API |
-| `config/model_benchmarks.yaml` | Editable scores, thresholds, effort bands |
-
-### When does fallback win?
-
-Prefer fallback only if:
-
-1. Primary **expired** (`free_until`, e.g. `tencent/hy3:free` after **2026-07-21**), or  
-2. Primary **degraded** (`quota_exhausted`, `rate_limited_429`, `empty_completion`, …), or  
-3. Primary **mis-specialized**: `score_fallback(area) − score_primary(area) ≥ 8` **and** primary score ≤ 49 on a relevant area  
-
-Healthy primary + easy/adequate task → **stay on primary** even if the fallback edges higher by a few points. Details → **[systems.md §4.3–4.5](systems.md)**.
-
-### Reasoning effort (same call)
-
-| Difficulty (role-relevant max) | Abstract effort |
-|--------------------------------|-----------------|
-| &lt; 50 | low |
-| 50–74 | medium |
-| ≥ 75 | high |
-
-Role clamps (examples): debugger/synthesizer/planner min **medium**; safety/web_search max **low**.
-
-**Models with API reasoning** (Groq GPT-OSS family, Qwen 3.6 on Groq, …): kwargs injected automatically; default `include_reasoning=false` so JSON agents get clean `content`.  
-**Others** (Agnes, Codestral, Gemini, Cohere, compound-mini): no effort kwargs — quality is model choice only. Cascade hops **strip** unsupported reasoning params so Agnes never sees `reasoning_effort`.
-
----
-
-## Agent handoffs
-
-Nodes pass control via `core.handoff.transfer_control` (Swarm-style): original user input (`idea` / `query`), intermediate artifacts (`TechnicalSpec`, `GroundedReport`, …), and an audit trail in `handoff_history` are preserved on every transfer. Model switches use the same path via `record_model_selection_handoff`.
-
-Protocol + Mermaid diagrams → **[docs/handoff_protocol.md](docs/handoff_protocol.md)**.
-
----
-
-## Providers, quotas & free-durable defaults
-
-| Provider | Env | Free-tier notes (summary) |
-|----------|-----|---------------------------|
-| **Agnes AI** | `AGNES_API_KEY` | Default text model `agnes-2.0-flash` (~20 RPM fair-use, $0/M). Image/video models exist but are not chat roles. |
-| **Groq** | `GROQ_API_KEY` | ~1 000 RPD/model; `groq/compound-mini` ~250 RPD + live search; GPT-OSS supports `reasoning_effort` |
-| **Mistral** | `MISTRAL_API_KEY` | Experiment free; Codestral for coding |
-| **Cohere** | `COHERE_API_KEY` | Trial ~1 000/mo, non-commercial — **grounding only** |
-| **Gemini** | `GEMINI_API_KEY` | AI Studio Flash free; used as fallback |
-| **Cerebras** | `CEREBRAS_API_KEY` | ~5 RPM, ~1M TPD; quality cascade leaf |
-| **OpenRouter** | `OPENROUTER_API_KEY` | `:free` ~50 RPD shared — **off hot path** (hy3 promo expires **2026-07-21**) |
-| **Ollama** | *(none)* | Local; models = only `ollama list` |
-
-Quota soft-caps count **calls/day**, not tokens (`core/quotas.py` + `data/quotas.db`). Estimate remaining A/B runs:
-
-```bash
-multiagent quota
-```
-
-### Default roles (free-durable)
+Live config: `config/model_router.yaml` · factory reset: `multiagent config reset` (from `config/defaults_model_router.yaml`).
 
 | Role | Primary | Fallback |
 |------|---------|----------|
@@ -344,106 +147,46 @@ multiagent quota
 | research web_search | `groq` / `groq/compound-mini` | — (hard fail if no live search) |
 | research grounding | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` |
 | research synthesizer | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
-| cli chat / planner | `agnes` / `agnes-2.0-flash` | `groq` / `openai/gpt-oss-120b` |
-
-**Cascade (simplified):**  
-`cohere → mistral → agnes → groq → gemini → cerebras → groq`  
-OpenRouter failures hop to **Agnes**, not deeper `:free` models.
+| chat / planner | `agnes` / `agnes-2.0-flash` | `groq` / `openai/gpt-oss-120b` |
 
 ```bash
-multiagent config show
 multiagent config set vibe_coding.coder mistral codestral-latest
-multiagent config reset                 # restore factory free-durable defaults
-
-# Optional local Ollama
-ollama pull llama3.2
-multiagent config set cli.chat ollama llama3.2
+multiagent config reset
+# optional local model:
+# ollama pull llama3.2 && multiagent config set cli.chat ollama llama3.2
 ```
 
-- Live: `config/model_router.yaml`  
-- Factory: `config/defaults_model_router.yaml`  
-- Benchmarks + selection + reasoning: `config/model_benchmarks.yaml`  
-- Soft daily limits: `core/quotas.py`  
-- Remaining-run estimates: `core/quota_estimate.py`  
-- Full tables & rationale: **[systems.md](systems.md)**
+Soft daily call caps and remaining-run estimates: `multiagent quota`.  
+Full cascade, benchmarks, and “when fallback wins” rules: **[`systems.md`](systems.md)**.
 
 ---
 
-## Production hardening
+## Skills
 
-Built to run on free-tier APIs without burning quota or corrupting the user’s repo:
+Optional instruction packs (`SKILL.md`). Registry: `~/.config/multiagent/skills.yaml`.
 
-- **Quota gating + cascading fallback** (`core/router.py`) — refuses calls past a provider’s soft daily limit and walks the fallback chain (skip-visited, no infinite loops).
-- **Empty-completion guard** — HTTP 200 with empty content cascades instead of breaking Pydantic validation.
-- **Difficulty-aware model + reasoning** — hard tasks raise effort on GPT-OSS without an extra call; degraded primaries hand off via audited fallback.
-- **Swarm-style handoffs** — refuse transfers that would drop the original user input.
-- **System A safety rails** — path-traversal blocked, atomic writes, pre-run WIP stash + git rollback.
-- **System B safety rails** — unsafe queries terminate; fake “no live search” hard-aborts before grounding.
-- **Rotating logs** — under `data/logs/` (gitignored); never logs keys or full message bodies.
-- **Tool sandbox** — `run_terminal` blocks classic dangerous commands and soft-upgrades `ls`→`eza`, etc. when available.
-- **KeyboardInterrupt-safe** — TUI and pipelines exit cleanly on Ctrl-C.
-- **hy3 temporal** — catalog-only; auto-skip after `free_until` (2026-07-21) with score cap ≤49.
+**New skills are registered disabled.** Nothing injects until you enable them.
 
----
-
-## Tech stack
-
-- Python 3.11+ · Pydantic v2 · LangGraph + SQLite checkpoints  
-- GitPython · Cohere SDK v2 · OpenAI SDK (Groq / OpenRouter / Mistral / Gemini / Cerebras / Agnes / Ollama)  
-- Click + Textual + Rich (TUI) · PyYAML · python-dotenv  
-- Optional host CLIs from the toolbox (eza, ripgrep, fd, bat, …) — not Python deps  
-- Packaged via `pyproject.toml` (`pip install -e .` exposes the `multiagent` command)
-
----
-
-## Project layout
-
-```text
-MultiAgent/
-├── cli.py                 # Click entry (chat default, config, keys, skills, tools, quota, …)
-├── systems.md             # Free-tier limits, benchmarks, selection & reasoning policy
-├── pyproject.toml
-├── .env.example
-├── bin/multiagent         # PATH launcher (preserves caller cwd)
-├── config/
-│   ├── model_router.yaml              # live provider/model roles
-│   ├── defaults_model_router.yaml     # factory reset snapshot
-│   ├── model_benchmarks.yaml          # scores, thresholds, reasoning effort
-│   └── cli_toolbox.yaml               # modern terminal tool catalog
-├── docs/
-│   └── handoff_protocol.md            # Swarm-style transfer protocol
-├── cli_app/               # TUI + slash commands + agent tools
-│   ├── tui.py
-│   ├── commands.py
-│   ├── agent_chat.py
-│   ├── tools.py
-│   ├── graph_rag.py
-│   └── session.py
-├── core/
-│   ├── router.py          # cascade, empty-completion, reasoning via extra_body
-│   ├── quotas.py          # per-call soft daily caps (SQLite)
-│   ├── quota_estimate.py  # remaining A/B run estimates for CLI
-│   ├── difficulty_scorer.py
-│   ├── model_selector.py
-│   ├── reasoning_params.py
-│   ├── handoff.py
-│   ├── agent_runtime.py   # selection + reasoning injection for all agents
-│   ├── agent_config.py, config_editor.py, clients.py, keys.py
-│   ├── toolbox.py, skills.py, search_guards.py, runs.py
-│   └── …
-├── agents/                # vibe_coding + deep_research + planner
-├── graphs/                # LangGraph pipelines (handoffs + difficulty)
-├── schemas/               # domain + handoff Pydantic models
-├── skills/README.md
-├── data/                  # local SQLite / logs / failed vibe snaps — gitignored
-├── graphify-out/          # knowledge graph — gitignored
-└── tests/                 # offline mocks; handoff / selector / reasoning / quota
+```bash
+multiagent skills add ./skills/vibe-landing      # still off
+multiagent skills enable vibe-landing
+multiagent skills list
 ```
 
-User-global state (not in this repo):
+Bundled examples (landing quality + safe content tests): `skills/vibe-landing`, `skills/vibe-content-tests`.  
+Format and pipelines (`chat` / `vibe_coding`): [`skills/README.md`](skills/README.md).
 
-- `~/.config/multiagent/skills.yaml` — external skill registry  
-- MultiAgent `.env` — API keys only in the install tree  
+---
+
+## Terminal toolbox
+
+```bash
+multiagent tools doctor -p core
+multiagent tools suggest "search code"
+multiagent tools alt ls
+```
+
+When tools are on `PATH`, chat host helpers prefer them (`eza`, `rg`, `fd`, `bat`, …). Catalog: `config/cli_toolbox.yaml`.
 
 ---
 
@@ -451,21 +194,147 @@ User-global state (not in this repo):
 
 ```bash
 pytest tests/ -v
-pytest tests/test_toolbox.py -v
-pytest tests/test_handoff.py tests/test_model_selector.py tests/test_reasoning_params.py -v
-pytest tests/test_quota_estimate.py tests/test_router_fallback.py tests/test_graphs_mocked.py -v
 ```
 
-Network-facing tests mock HTTP; no real API usage in CI-style runs. Toolbox tests probe real `PATH` for optional binaries.
+Network tests mock HTTP; no real API calls in normal CI-style runs.
+
+---
+
+## Technical reference
+
+For operators and contributors. Live design narrative and full tables: **[`systems.md`](systems.md)**. Machine-readable scores/thresholds: `config/model_benchmarks.yaml`. Live roles: `config/model_router.yaml`.
+
+### Project structure
+
+```text
+MultiAgent/
+├── cli.py                 # Click entry: multiagent → TUI by default
+├── systems.md             # Free-durable design: limits, benchmarks, selection
+├── config/
+│   ├── model_router.yaml          # live provider/model/fallback per role
+│   ├── defaults_model_router.yaml # factory reset snapshot
+│   ├── model_benchmarks.yaml      # 0–100 scores, selection + reasoning policy
+│   └── cli_toolbox.yaml           # terminal tool catalog
+├── docs/                  # handoffs, vibe web quality notes
+├── cli_app/               # TUI, slash commands, host tools, /do orchestrator
+├── core/
+│   ├── router.py          # provider cascade, empty-completion, quota tick
+│   ├── quotas.py          # soft daily caps (calls, not tokens)
+│   ├── difficulty_scorer.py  # task → DifficultyAssessment (0–100 areas)
+│   ├── model_selector.py  # primary vs fallback from scores + health
+│   ├── reasoning_params.py   # reasoning_effort on capable models (same call)
+│   ├── agent_runtime.py   # wires selection + reasoning into agent calls
+│   ├── handoff.py         # Swarm-style transfer + audit trail
+│   ├── skills.py · toolbox.py · search_guards.py · …
+├── agents/                # planner, vibe_coding/*, deep_research/*
+├── graphs/                # LangGraph: vibe_coding_graph, deep_research_graph
+├── schemas/               # Pydantic domain + handoff models
+├── skills/                # bundled SKILL.md (opt-in)
+├── data/                  # quotas/runs/checkpoints/logs — gitignored
+├── graphify-out/          # package knowledge graph — gitignored
+└── tests/
+```
+
+**Control flow (one agent call):**
+
+```text
+task / role
+  → DifficultyAssessment          (code, reason, ground, synth, safety)
+  → select_for_role               (primary vs fallback; optional handoff audit)
+  → resolve_reasoning_kwargs      (effort on GPT-OSS family only; same RPD call)
+  → router.call_agent             (1 soft-quota tick on success; cascade on fail)
+  → structured domain schema
+```
+
+| Pipeline | Typical LLM steps | Notes |
+|----------|-------------------|--------|
+| Vibe (A) | 2–5 | Architect + Coder + Debugger (0–3 fix cycles) |
+| Research (B) | 5 | Safety → compress → web_search → grounding → synth |
+| `/do` | +1 planner | Then N× A and/or B |
+
+### Reasoning used for model placement
+
+Design goals (free-durable profile):
+
+1. **Survive a workday** on free/trial APIs without early hard-stop.
+2. **One scarce bucket = one critical role** (e.g. Cohere only on grounding).
+3. **Spread Groq load across model IDs** (independent ~1 000 RPD counters).
+4. **Reserve live web search** (`groq/compound-mini` ~250 RPD) for research only.
+5. Prefer **durable free** models over expiring promos; OpenRouter `:free` stays catalog-only.
+6. **Specialize**: Codestral → code; Safeguard → safety; Command A+ → RAG; 120b → debug/synth.
+
+**Runtime primary vs fallback** (`model_selector` + `model_benchmarks.yaml`):
+
+| Prefer fallback when… | Keep primary when… |
+|-----------------------|--------------------|
+| Primary expired (`free_until`), or degraded (429 / soft quota / empty completion) | Healthy primary on an easy/adequate task |
+| Mis-specialized: fallback score − primary ≥ **8** **and** primary ≤ **49** on a relevant area | Fallback only edges higher by a few points on a secondary area |
+
+**Reasoning effort** (not an extra daily call): difficulty bands map to low / medium / high. Injected only for models that support it (Groq GPT-OSS family). Debugger / synthesizer / planner floor at **medium**. Raising effort is preferred over cascading models on hard fix/report work.
+
+**Provider cascade** (after role fallback fails):  
+`cohere → mistral → agnes → groq → gemini → cerebras → groq`  
+(OpenRouter failures hop to Agnes — not deeper `:free` models.)
+
+---
+
+### Provider rate limits (API keys)
+
+Public free/trial **reference** values (~mid-2026). Providers change tiers without notice. MultiAgent soft-caps are **conservative** and enforced locally in `core/quotas.py` (must stay ≤ real limits).
+
+| Provider / env key | Free-tier reference | Soft-cap (YAML) | Stack use |
+|--------------------|---------------------|-----------------|-----------|
+| **Groq** `GROQ_API_KEY` | ~**30 RPM**; most models ~**1 000 RPD each**; `compound-mini` ~**250 RPD** + live search | **800** RPD/model | Debugger, safety, web_search, synthesizer |
+| **Agnes** `AGNES_API_KEY` | ~**20 RPM** fair-use; large context; $0/M promo text | **2 000** calls/day (local) | Chat, planner, architect, compressor, fallbacks |
+| **Mistral** `MISTRAL_API_KEY` | Experiment free (rate-limited; ~1 RPS class community) | **200**/day | Coder (Codestral); grounding fallback |
+| **Cohere** `COHERE_API_KEY` | Trial ~**1 000/month** (~25–30/day), ~20 RPM; **non-commercial** trial ToS | **28**/day | **Grounding only** |
+| **Gemini** `GEMINI_API_KEY` | Flash ~**10–15 RPM**; RPD varies (~250–1 500 class) | **400**/day shared soft | Role / cascade fallbacks |
+| **Cerebras** `CEREBRAS_API_KEY` | ~**5 RPM**, ~1M TPD | **150**/day | Cascade **leaf** (quality burst, not volume) |
+| **OpenRouter** `OPENROUTER_API_KEY` | `:free` **20 RPM**, **50 RPD shared** (&lt;$10 credits); 1 000 free RPD after credits | **45**/day shared | Catalog only (not hot path) |
+| **Ollama** *(none)* | Hardware only | Local tracker only | Optional privacy/offline override |
+
+Quota unit in this stack is almost always **calls/day**, not tokens. Cascading after 429 **costs another call** on the next model; raising `reasoning_effort` on the same model does **not**.
+
+```bash
+multiagent quota    # live usage + estimated remaining full System A/B runs
+```
+
+---
+
+### Model benchmarks (0–100) and intended use
+
+Scores are **relative within this free-durable stack** (snapshot mid-2026 in `config/model_benchmarks.yaml`) — not absolute frontier rank vs paid models.
+
+**Rubric areas:** **code** · **reason** · **ground** · **synth** · **safety**  
+**Bands:** 0–30 unreliable · 31–49 weak · 50–69 adequate · 70–84 strong · 85–100 best-in-stack (free/trial).
+
+| Model | code | reason | ground | synth | safety | Use as… |
+|-------|-----:|-------:|-------:|------:|-------:|---------|
+| `mistral` / `codestral-latest` | **88** | 62 | 40 | 55 | 35 | **Coder primary** — best free coding specialist |
+| `groq` / `openai/gpt-oss-120b` | **82** | **90** | 48 | **85** | 45 | **Debugger / synthesizer primary** — hard reason + long reports |
+| `agnes` / `agnes-2.0-flash` | **78** | **76** | 42 | **80** | 40 | **Chat, planner, architect, compressor** — high-volume free agents |
+| `gemini` / `gemini-2.0-flash` | 70 | **78** | 55 | 75 | 50 | Structured JSON / plan **fallback** |
+| `cohere` / `command-a-plus-05-2026` | 58 | 72 | **93** | 78 | 48 | **Grounding only** — RAG / citations (scarce trial) |
+| `mistral` / `mistral-small-latest` | 58 | 62 | 55 | 65 | 40 | Grounding **fallback** |
+| `groq` / `groq/compound-mini` | 50 | 58 | **88** | 52 | 30 | **Web search only** — only free live-search path |
+| `groq` / `openai/gpt-oss-safeguard-20b` | 35 | 55 | 30 | 40 | **92** | **Safety filter only** — not a general coder |
+| `openrouter` / `tencent/hy3:free` ⚠ | 55 | 60 | 38 | 58 | 35 | Catalog / temporal (**expires 2026-07-21**); auto-skip when expired |
+
+| Capability | Prefer | Avoid as primary |
+|------------|--------|------------------|
+| Coding | Codestral; Agnes; GPT-OSS-120b | Safeguard; compound-mini alone |
+| Plan / reason | GPT-OSS-120b; Gemini; Agnes | Expired promos |
+| Live search | **compound-mini only** | Models that invent “search” |
+| Citations / RAG | Command A+ | General chat without corpus |
+| Long report write-up | GPT-OSS-120b; Agnes | Mini search system as sole writer |
+| Safety gate | Safeguard-20b | Random general chat |
+
+When free-tier catalogs or limits change, update **`systems.md`**, `config/model_benchmarks.yaml`, and soft caps in the router YAML together.
 
 ---
 
 ## Notes
 
-- Prefer **Agnes / Groq** for volume; send heavy multi-step work through **`/do`**.  
-- On hard debug/synth tasks, the stack raises **reasoning effort** on GPT-OSS first (same call / same RPD).  
-- Rebuild the package graph after large code changes: `graphify update .` (or ask chat). Artifacts → `graphify-out/` (gitignored).  
-- Global skills: `~/.config/multiagent/skills.yaml` — see `skills/README.md`.  
-- Keep the toolbox catalog honest: prefer `config/cli_toolbox.yaml` over hard-coded tool lists in prompts.  
-- When free-tier limits or catalogs change, update **`systems.md`**, `config/model_benchmarks.yaml`, YAML notes, and `core/quotas.py` together.  
-- Temporal OpenRouter promos (e.g. `tencent/hy3:free` → **2026-07-21**) stay catalog-only on free-durable defaults.  
+- Prefer **Agnes / Groq** for volume; send multi-step work through **`/do`**.
+- After large code changes, refresh the package graph: `graphify update .` (or ask chat) → `graphify-out/`.
+- Full handoff protocol diagrams: [`docs/handoff_protocol.md`](docs/handoff_protocol.md).
