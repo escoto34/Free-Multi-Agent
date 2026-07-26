@@ -36,6 +36,8 @@ from textual.widgets import (
 )
 
 from cli_app.commands import chat_turn, dispatch
+from cli_app.icons import get_icon
+from cli_app.ui import ProgressStatus, ThrottledProgress
 from cli_app.session import ConversationSession
 from cli_app.tools import ToolCall
 from core.clients import get_provider_meta, list_provider_names
@@ -64,6 +66,10 @@ _DRAG_EDGE = 2
 
 # Cap chat message widgets to keep the DOM light
 _LOG_MAX_LINES = 800
+
+# Throttle progress updates to this many UI refreshes per second
+_PROGRESS_FPS = 10
+_PROGRESS_INTERVAL = 1.0 / _PROGRESS_FPS
 
 # Module-level caches (providers/models rarely change mid-session)
 _provider_opts_cache: Optional[list[tuple[str, str]]] = None
@@ -307,6 +313,24 @@ class PromptArea(TextArea):
         # Override TextArea's ctrl+k (delete line) so compact always works / shows
         Binding("ctrl+k", "app_compact", "compact", show=True, priority=True),
     ]
+
+    def _clamp_cursor(self) -> None:
+        try:
+            line_count = self.document.line_count
+        except Exception:
+            line_count = 1
+        row, col = self.cursor_location
+        if row >= line_count:
+            self.cursor_location = (max(0, line_count - 1), 0)
+
+    def scroll_cursor_visible(
+        self, center: bool = False, animate: bool = False
+    ) -> Offset:
+        try:
+            return super().scroll_cursor_visible(center=center, animate=animate)
+        except ValueError:
+            self._clamp_cursor()
+            return super().scroll_cursor_visible(center=center, animate=animate)
 
     def action_submit_prompt(self) -> None:
         app = self.app
@@ -949,12 +973,18 @@ class MultiAgentApp(App[None]):
         self._approval_event = threading.Event()
         self._approval_decision = "reject"
         self._approval_pending = False
+        # Throttled progress callback for Celery/status updates
+        self._throttled_progress = ThrottledProgress(
+            lambda msg: self.call_from_thread(self._chat_progress, msg),
+            min_interval=_PROGRESS_INTERVAL,
+        )
 
     def compose(self) -> ComposeResult:
         yield StatusLine(id="status-line")
         with Horizontal(id="workspace"):
             with Vertical(id="main"):
                 yield ChatHistory(id="chat-log")
+                yield ProgressStatus(id="progress-status")
                 yield Label(
                     "enter send  ·  shift+enter newline  ·  drag-select + ctrl+c copy",
                     id="hint",
@@ -1498,8 +1528,11 @@ class MultiAgentApp(App[None]):
         self._resolve_approval("always")
 
     def _chat_progress(self, msg: str) -> None:
-        """Progress line from the agent loop (called via call_from_thread)."""
-        self._log_meta(msg)
+        """Update the in-place progress bar (single Static widget)."""
+        try:
+            self.query_one(ProgressStatus).set_progress(msg)
+        except Exception:
+            pass  # Progress bar not mounted yet (startup race)
 
     # --- submit ---
 
@@ -1563,8 +1596,7 @@ class MultiAgentApp(App[None]):
     def _run_command(self, line: str) -> None:
         self.call_from_thread(self._set_busy, True)
 
-        def progress(msg: str) -> None:
-            self.call_from_thread(self._chat_progress, msg)
+        progress = self._throttled_progress
 
         self.session.progress_cb = progress
         try:
@@ -1581,8 +1613,7 @@ class MultiAgentApp(App[None]):
         def approve(call: ToolCall) -> str:
             return self._request_tool_approval(call)
 
-        def progress(msg: str) -> None:
-            self.call_from_thread(self._chat_progress, msg)
+        progress = self._throttled_progress
 
         try:
             result = chat_turn(

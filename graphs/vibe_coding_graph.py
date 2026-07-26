@@ -6,7 +6,7 @@ Features:
   - Actual Git commit on success and Git rollback (git reset --hard) on exhaustion.
   - Pre-existing dirty work is auto-stashed before the run so rollback cannot
     silently destroy the caller's uncommitted changes (critical for MCP use).
-  - Automatic model fallback from tencent/hy3 to gpt-oss-120b (via YAML config).
+   - Automatic model fallback via YAML config model_router.yaml.
 """
 
 from __future__ import annotations

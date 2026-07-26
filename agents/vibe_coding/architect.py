@@ -9,53 +9,45 @@ from __future__ import annotations
 
 from agents.vibe_coding.web_quality import WEB_LANDING_QUALITY_RULES
 from core.agent_runtime import run_structured_agent
+from core.prompt_fragments import (
+    GROUNDED_FACTS_RULES,
+    NO_JSON_CODEBLOCK,
+    STATIC_SITE_RULES,
+)
 from schemas.vibe_coding import TechnicalSpec
 
-SYSTEM_PROMPT = """You are an expert software architect working on an EXISTING project
-(or a greenfield one when the idea is a new app).
-
-Analyze the user request and generate a complete, structured Technical Specification.
-You MUST output your response strictly as a JSON object matching this schema:
-{
-  "architecture": "Detailed description of architecture and patterns. Explain HOW to integrate with existing code: what to add, what to change, what to leave alone.",
-  "test_cases": ["List of critical unit test cases to verify the code."],
-  "files_to_create": ["List of relative file paths that need to be created OR modified."]
-}
-
-Rules for files_to_create:
-- List ONLY paths that must change for this idea. Prefer the smallest set.
-- Prefer NEW dedicated modules for green features instead of rewriting large core files.
-- If modifying an existing file is necessary, list it — the Coder will be given that file's current contents and must MERGE, not erase unrelated logic.
-- Do not list every file in the project "just in case".
-- architecture should call out "preserve X / do not remove Y" when relevant.
-
-When the idea includes GROUNDED FACTS FROM PRIOR RESEARCH or a research report:
-- Treat that block as authoritative facts for brand, contact, location, services.
-- architecture MUST name concrete hex colors, WhatsApp/social URLs, logo URLs, and
-  address strings taken from those facts (copy them).
-- architecture MUST forbid inventing emails/phones/maps/doctor bios not in the facts.
-- For marketing / brand websites: DEFAULT to a self-contained static site
-  (HTML + CSS + minimal JS) in a dedicated folder (e.g. site/index.html).
-- Call it a "static single-page landing", NOT a "SPA" / Next.js app, unless the user
-  explicitly asked for a JS-framework SPA.
-- Do NOT choose Next.js, React, Vue, Angular, Tailwind-as-npm, or Jest unless the
-  user explicitly requested that stack. The host test runner is pytest-only.
-- Put pytest checks next to the site, e.g. site/tests/test_content.py, that
-  assert grounded hex colors, wa.me links, logo URL, and address substrings appear
-  in the generated HTML/CSS. Never rely on Selenium/Chrome.
-- test_cases MUST describe GOOD assertions (substring / regex). Explicitly FORBID
-  fragile checks like assert "@" not in html (CSS @media contains @).
-- If EMAILS are missing in research: plan WhatsApp/phone CTAs, not email forms;
-  test_cases should check mailto: absence via safe patterns, not bare "@".
-- Do not plan fake binary image files; use remote asset URLs from research or inline SVG.
-- architecture must describe a usable landing (hero, services, contact, responsive),
-  not a minimal stub.
-- files_to_create must list every path including the pytest file(s).
-
-""" + WEB_LANDING_QUALITY_RULES + """
-
-Ensure your response is valid JSON only. Do not wrap in markdown code blocks like ```json ... ```. Just return raw JSON.
-"""
+SYSTEM_PROMPT = (
+    "You are an expert software architect working on an EXISTING project\n"
+    "(or a greenfield one when the idea is a new app).\n"
+    "\n"
+    "Analyze the user request and generate a complete, structured Technical Specification.\n"
+    "You MUST output your response strictly as a JSON object matching this schema:\n"
+    '{\n'
+    '  "architecture": "Detailed description of architecture and patterns. Explain HOW to integrate with existing code: what to add, what to change, what to leave alone.",\n'
+    '  "test_cases": ["List of critical unit test cases to verify the code."],\n'
+    '  "files_to_create": ["List of relative file paths that need to be created OR modified."]\n'
+    '}\n'
+    "\n"
+    "Rules for files_to_create:\n"
+    "- List ONLY paths that must change for this idea. Prefer the smallest set.\n"
+    "- Prefer NEW dedicated modules for green features instead of rewriting large core files.\n"
+    "- If modifying an existing file is necessary, list it — the Coder will be given that file's current contents and must MERGE, not erase unrelated logic.\n"
+    "- Do not list every file in the project \"just in case\".\n"
+    "- architecture should call out \"preserve X / do not remove Y\" when relevant.\n"
+    "- files_to_create must list every path including the pytest file(s).\n"
+    "\n"
+    + GROUNDED_FACTS_RULES
+    + "\n"
+    + STATIC_SITE_RULES
+    + "\n"
+    + "- test_cases MUST describe GOOD assertions (substring / regex). Explicitly FORBID\n"
+    + '  fragile checks like assert "@" not in html (CSS @media contains @).\n'
+    + "- test_cases should check mailto: absence via safe patterns, not bare \"@\".\n"
+    + "\n"
+    + WEB_LANDING_QUALITY_RULES
+    + "\n\n"
+    + NO_JSON_CODEBLOCK
+)
 
 
 def run_architect(idea: str, router_instance=None) -> TechnicalSpec:

@@ -22,46 +22,42 @@ from agents.deep_research.research_types import (
     research_profile_block,
 )
 from core.agent_runtime import run_role_raw, strip_fences
+from core.prompt_fragments import NO_INVENT_RULES, NO_JSON_CODEBLOCK
 from core.search_guards import (
     extract_urls,
     scrub_ungrounded_claims,
     source_url_is_verified,
+    verify_cited_urls,
 )
 from schemas.deep_research import GroundedReport
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an expert investigative research writer.
-Take grounded research notes and produce a single, cohesive, detailed report.
-You must maintain citations and URLs from the sources.
-
-STRICT RULES:
-- Stay on the named subject only. Drop or quarantine facts about other companies.
-- Do NOT invent contact data, social handles, reviews, archive years, hex colors,
-  fonts, logos, or source URLs. If missing, keep the gap explicit.
-- Do NOT add web.archive.org or directory links that were not already in the notes.
-- Keep BOTH official-site findings and third-party web findings when present.
-- Prefer official domain for brand/contact when it conflicts with weak directories,
-  but do not drop third-party evidence that is clearly the same entity.
-- WhatsApp phones decoded from wa.me buttons and social handles found on the
-  official page are valid contact/presence evidence — keep them.
-- Include social profile/post findings when LINKED PRESENCE or live dump has them.
-- Preserve depth: addresses, phones, service lists, review stats, and gaps already verified.
-- Prefer structured Markdown with clear headings over a short blurb.
-- Flag uncertain associations (e.g. social accounts not clearly the same brand).
-- sources[] may only list URLs that already appear in the notes/content.
-- Open with a short "Research framing" line stating purpose/depth/data/design used.
-- Shape the report to that profile (basic vs applied; exploratory/descriptive/explanatory;
-  quant/qual emphasis; experimental vs observational limits).
-
-You MUST output your response strictly as a JSON object matching this schema:
-{
-  "content": "The final detailed report with inline citations and headings.",
-  "sources": ["URL1", "URL2", "URL3"]
-}
-
-Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
-"""
+SYSTEM_PROMPT = (
+    "You are an expert investigative research writer.\n"
+    "Take grounded research notes and produce a single, cohesive, detailed report.\n"
+    "You must maintain citations and URLs from the sources.\n"
+    "\n"
+    "STRICT RULES:\n"
+    "- Stay on the named subject only. Drop or quarantine facts about other companies.\n"
+    "- Keep BOTH official-site findings and third-party web findings when present.\n"
+    "- Prefer official domain for brand/contact when it conflicts with weak directories.\n"
+    "- Preserve depth: addresses, phones, service lists, review stats, and gaps already verified.\n"
+    "- Prefer structured Markdown with clear headings over a short blurb.\n"
+    "- Flag uncertain associations (e.g. social accounts not clearly the same brand).\n"
+    '- sources[] may only list URLs that already appear in the notes/content.\n'
+    '- Open with a short "Research framing" line stating purpose/depth/data/design used.\n'
+    "\n"
+    + NO_INVENT_RULES
+    + "\n"
+    + "You MUST output your response strictly as a JSON object matching this schema:\n"
+    + '{\n'
+    + '  "content": "The final detailed report with inline citations and headings.",\n'
+    + '  "sources": ["URL1", "URL2", "URL3"]\n'
+    + '}\n'
+    + "\n"
+    + NO_JSON_CODEBLOCK
+)
 
 
 def clean_and_parse_synthesizer_report(
@@ -204,5 +200,12 @@ def run_synthesizer(
         content, sources = merge_host_verified_primary(content, sources, corpus)
     except Exception:
         pass
+
+    # HTTP-verify every cited URL
+    content, sources, _url_notes = verify_cited_urls(
+        content, sources, max_verify=8, timeout=6.0
+    )
+    if _url_notes:
+        logger.info("Synthesizer URL verification dropped %d unreachable sources", len(_url_notes))
 
     return GroundedReport(content=content, sources=sources)

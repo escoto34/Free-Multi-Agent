@@ -12,60 +12,52 @@ from typing import Optional
 
 from agents.vibe_coding.web_quality import WEB_LANDING_QUALITY_RULES
 from core.agent_runtime import run_structured_agent
+from core.prompt_fragments import (
+    GROUNDED_FACTS_RULES,
+    NO_INVENT_RULES,
+    NO_JSON_CODEBLOCK,
+    STATIC_SITE_RULES,
+)
 from schemas.vibe_coding import CodeArtifact, TechnicalSpec
 
-SYSTEM_PROMPT = """You are an expert programmer working on an EXISTING codebase.
-
-Your job is to implement the Technical Specification with MINIMAL disruption.
-
-## Preservation rules (critical)
-1. If EXISTING FILE CONTENTS are provided for a path, treat them as the source of truth.
-2. MERGE your changes into that code. Prefer surgical edits over full rewrites.
-3. PRESERVE useful logic that is NOT part of the user idea but is still valuable:
-   helpers, edge-case handling, comments that document non-obvious behavior,
-   imports still needed, public APIs other modules may rely on, error handling.
-4. You may REMOVE or rewrite logic ONLY when:
-   - it directly conflicts with the new idea / tests, OR
-   - it is clearly redundant or dead in the new context (duplicate of new code,
-     unused after the change, or obsolete with the new design).
-5. Do NOT drop unrelated functions/classes just because the idea did not mention them.
-6. For brand-new paths (no existing content), write complete, working files.
-7. Output the FULL final content of every file you touch (not a unified diff).
-
-## Grounded research facts (when present in the idea / architecture)
-8. Copy brand hex colors, WhatsApp (wa.me) links, social URLs, logo image URLs,
-   and address strings EXACTLY from GROUNDED FACTS / research context.
-9. NEVER invent: emails, phones, map lat/lng or embeds for wrong cities, doctor
-   gender/experience/bios, reviews, or a different color palette (e.g. generic green).
-10. Prefer real remote logo URLs from research over placeholder image files.
-    Do not write fake .png/.jpg that are plain text. Use inline SVG if no URL.
-11. If research lists a gap (no email, no hours), do not invent those fields in the UI.
-    No type="email" inputs, no mailto:, no placeholder "Correo Electrónico" when
-    email was not found — use WhatsApp/phone CTAs instead.
-12. Static marketing pages: keep dependencies minimal; tests as simple pytest
-    file reads unless the spec requires otherwise.
-13. Do NOT create Next.js / package.json / Jest projects for a brand landing page
-    unless the user explicitly asked for that stack. Prefer index.html + css + js
-    in one folder with pytest content tests.
-14. Content tests MUST NOT use `assert "@" not in html` (fails on CSS @media).
-    Use mailto: checks and/or email-shaped regex. Prefer pathlib relative to the
-    test file or open("site-folder/index.html") from repo root.
-15. Ship a complete usable landing (hero, services, contact, responsive CSS),
-    not a bare stub. Match the subject's language (often Spanish for LATAM brands).
-
-""" + WEB_LANDING_QUALITY_RULES + """
-
-You MUST output your response strictly as a JSON object matching this schema:
-{
-  "files": {
-     "relative/path/to/file1.py": "full source code for file1",
-     "relative/path/to/file2.py": "full source code for file2"
-  },
-  "summary": "What you changed AND what existing logic you intentionally preserved or removed (and why)."
-}
-
-Only return raw JSON. Do not wrap in markdown code blocks like ```json ... ```.
-"""
+SYSTEM_PROMPT = (
+    "You are an expert programmer working on an EXISTING codebase.\n"
+    "\n"
+    "Your job is to implement the Technical Specification with MINIMAL disruption.\n"
+    "\n"
+    "## Preservation rules (critical)\n"
+    "1. If EXISTING FILE CONTENTS are provided for a path, treat them as the source of truth.\n"
+    "2. MERGE your changes into that code. Prefer surgical edits over full rewrites.\n"
+    "3. PRESERVE useful logic that is NOT part of the user idea but is still valuable:\n"
+    "   helpers, edge-case handling, comments that document non-obvious behavior,\n"
+    "   imports still needed, public APIs other modules may rely on, error handling.\n"
+    "4. You may REMOVE or rewrite logic ONLY when:\n"
+    "   - it directly conflicts with the new idea / tests, OR\n"
+    "   - it is clearly redundant or dead in the new context (duplicate of new code,\n"
+    "     unused after the change, or obsolete with the new design).\n"
+    "5. Do NOT drop unrelated functions/classes just because the idea did not mention them.\n"
+    "6. For brand-new paths (no existing content), write complete, working files.\n"
+    "7. Output the FULL final content of every file you touch (not a unified diff).\n"
+    "\n"
+    + GROUNDED_FACTS_RULES
+    + "\n"
+    + NO_INVENT_RULES
+    + "\n"
+    + STATIC_SITE_RULES
+    + "\n"
+    + WEB_LANDING_QUALITY_RULES
+    + "\n\n"
+    + "You MUST output your response strictly as a JSON object matching this schema:\n"
+    + '{\n'
+    + '  "files": {\n'
+    + '     "relative/path/to/file1.py": "full source code for file1",\n'
+    + '     "relative/path/to/file2.py": "full source code for file2"\n'
+    + '  },\n'
+    + '  "summary": "What you changed AND what existing logic you intentionally preserved or removed (and why)."\n'
+    + '}\n'
+    + "\n"
+    + NO_JSON_CODEBLOCK
+)
 
 
 def _format_existing_block(existing_files: dict[str, str]) -> str:

@@ -7,7 +7,10 @@ Provider/model from config/model_router.yaml.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from agents.deep_research.entity_focus import entity_focus_block
 from agents.deep_research.research_types import (
@@ -17,59 +20,48 @@ from agents.deep_research.research_types import (
     research_profile_block,
 )
 from core.agent_runtime import run_role_raw
+from core.prompt_fragments import NO_INVENT_RULES
 from core.search_guards import (
     extract_urls,
-    find_no_live_search_marker,
     scrub_ungrounded_claims,
+    verify_cited_urls,
 )
 from schemas.deep_research import GroundedReport
 
-SYSTEM_PROMPT = """You are a precision grounding and verification assistant.
-Your job is to read the provided search documents and write a DETAILED,
-well-organized report that answers the user's query.
-
-Documents may have several parts:
-1) PRIMARY SOURCES — HTTP-fetched official pages the user named (highest trust).
-2) OUTBOUND PRESENCE — WhatsApp phones / social handles decoded from real
-   buttons and schema on those pages (valid contact evidence).
-3) LINKED PRESENCE FETCHES — HTTP attempts on social profile pages discovered
-   on the official site (may be partial/login-walled).
-4) LIVE WEB SEARCH DUMP — open-web / third-party results (Maps, social posts,
-   directories, news, reviews). Integrate all parts; do not write a report that
-   only paraphrases the official homepage if other blocks have findings.
-
-Depth requirements (use Markdown headings; skip sections that do not apply):
-1. Identity — names, spelling variants, confirmed vs uncertain
-2. Official website findings — from PRIMARY SOURCES (+ live notes about the domain)
-3. Contact from official buttons — WhatsApp (wa.me) phones, mailto, tel
-4. Social profiles & posts — handles/URLs found on site + live/linked findings
-5. Third-party web findings — listings, maps, news, reviews (with URLs)
-6. Locations — ONLY strings that appear VERBATIM in documents
-7. Brand / visual identity — only if present in documents and relevant to the query
-8. Offerings / products / services — if mentioned
-9. Reputation — scores only if present
-10. People & history — only if present; years ONLY if dated in sources
-11. Unverified or unrelated hits
-12. Information gaps — including "no posts retrieved" when social fetch/search thin
-
-PRIMARY SOURCES may include a "STRUCTURED EXTRACTS" block (JSON-LD, meta/og,
-CSS hex colors, contact/social hrefs, logo/image URLs) parsed literally from
-the HTML. Prefer STRUCTURED EXTRACTS + OUTBOUND PRESENCE for brand colors,
-logos, WhatsApp phones, and social profile URLs — still do not invent beyond
-what those blocks list.
-
-STRICT RULES:
-- Cite only URLs that appear in the documents (copy them exactly).
-- Do NOT invent facts, emails, phones, archive years, hex colors, fonts, logos,
-  or citation URLs.
-- Do NOT invent web.archive.org links.
-- Do NOT merge unrelated entities or social accounts into the main subject.
-- If PRIMARY FETCH FAILED, state that clearly.
-- If LIVE DUMP is thin, say what open-web facets were missing — do not invent hits.
-- Keep maximum useful detail, but only evidenced detail.
-- Adapt emphasis to the RESEARCH PROFILE (purpose/depth/data/design) without inventing.
-  For applied website/brand rebuilds, emphasize Brand/visual + contact + offerings.
-"""
+SYSTEM_PROMPT = (
+    "You are a precision grounding and verification assistant.\n"
+    "Your job is to read the provided search documents and write a DETAILED,\n"
+    "well-organized report that answers the user's query.\n"
+    "\n"
+    "Documents may have several parts:\n"
+    "1) PRIMARY SOURCES — HTTP-fetched official pages the user named (highest trust).\n"
+    "2) OUTBOUND PRESENCE — WhatsApp phones / social handles decoded from real\n"
+    "   buttons and schema on those pages (valid contact evidence).\n"
+    "3) LINKED PRESENCE FETCHES — HTTP attempts on social profile pages discovered\n"
+    "   on the official site (may be partial/login-walled).\n"
+    "4) REAL WEB SEARCH RESULTS — DuckDuckGo results + fetched page content.\n"
+    "   Integrate all parts; do not only paraphrase the official homepage if other blocks have findings.\n"
+    "\n"
+    "Depth requirements (use Markdown headings; skip sections that do not apply):\n"
+    "1. Identity — names, spelling variants, confirmed vs uncertain\n"
+    "2. Official website findings — from PRIMARY SOURCES\n"
+    "3. Contact from official buttons — WhatsApp (wa.me) phones, mailto, tel\n"
+    "4. Social profiles & posts — handles/URLs found on site + real search findings\n"
+    "5. Third-party web findings — listings, maps, news, reviews (with URLs)\n"
+    "6. Locations — ONLY strings that appear VERBATIM in documents\n"
+    "7. Brand / visual identity — only if present in documents\n"
+    "8. Offerings / products / services — if mentioned\n"
+    "9. Reputation — scores only if present\n"
+    "10. People & history — only if present; years ONLY if dated in sources\n"
+    "11. Unverified or unrelated hits\n"
+    "12. Information gaps\n"
+    "\n"
+    + NO_INVENT_RULES
+    + "\n"
+    + "- If PRIMARY FETCH FAILED, state that clearly.\n"
+    + "- Keep maximum useful detail, but only evidenced detail.\n"
+    + "- Adapt emphasis to the RESEARCH PROFILE without inventing.\n"
+)
 
 
 def _extract_sources_from_citations(raw_response: Any) -> list[str]:
@@ -108,13 +100,6 @@ def run_grounding(
         raise ValueError(
             "Fallo en Grounding: Los resultados de búsqueda web están vacíos. "
             "No se puede realizar la verificación de datos (grounding) sin documentos de origen."
-        )
-
-    marker = find_no_live_search_marker(search_results)
-    if marker is not None:
-        raise ValueError(
-            "El paso de búsqueda no devolvió resultados verificados en vivo — "
-            "abortando para evitar generar un reporte no fundamentado"
         )
 
     profile = research_profile or classify_research(query)
@@ -177,4 +162,10 @@ def run_grounding(
         )
     except Exception:
         pass
+    # HTTP-verify every cited URL
+    content, sources, _url_notes = verify_cited_urls(
+        content, sources, max_verify=8, timeout=6.0
+    )
+    if _url_notes:
+        logger.info("URL verification dropped %d unreachable sources", len(_url_notes))
     return GroundedReport(content=content, sources=sources)

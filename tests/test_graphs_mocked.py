@@ -308,12 +308,10 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
         ),
     )
 
-    # 2. First Run (Fails at grounding node)
+    # 2. First Run (Grounding node fails and delivers fallback)
     graph = get_deep_research_graph(db_path=db_file)
     config = {"configurable": {"thread_id": "thread-123"}}
 
-    # handoff_history is required by DeepResearchState (Swarm-style audit trail);
-    # resume still works because the checkpointer stores the full state including it.
     initial_state = {
         "query": "Quantum AI",
         "safety": None,
@@ -327,39 +325,38 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
         "last_model_selection": None,
     }
 
-    with pytest.raises(ValueError) as exc:
-        graph.invoke(initial_state, config=config)
+    # Grounding now has a fallback — instead of crashing, it delivers raw results
+    first_state = graph.invoke(initial_state, config=config)
 
-    assert "simulated failure" in str(exc.value)
-
-    # Verify node call counts after first (failed) run
+    # Verify node call counts after first run (grounding failed but fallback was used)
     assert calls["safety"] == 1
     assert calls["compressor"] == 1
     assert calls["web_search"] == 1
     assert calls["grounding"] == 1
-    assert calls["synthesizer"] == 0
+    # Synthesizer ran with fallback content from grounding
+    assert calls["synthesizer"] == 1
+    assert first_state.get("final_report") is not None
+    assert first_state["final_report"].content == "Final synthesized executive report."
 
-    # 3. Second Run (Resume after fixing the failure)
+    # 3. Second Run — graph already completed, returning cached state
     fail_grounding = False
 
-    # Invoke the graph again with None as input to resume the saved state from checkpointer
-    # Using the EXACT SAME thread_id
     final_state = graph.invoke(None, config=config)
 
-    # Verify final output is successful
+    # Same result as first run (no re-execution)
     assert final_state["final_report"] is not None
     assert final_state["final_report"].content == "Final synthesized executive report."
 
-    # Verify earlier nodes were NOT run a second time (checkpoint worked!)
-    assert calls["safety"] == 1        # Stays at 1 (not re-run)
-    assert calls["compressor"] == 1    # Stays at 1 (not re-run)
-    assert calls["web_search"] == 1    # Stays at 1 (not re-run)
-    assert calls["grounding"] == 2      # Incremented from 1 to 2 (re-run from failure point)
-    assert calls["synthesizer"] == 1    # Incremented from 0 to 1 (run for the first time)
+    # Verify NO nodes were re-run (graph was already complete)
+    assert calls["safety"] == 1
+    assert calls["compressor"] == 1
+    assert calls["web_search"] == 1
+    assert calls["grounding"] == 1
+    assert calls["synthesizer"] == 1
 
     # Formal handoffs must preserve the original user query end-to-end
     history = final_state.get("handoff_history") or []
-    assert len(history) >= 4  # safety, compressor, search, grounding, synth (partial if crash mid-way)
+    assert len(history) >= 5  # safety, compressor, search, grounding, synth
     assert all(h.get("user_input") == "Quantum AI" for h in history)
     assert history[-1]["from_agent"] == "synthesizer"
     assert history[-1]["to_agent"] == "END"

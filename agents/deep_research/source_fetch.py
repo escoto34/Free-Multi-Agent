@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Iterable, Optional
-from urllib.parse import parse_qs, unquote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -1575,3 +1575,169 @@ def merge_host_verified_primary(
             ordered.append(p)
     ordered.extend(rest)
     return text, ordered
+
+
+# ---------------------------------------------------------------------------
+# DuckDuckGo real search (no API key required)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SearchResult:
+    url: str
+    title: str
+    snippet: str
+
+
+_DDG_URL = "https://lite.duckduckgo.com/lite/"
+_DDG_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def _parse_ddg_results(html: str) -> list[SearchResult]:
+    """Parse DuckDuckGo lite HTML results table."""
+    results: list[SearchResult] = []
+    saw_heading = False
+    for m in re.finditer(
+        r'(?is)<tr>\s*<td[^>]*class="result-snippet"[^>]*>\s*'
+        r'<a[^>]*href="([^"]+)"[^>]*>([^<]*)</a>\s*</td>\s*</tr>\s*'
+        r'<tr>\s*<td[^>]*class="result-snippet"[^>]*>\s*'
+        r'([^<]*)',
+        html,
+    ):
+        url = m.group(1).strip()
+        title = m.group(2).strip()
+        snippet = m.group(3).strip() if m.group(3) else ""
+        if url and not url.startswith("http"):
+            continue
+        if url and not any(
+            skip in url.lower()
+            for skip in ("duckduckgo.com", "duck.co", "spreadprivacy")
+        ):
+            results.append(SearchResult(url=url, title=title, snippet=snippet))
+    if not results:
+        for m in re.finditer(
+            r'(?is)<a[^>]*href="(https?://[^"]+)"[^>]*class="result-link"[^>]*>([^<]*)</a>',
+            html,
+        ):
+            url = m.group(1).strip()
+            title = m.group(2).strip()
+            results.append(
+                SearchResult(url=url, title=title, snippet="")
+            )
+    return results
+
+
+def search_duckduckgo(
+    query: str,
+    *,
+    max_chars: int = 8000,
+    timeout: float = 15.0,
+) -> str:
+    """Real DuckDuckGo lite search. Returns formatted text with URLs + snippets.
+
+    No API key required. Returns empty string on failure.
+    """
+    if not query or not query.strip():
+        return ""
+    try:
+        encoded = quote(query.strip())
+        url = f"{_DDG_URL}?q={encoded}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": _DDG_UA,
+                "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "es,es-419;q=0.9,en;q=0.8",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(max(max_chars * 2, 200_000))
+        decoded = raw.decode("utf-8", errors="replace")
+        results = _parse_ddg_results(decoded)
+        if not results:
+            logger.info("DDG search returned 0 results for: %s", query)
+            return ""
+        lines = [f"--- DuckDuckGo results for: {query} ---"]
+        for r in results[:10]:
+            lines.append(f"URL: {r.url}")
+            lines.append(f"Title: {r.title}")
+            if r.snippet:
+                lines.append(f"Snippet: {r.snippet}")
+            lines.append("")
+        text = "\n".join(lines)
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n…[truncated]"
+        return text
+    except Exception as exc:
+        logger.warning("DDG search failed for %r: %s", query, exc)
+        return ""
+
+
+def fetch_search_documents(
+    queries: list[str],
+    *,
+    max_results_per_query: int = 5,
+    max_fetches: int = 8,
+    timeout: float = 12.0,
+    max_chars: int = 8000,
+) -> str:
+    """Run real web searches + fetch top result pages.
+
+    Returns a formatted block with search result metadata and fetched content.
+    """
+    if not queries:
+        return ""
+
+    seen_urls: set[str] = set()
+    all_search_text_parts: list[str] = []
+    for q in queries:
+        raw = search_duckduckgo(q, max_chars=max_chars * 2, timeout=timeout)
+        if not raw:
+            continue
+        for m in re.finditer(r"^URL:\s*(\S+)", raw, re.M):
+            url = m.group(1).strip()
+            lower = url.lower().rstrip("/")
+            if lower not in seen_urls:
+                seen_urls.add(lower)
+        all_search_text_parts.append(raw)
+
+    if not all_search_text_parts:
+        return ""
+
+    search_text = "\n\n".join(all_search_text_parts)
+
+    urls_to_fetch = list(seen_urls)[:max_fetches]
+    fetched_blocks: list[str] = []
+    fetched_count = 0
+    for url in urls_to_fetch:
+        if fetched_count >= max_results_per_query * max(len(queries), 1):
+            break
+        page = fetch_url(url, timeout=timeout, max_chars=max_chars // 2)
+        if page.ok and page.text.strip():
+            snippet = page.text[:600].strip()
+            fetched_blocks.append(
+                f"=== FETCHED: {url} ===\n{snippet}\n=== END FETCH ==="
+            )
+            fetched_count += 1
+        else:
+            reason = page.error or f"HTTP {page.status}" if page.status else "unknown"
+            fetched_blocks.append(
+                f"=== FETCH FAILED: {url} ({reason}) ==="
+            )
+
+    parts = [
+        "=== REAL WEB SEARCH RESULTS (automatically fetched) ===",
+        search_text,
+        "",
+        "=== FETCHED PAGE CONTENT ===",
+        "\n\n".join(fetched_blocks) if fetched_blocks else "(no pages could be fetched)",
+        "=== END REAL SEARCH ===",
+    ]
+    result = "\n\n".join(parts)
+    if len(result) > max_chars * 3:
+        result = result[: max_chars * 3] + "\n…[truncated]"
+    return result

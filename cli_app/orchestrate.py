@@ -82,10 +82,13 @@ def ensure_origin_urls_in_research_prompt(
     return "\n".join(lines)
 
 
-def _run_research(prompt: str) -> dict[str, Any]:
+def _run_research(
+    prompt: str,
+    use_gpt_researcher: bool = False,
+) -> dict[str, Any]:
     from graphs.deep_research_graph import invoke_deep_research_pipeline
 
-    return invoke_deep_research_pipeline(prompt)
+    return invoke_deep_research_pipeline(prompt, use_gpt_researcher=use_gpt_researcher)
 
 
 def _run_vibe(prompt: str) -> dict[str, Any]:
@@ -162,6 +165,7 @@ def execute_plan(
     *,
     progress: ProgressCb = None,
     origin_prompt: str = "",
+    use_gpt_researcher: bool = False,
 ) -> dict[str, Any]:
     """Run each plan step in order. Returns aggregate result for the CLI.
 
@@ -214,8 +218,9 @@ def execute_plan(
         _emit(progress, f"step {i}/{len(plan.steps)}: {action} …")
         try:
             if action == "research":
-                _emit(progress, "deep-research: safety → search → ground → synthesize")
-                raw = _run_research(prompt)
+                engine = "GPT-Researcher" if use_gpt_researcher else "native"
+                _emit(progress, f"deep-research: {engine}")
+                raw = _run_research(prompt, use_gpt_researcher=use_gpt_researcher)
             else:
                 _emit(progress, "vibe-coding: architect → code → test …")
                 raw = _run_vibe(prompt)

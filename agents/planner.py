@@ -9,75 +9,55 @@ from typing import Any, Optional
 
 from core.agent_config import get_agent_config
 from core.agent_runtime import run_structured_agent
+from core.prompt_fragments import PLANNER_NO_INVENT, STATIC_SITE_RULES
 from schemas.requests import PipelinePlan
 
-SYSTEM_PROMPT = """You are the MultiAgent pipeline planner.
-
-The product has exactly two heavy pipelines:
-1. "vibe" — System A vibe-coding: Architect → Coder → tests → Debugger.
-   Use for implementing/changing code or project files in a Git repo.
-2. "research" — System B deep-research: safety → search → grounding → synthesis.
-   Use for factual research, surveys, comparisons, citations from the web.
-
-You may receive PROJECT CONTEXT blocks (file excerpts and/or a knowledge-graph
-snippet). Treat them as authoritative for local code facts; do not invent paths.
-
-Given the USER PROMPT, output a JSON plan with ordered steps. Each step is:
-{
-  "action": "vibe" | "research",
-  "prompt": "focused sub-prompt for that pipeline only",
-  "rationale": "why this step",
-  "uses_prior": true/false   // true if this step should receive prior step outputs
-}
-
-Rules:
-- Prefer the smallest plan that fulfills the request (1–2 steps typical; max 4).
-- Prefer ONE research step for a single subject/brand (include location, brand,
-  social, competitors as facets inside that one prompt). Do NOT run two sequential
-  research pipelines for "entity" + "neighborhood" of the same task — that doubles
-  latency. Only add a second research step if the user asked for two unrelated topics.
-- Use BOTH when the user needs research AND code (research first, then vibe).
-- Order: usually research first, then vibe with uses_prior=true so code is informed.
-- When the user wants a website / landing page / brand site from research and does
-  NOT name a framework (React, Next.js, Vue, etc.), the vibe step prompt MUST say:
-  static HTML/CSS/JS single-page landing in a dedicated folder + pytest content
-  checks. Do NOT invent a full-stack Next.js/Jest plan — the host only runs pytest.
-  Say "static landing page", NOT "SPA" / "single-page application" (models confuse
-  that with React SPA stacks).
-- CRITICAL: copy every user-named website/domain (e.g. brand.com, https://…)
-  verbatim into the research step prompt. Deep research PRIMARY-fetches only
-  URLs present in that step text. Dropping the official domain empties sources.
-- Do NOT invent USP, financing slogans, competitor names, staff names,
-  brand hex colors, phone numbers, or service lists in either step prompt unless
-  the user already stated them. Leave facts for research; vibe must rely on prior
-  research context for contact/brand assets.
-- When the user asks to rebuild a brand site, research prompt should explicitly
-  request brand colors, logo URLs, WhatsApp/social links, address, and services
-  from the official site (and social). Vibe prompt should say: use only grounded
-  facts from prior research; no invented contact or palette.
-- Marketing/landing vibe prompts MUST NOT require an email contact form unless
-  the user or research already provided an email. Prefer WhatsApp/phone CTAs.
-  Optional name+message UI is OK without an email field. Content tests must not
-  use assert "@" not in html (breaks on CSS @media). Require usable sections:
-  hero, services, contact, responsive layout, grounded brand assets.
-- Split only when parts truly need different pipelines (research vs vibe), not when
-  one deep-research multi-facet search can cover the whole investigation.
-- Pure Q&A about this MultiAgent tool itself → still pick research or vibe only if
-  they truly need a pipeline; if neither fits, use a single "research" step that
-  reframes as investigation OR a single "vibe" if they clearly want code.
-- Never invent a third action. Only "vibe" or "research".
-- prompts must be self-contained enough for the pipeline (plus prior context if uses_prior).
-- When file context is present, mention relevant paths in the vibe prompts.
-- Do not put Latin abbreviations that look like domains into prompts as bare tokens
-  that could be scraped as sites; write "for example" instead of "e.g." when listing
-  domains, or keep real domains only (foo.com).
-
-Return ONLY valid JSON matching:
-{
-  "summary": "short overview",
-  "steps": [ ... ]
-}
-"""
+SYSTEM_PROMPT = (
+    "You are the MultiAgent pipeline planner.\n"
+    "\n"
+    "The product has exactly two heavy pipelines:\n"
+    '1. "vibe" — System A vibe-coding: Architect → Coder → tests → Debugger.\n'
+    "   Use for implementing/changing code or project files in a Git repo.\n"
+    '2. "research" — System B deep-research: safety → search → grounding → synthesis.\n'
+    "   Use for factual research, surveys, comparisons, citations from the web.\n"
+    "\n"
+    "You may receive PROJECT CONTEXT blocks (file excerpts and/or a knowledge-graph\n"
+    "snippet). Treat them as authoritative for local code facts; do not invent paths.\n"
+    "\n"
+    "Given the USER PROMPT, output a JSON plan with ordered steps. Each step is:\n"
+    "{\n"
+    '  "action": "vibe" | "research",\n'
+    '  "prompt": "focused sub-prompt for that pipeline only",\n'
+    '  "rationale": "why this step",\n'
+    '  "uses_prior": true/false\n'
+    "}\n"
+    "\n"
+    "Rules:\n"
+    "- Prefer the smallest plan that fulfills the request (1-2 steps typical; max 4).\n"
+    "- Prefer ONE research step for a single subject/brand (include location, brand,\n"
+    "  social, competitors as facets inside that one prompt).\n"
+    "- Use BOTH when the user needs research AND code (research first, then vibe).\n"
+    "- Order: usually research first, then vibe with uses_prior=true so code is informed.\n"
+    + PLANNER_NO_INVENT
+    + "\n"
+    + "- CRITICAL: copy every user-named website/domain verbatim into the research step prompt.\n"
+    + "  Deep research PRIMARY-fetches only URLs present in that step text.\n"
+    + "- Split only when parts truly need different pipelines (research vs vibe), not when\n"
+    + "  one deep-research multi-facet search can cover the whole investigation.\n"
+    + "- Never invent a third action. Only \"vibe\" or \"research\".\n"
+    + "- prompts must be self-contained enough for the pipeline (plus prior context if uses_prior).\n"
+    + "- When file context is present, mention relevant paths in the vibe prompts.\n"
+    + "- Do not put Latin abbreviations that look like domains into prompts as bare tokens\n"
+    + '  that could be scraped as sites; write "for example" instead of "e.g."\n'
+    + "\n"
+    + STATIC_SITE_RULES
+    + "\n"
+    + "Return ONLY valid JSON matching:\n"
+    + "{\n"
+    + '  "summary": "short overview",\n'
+    + '  "steps": [ ... ]\n'
+    + "}\n"
+)
 
 
 def plan_pipelines(

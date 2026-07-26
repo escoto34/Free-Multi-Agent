@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from core.agent_config import get_max_fix_cycles, reload_config
 from core.agent_runtime import strip_fences
 from core.runs import RunHistory
-from core.search_guards import extract_urls, find_no_live_search_marker
+from core.search_guards import extract_urls
 from schemas.requests import DeepResearchRequest, VibeCodingRequest
 
 
@@ -57,13 +57,6 @@ def test_run_history_start_finish_list(tmp_path: Path):
     assert rows[0]["id"] == rid
     assert rows[0]["status"] == "success"
     assert rows[0]["meta"]["passed"] is True
-
-
-def test_no_live_search_marker_shared():
-    assert find_no_live_search_marker("hello world") is None
-    assert find_no_live_search_marker(
-        "Note: no live web-search was performed."
-    ) is not None
 
 
 def test_extract_urls_dedupes():

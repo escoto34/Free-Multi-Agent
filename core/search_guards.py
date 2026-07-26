@@ -12,57 +12,6 @@ from typing import Iterable, Optional
 
 _URL_PATTERN = re.compile(r"https?://[^\s\)\]\"'>,;]+")
 
-# Phrases (lowercase) that indicate no real live search was performed.
-# Both exact multi-word admissions and shorter stems used by grounding.
-NO_LIVE_SEARCH_MARKERS: tuple[str, ...] = (
-    "no live web-search was performed",
-    "no live web search was performed",
-    "no live search was performed",
-    "no live web-search",
-    "no live web search",
-    "based on my training data",
-    "sin acceso a internet en tiempo real",
-    "no se realizó ninguna búsqueda",
-    "no se realizó una búsqueda",
-    "no se realizó búsqueda",
-    "no se realizo busqueda",
-    "no pude verificar en línea",
-    "no pude verificar en linea",
-    "sin realizar una búsqueda en vivo",
-    "no internet access",
-    "knowledge cutoff",
-    "without real-time",
-    "without internet",
-    "search was not performed",
-)
-
-
-class NoLiveSearchError(Exception):
-    """Raised when search output admits it did not perform a live search."""
-
-
-def find_no_live_search_marker(text: str) -> str | None:
-    """Return the first matching marker in *text*, or None if clean."""
-    if not text:
-        return None
-    lowered = text.lower()
-    for marker in NO_LIVE_SEARCH_MARKERS:
-        if marker in lowered:
-            return marker
-    return None
-
-
-def raise_if_no_live_search(result_text: str) -> None:
-    """Raise ``NoLiveSearchError`` if the result admits it wasn't a real search."""
-    marker = find_no_live_search_marker(result_text)
-    if marker is None:
-        return
-    raise NoLiveSearchError(
-        "El paso de búsqueda no devolvió resultados verificados en "
-        f"vivo (marcador detectado: {marker!r}). Abortando para "
-        "evitar generar un reporte no fundamentado."
-    )
-
 
 def _url_host_plausible(url: str) -> bool:
     """Drop abbreviation false-positives (https://e.g) and empty hosts."""
@@ -316,3 +265,63 @@ def scrub_ungrounded_claims(
             text = text.rstrip() + audit
 
     return text, new_sources, notes
+
+
+def verify_cited_urls(
+    content: str,
+    sources: list[str],
+    *,
+    max_verify: int = 8,
+    timeout: float = 6.0,
+) -> tuple[str, list[str], list[str]]:
+    """HTTP-verify every cited URL in content and source list.
+
+    Drops URLs that return non-200 or empty body. Returns
+    ``(content, verified_sources, audit_notes)``.
+    """
+    from agents.deep_research.source_fetch import fetch_url
+
+    all_urls = list(extract_urls(content, limit=max_verify * 2))
+    url_set: set[str] = set()
+    for u in all_urls:
+        norm = u.lower().rstrip("/")
+        if norm not in url_set:
+            url_set.add(norm)
+    for s in sources:
+        norm = s.lower().rstrip("/")
+        if norm not in url_set:
+            url_set.add(norm)
+            all_urls.append(s)
+
+    to_check = all_urls[:max_verify]
+    verified: set[str] = set()
+    notes: list[str] = []
+
+    for url in to_check:
+        if not url.startswith(("http://", "https://")):
+            continue
+        page = fetch_url(url, timeout=timeout, max_chars=2000)
+        if page.ok and page.text and len(page.text.strip()) > 50:
+            verified.add(url.lower().rstrip("/"))
+        else:
+            reason = page.error or f"HTTP {page.status}" if page.status else "no content"
+            notes.append(f"Cited URL failed verification: {url} ({reason})")
+
+    verified_sources: list[str] = []
+    for s in sources:
+        if s.lower().rstrip("/") in verified or s.lower().rstrip("/") in {
+            v.lower().rstrip("/") for v in verified
+        }:
+            verified_sources.append(s)
+        else:
+            notes.append(f"Dropped source (unreachable): {s}")
+
+    if notes:
+        audit = (
+            "\n\n## URL verification audit (automatic HTTP check)\n"
+            + "\n".join(f"- {n}" for n in notes)
+        )
+        if "## URL verification audit" not in content:
+            content = content.rstrip() + audit
+
+    return content, verified_sources, notes

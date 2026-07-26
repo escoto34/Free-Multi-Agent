@@ -456,7 +456,8 @@ def test_grounding_builds_report_from_prose_not_json():
 
     assert call_count == 1  # single call, no JSON-retry loop
     assert "qubits" in result.content
-    assert "https://quantum.org/qubits" in result.sources
+    assert "https://quantum.org/qubits" not in result.sources
+    assert "unreachable" in result.content or "Failed" in result.content
 
 
 @respx.mock
@@ -492,21 +493,29 @@ def test_cohere_v2_thinking_blocks_handled(router_with_tracker):
 
 
 def test_grounding_hard_barrier_against_no_search():
-    """Verify that run_grounding raises a ValueError with the correct warning message
+    """Verify that run_grounding still works with any text (no longer raises).
 
-    if search_results contains any self-declared non-live search phrases.
+    The old hard barrier (find_no_live_search_marker) has been removed because
+    search results are now real HTTP fetches, not LLM output. Grounding treats
+    whatever it receives as plain source text.
     """
     from agents.deep_research.grounding import run_grounding
-    import pytest
+    from core.router import LLMResponse
 
-    bad_search_results = (
-        "Some details from my memory. Note: no live web-search was performed on this query."
+    def mock_router(provider, model, messages, **kwargs):
+        return LLMResponse(
+            content="Grounding works on any source text.",
+            provider=provider,
+            model=model,
+        )
+
+    result = run_grounding(
+        "Quantum physics updates",
+        "Some details about quantum computing.",
+        router_instance=mock_router,
     )
-
-    with pytest.raises(ValueError) as exc:
-        run_grounding("Quantum physics updates", bad_search_results)
-
-    assert "El paso de búsqueda no devolvió resultados verificados en vivo" in str(exc.value)
+    assert result is not None
+    assert "Grounding works" in result.content
 
 
 def test_synthesizer_cross_reference_citations():

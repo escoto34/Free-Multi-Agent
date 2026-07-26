@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+from cli_app.icons import get_icon
 from core.agent_config import get_agent_config
 from core.router import get_router
 from core.runs import get_run_history
@@ -67,10 +68,10 @@ def validate_api_keys() -> None:
             continue
         val = os.environ.get(env_name)
         if not val or not val.strip() or "your_" in val or "_here" in val:
-            missing.append(f"  {prov:12} → {env_name}  (multiagent keys set {prov})")
+            missing.append(f"  {prov:12} " + get_icon("arrow") + f" {env_name}  (multiagent keys set {prov})")
     if missing:
         click.secho(
-            "❌ Missing API keys for providers used by current roles:\n"
+            get_icon("error") + " Missing API keys for providers used by current roles:\n"
             + "\n".join(missing)
             + "\n\nWith free-durable defaults you also need AGNES_API_KEY "
             "(chat/planner/architect/compressor) and MISTRAL_API_KEY (coder). "
@@ -103,14 +104,14 @@ def check_hy3_expiration() -> None:
 
         click.secho("=" * 70, fg="blue")
         click.secho(
-            f"📅 Current Date: {today.isoformat()} | Hy3 free tier expiry: "
+            get_icon("calendar") + f" Current Date: {today.isoformat()} | Hy3 free tier expiry: "
             f"{expiration_date.isoformat()}",
             fg="blue",
         )
 
         if 0 <= delta_days <= 3:
             click.secho(
-                f"⚠️ WARNING: tencent/hy3:free expires in {delta_days} day(s) "
+                get_icon("warning") + f" WARNING: tencent/hy3:free expires in {delta_days} day(s) "
                 f"(on {expiration_date.isoformat()})!\n"
                 f"After expiry, model_selector auto-switches to {fb_label} "
                 f"(no manual YAML edit required).",
@@ -119,7 +120,7 @@ def check_hy3_expiration() -> None:
             )
         elif delta_days < 0:
             click.secho(
-                f"⚠️ WARNING: tencent/hy3:free EXPIRED {abs(delta_days)} day(s) ago "
+                get_icon("warning") + f" WARNING: tencent/hy3:free EXPIRED {abs(delta_days)} day(s) ago "
                 f"(on {expiration_date.isoformat()})!\n"
                 f"Scoring/selection skips hy3 and uses {fb_label} automatically.",
                 fg="red",
@@ -127,7 +128,7 @@ def check_hy3_expiration() -> None:
             )
         else:
             click.secho(
-                f"ℹ️ tencent/hy3:free remains active for {delta_days} more days.",
+                get_icon("info") + f" tencent/hy3:free remains active for {delta_days} more days.",
                 fg="cyan",
             )
         click.secho("=" * 70 + "\n", fg="blue")
@@ -238,7 +239,7 @@ def config_show() -> None:
         if row.get("missing"):
             click.secho(f"  {row['id']:32} (missing)", fg="yellow")
             continue
-        fb = f"  fallback→ {row['fallback']}" if row.get("fallback") else ""
+        fb = f"  fallback" + get_icon("arrow") + f" {row['fallback']}" if row.get("fallback") else ""
         free = f"  free_until={row['free_until']}" if row.get("free_until") else ""
         click.echo(f"  {row['id']:32} {row['provider']}/{row['model']}{free}{fb}")
     settings = get_cli_settings()
@@ -260,10 +261,10 @@ def config_set(role_id: str, provider: str, model: str) -> None:
     try:
         node = set_role(system, role, provider=provider, model=model)
     except Exception as exc:
-        click.secho(f"❌ {exc}", fg="red", err=True)
+        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
         sys.exit(1)
     click.secho(
-        f"✔ {role_id} → {node['provider']}/{node['model']}", fg="green"
+        get_icon("ok") + f" {role_id} " + get_icon("arrow") + f" {node['provider']}/{node['model']}", fg="green"
     )
 
 
@@ -274,7 +275,7 @@ def config_reset() -> None:
     from core.config_editor import reset_to_defaults
 
     reset_to_defaults()
-    click.secho("✔ Restored defaults from config/defaults_model_router.yaml", fg="green")
+    click.secho(get_icon("ok") + " Restored defaults from config/defaults_model_router.yaml", fg="green")
 
 
 @main.group()
@@ -305,16 +306,16 @@ def keys_set(provider: str, api_key: Optional[str]) -> None:
 
     valid = sorted(provider_env_map())
     if provider.lower() not in valid:
-        click.secho(f"❌ Unknown provider. Valid: {valid}", fg="red", err=True)
+        click.secho(get_icon("error") + f" Unknown provider. Valid: {valid}", fg="red", err=True)
         sys.exit(2)
     if not api_key:
         api_key = click.prompt(f"{provider} API key", hide_input=True)
     try:
         preview = set_api_key(provider, api_key)
     except Exception as exc:
-        click.secho(f"❌ {exc}", fg="red", err=True)
+        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
         sys.exit(1)
-    click.secho(f"✔ Saved {provider} key (preview {preview})", fg="green")
+    click.secho(get_icon("ok") + f" Saved {provider} key (preview {preview})", fg="green")
 
 
 @main.command(name="providers")
@@ -334,7 +335,7 @@ def providers_cmd() -> None:
         st = status.get(name, {})
         key_s = st.get("status", "?")
         color = "green" if key_s == "set" else "yellow"
-        click.secho(f"▸ {name}", fg="blue", bold=True, nl=False)
+        click.secho(get_icon("bullet") + f" {name}", fg="blue", bold=True, nl=False)
         click.secho(f"  key={key_s}  env={meta.get('env_key')}", fg=color)
         if meta.get("base_url"):
             click.echo(f"    base_url: {meta['base_url']}")
@@ -359,6 +360,10 @@ def providers_cmd() -> None:
 @main.command(name="chat")
 def chat_cmd() -> None:
     """Interactive TUI (pipelines via /do planner only here)."""
+    from cli_app.env_setup import ensure_utf8_and_ansi
+
+    ensure_utf8_and_ansi()
+
     # Preflight capacity snapshot (same live estimate as `multiagent quota`)
     try:
         from core.quota_estimate import build_system_estimate
@@ -384,7 +389,7 @@ def chat_cmd() -> None:
         from cli_app.tui import run_app
     except ImportError as exc:
         click.secho(
-            f"❌ Interactive TUI requires textual. Install with:\n"
+            get_icon("error") + " Interactive TUI requires textual. Install with:\n"
             f"   pip install textual\n({exc})",
             fg="red",
             err=True,
@@ -436,10 +441,10 @@ def skills_add(path: str, enable: bool, disabled: bool) -> None:
     try:
         meta = add_skill(path, enabled=enabled)
     except Exception as exc:
-        click.secho(f"❌ {exc}", fg="red", err=True)
+        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
         sys.exit(1)
     state = "enabled" if meta.enabled else "disabled"
-    click.secho(f"✔ Registered {meta.name!r} ({state}) → {meta.path}", fg="green")
+    click.secho(get_icon("ok") + f" Registered {meta.name!r} ({state}) " + get_icon("arrow") + f" {meta.path}", fg="green")
     if not meta.enabled:
         click.echo(f"  Enable with: multiagent skills enable {meta.name}")
 
@@ -452,9 +457,9 @@ def skills_enable(name: str) -> None:
     try:
         meta = set_enabled(name, True)
     except Exception as exc:
-        click.secho(f"❌ {exc}", fg="red", err=True)
+        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
         sys.exit(1)
-    click.secho(f"✔ {meta.name} enabled", fg="green")
+    click.secho(get_icon("ok") + f" {meta.name} enabled", fg="green")
 
 
 @skills.command(name="disable")
@@ -466,9 +471,9 @@ def skills_disable(name: str) -> None:
     try:
         meta = set_enabled(name, False)
     except Exception as exc:
-        click.secho(f"❌ {exc}", fg="red", err=True)
+        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
         sys.exit(1)
-    click.secho(f"✔ {meta.name} disabled", fg="yellow")
+    click.secho(get_icon("ok") + f" {meta.name} disabled", fg="yellow")
 
 
 @skills.command(name="remove")
@@ -478,9 +483,9 @@ def skills_remove(name: str) -> None:
     from core.skills import remove_skill
 
     if not remove_skill(name):
-        click.secho(f"❌ Skill {name!r} not found", fg="red", err=True)
+        click.secho(get_icon("error") + f" Skill {name!r} not found", fg="red", err=True)
         sys.exit(1)
-    click.secho(f"✔ Unregistered {name!r}", fg="green")
+    click.secho(get_icon("ok") + f" Unregistered {name!r}", fg="green")
 
 
 @skills.command(name="show")
@@ -492,7 +497,7 @@ def skills_show(name: str) -> None:
     try:
         meta = load_skill(name)
     except Exception as exc:
-        click.secho(f"❌ {exc}", fg="red", err=True)
+        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
         sys.exit(1)
     click.echo(f"name:        {meta.name}")
     click.echo(f"enabled:     {meta.enabled}")

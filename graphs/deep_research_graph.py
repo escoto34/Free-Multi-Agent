@@ -4,9 +4,8 @@ Orchestrates: Safety Filter -> Context Compressor -> Web Search -> Grounding -> 
 Features:
   - Persistent SQLite checkpointing to allow resumption on failures.
   - Immediate termination on safety filter rejection.
-  - Immediate termination if the web search step admits it did not perform
-    a real live search (NoLiveSearchError) — prevents ungrounded content
-    from silently flowing into a report that looks verified.
+   - Real web search via DuckDuckGo + HTTP page fetches (no LLM fabrication).
+    - Post-hoc verification of cited URLs against actual fetched content.
   - Native Cohere grounding parameter integration.
 """
 
@@ -25,7 +24,7 @@ from agents.deep_research.grounding import run_grounding
 from agents.deep_research.research_types import profile_from_mapping
 from agents.deep_research.safety_filter import run_safety_filter
 from agents.deep_research.synthesizer import run_synthesizer
-from agents.deep_research.web_search import NoLiveSearchError, run_web_search
+from agents.deep_research.web_search import run_web_search
 from core.difficulty_scorer import (
     assessment_from_state,
     assessments_to_state_dict,
@@ -67,6 +66,8 @@ class DeepResearchState(TypedDict):
     handoff_history: list
     difficulty_by_role: Optional[dict]
     last_model_selection: Optional[dict]
+    use_gpt_researcher: bool
+    celery_task_id: Optional[str]
 
 
 # ---------------------------------------------------------------------------
@@ -191,13 +192,7 @@ def context_compressor_node(state: DeepResearchState) -> dict[str, Any]:
 
 
 def web_search_node(state: DeepResearchState) -> dict[str, Any]:
-    """Execute real web search using compound-mini (Tavily integrated).
-
-    HARD BARRIER: if the search step's own output admits it did not perform
-    a real live search (NoLiveSearchError), the pipeline stops here with an
-    explicit, visible error instead of letting unverified content flow
-    downstream into grounding/synthesis.
-    """
+    """Execute real web search via DuckDuckGo + HTTP page fetches."""
     logger.info("--- WEB SEARCH NODE ---")
     trends = state["trends"]
     if not trends:
@@ -233,32 +228,11 @@ def web_search_node(state: DeepResearchState) -> dict[str, Any]:
             state,
             from_agent="web_search",
             to_agent="grounding",
-            reason="Live search results ready for grounding",
+            reason="Real web search results ready for grounding",
             pipeline="deep_research",
             user_input_key="query",
             updates={"search_results": results, "error": None},
             require_keys=["search_results"],
-        )
-    except NoLiveSearchError as exc:
-        logger.error(
-            "⚠️ ABORTING — search step did not perform a real live search: %s", exc
-        )
-        return transfer_control(
-            state,
-            from_agent="web_search",
-            to_agent="END",
-            reason="No live search — hard abort (anti-fabrication)",
-            pipeline="deep_research",
-            user_input_key="query",
-            updates={
-                "search_results": None,
-                "error": (
-                    "El paso de búsqueda no devolvió resultados verificados en vivo. "
-                    "Abortando para evitar generar un reporte no fundamentado. "
-                    f"Detalle: {exc}"
-                ),
-            },
-            note=str(exc),
         )
     except HandoffError:
         raise
@@ -272,8 +246,7 @@ def grounding_node(state: DeepResearchState) -> dict[str, Any]:
     logger.info("--- GROUNDING NODE ---")
     search_results = state["search_results"]
     if not search_results:
-        # Covers both "no results at all" and the NoLiveSearchError abort
-        # from web_search_node (which sets search_results=None + error).
+    # Covers the case where web_search_node produced no results.
         return transfer_control(
             state,
             from_agent="grounding",
@@ -318,7 +291,28 @@ def grounding_node(state: DeepResearchState) -> dict[str, Any]:
         raise
     except Exception as exc:
         logger.error("Grounding node failed: %s", exc)
-        raise exc
+        # Fallback: deliver raw search results as-is instead of crashing
+        from schemas.deep_research import GroundedReport
+
+        fallback = GroundedReport(
+            content=(
+                "⚠️ Grounding LLM call failed. Below are the raw web search results "
+                "without structured analysis.\n\n"
+                f"{search_results[:8000]}"
+            ),
+            sources=[],
+        )
+        logger.warning("Grounding failed — delivering raw search results as fallback")
+        return transfer_control(
+            state,
+            from_agent="grounding",
+            to_agent="synthesizer",
+            reason="Grounding failed — raw search fallback",
+            pipeline="deep_research",
+            user_input_key="query",
+            updates={"grounded_report": fallback, "error": None},
+            require_keys=["grounded_report"],
+        )
 
 
 def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
@@ -412,6 +406,54 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
         )
 
 
+def gpt_researcher_node(state: DeepResearchState) -> dict[str, Any]:
+    """Run GPT-Researcher (via Celery or direct) as a LangGraph node.
+
+    Delegates to ``agents.deep_research.gpt_researcher_wrapper.gpt_researcher_node``
+    which handles Celery submission, polling with ``await asyncio.sleep(1)``
+    for TUI responsiveness, and automatic fallback to direct call when
+    Redis/Celery is unavailable.
+    """
+    import asyncio
+
+    logger.info("--- GPT-RESEARCHER NODE ---")
+
+    async def _run() -> dict[str, Any]:
+        from agents.deep_research.gpt_researcher_wrapper import (
+            gpt_researcher_node as _wrapper_node,
+        )
+
+        result = await _wrapper_node(dict(state))
+        return result
+
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        updates = loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+    celery_id = updates.get("celery_task_id")
+    report = updates.get("final_report")
+    return transfer_control(
+        state,
+        from_agent="gpt_researcher",
+        to_agent="END",
+        reason="GPT-Researcher completed (fallback pipeline bypass)",
+        pipeline="deep_research",
+        user_input_key="query",
+        updates={
+            "search_results": updates.get("search_results"),
+            "grounded_report": report,
+            "final_report": report,
+            "celery_task_id": celery_id,
+            "error": updates.get("error"),
+        },
+        require_keys=["final_report"],
+        note=f"celery_task_id={celery_id}" if celery_id else "direct_call",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routing logic
 # ---------------------------------------------------------------------------
@@ -433,7 +475,7 @@ def safety_routing(state: DeepResearchState) -> str:
 
 def search_routing(state: DeepResearchState) -> str:
     """Conditional edge: stop the pipeline if web_search set an error
-    (either no results, or the NoLiveSearchError hard-abort)."""
+    (empty search results)."""
     if state.get("error"):
         logger.warning(
             "⚠️ Search step failed/aborted. Terminating pipeline: %s", state["error"]
@@ -447,8 +489,15 @@ def search_routing(state: DeepResearchState) -> str:
 # ---------------------------------------------------------------------------
 
 
-def get_deep_research_graph(db_path: Optional[str] = None) -> Any:
+def get_deep_research_graph(
+    db_path: Optional[str] = None,
+    use_gpt_researcher: bool = False,
+) -> Any:
     """Build and compile the StateGraph for System B.
+
+    When ``use_gpt_researcher=True`` the graph is a single ``gpt_researcher``
+    node that delegates to GPT-Researcher (via Celery or direct), bypassing
+    the full native pipeline (safety_filter → … → synthesizer).
 
     Equipped with a persistent SqliteSaver checkpointer.
     """
@@ -461,6 +510,12 @@ def get_deep_research_graph(db_path: Optional[str] = None) -> Any:
     checkpointer.setup()
 
     workflow = StateGraph(DeepResearchState)
+
+    if use_gpt_researcher:
+        workflow.add_node("gpt_researcher", gpt_researcher_node)
+        workflow.set_entry_point("gpt_researcher")
+        workflow.add_edge("gpt_researcher", END)
+        return workflow.compile(checkpointer=checkpointer)
 
     workflow.add_node("safety_filter", safety_filter_node)
     workflow.add_node("context_compressor", context_compressor_node)
@@ -481,9 +536,7 @@ def get_deep_research_graph(db_path: Optional[str] = None) -> Any:
 
     workflow.add_edge("context_compressor", "web_search")
 
-    # Changed from an unconditional edge to a conditional one: if web_search
-    # aborted because of NoLiveSearchError (or produced no results at all),
-    # stop here instead of continuing to grounding with unverified/empty data.
+    # If web_search produced no results, stop instead of grounding empty data.
     workflow.add_conditional_edges(
         "web_search",
         search_routing,
@@ -499,7 +552,10 @@ def get_deep_research_graph(db_path: Optional[str] = None) -> Any:
     return workflow.compile(checkpointer=checkpointer)
 
 
-def initial_deep_research_state(topic: str) -> DeepResearchState:
+def initial_deep_research_state(
+    topic: str,
+    use_gpt_researcher: bool = False,
+) -> DeepResearchState:
     """Build a fresh graph state for System B."""
     return {
         "query": topic,
@@ -512,6 +568,8 @@ def initial_deep_research_state(topic: str) -> DeepResearchState:
         "handoff_history": [],
         "difficulty_by_role": None,
         "last_model_selection": None,
+        "use_gpt_researcher": use_gpt_researcher,
+        "celery_task_id": None,
     }
 
 
@@ -526,6 +584,7 @@ def summarize_deep_research_state(final_state: dict[str, Any]) -> dict[str, Any]
         "content": report.content if report else None,
         "sources": report.sources if report else [],
         "has_report": report is not None,
+        "celery_task_id": final_state.get("celery_task_id"),
     }
 
 
@@ -536,8 +595,12 @@ def invoke_deep_research_pipeline(
     db_path: Optional[str] = None,
     graph=None,
     record_history: bool = True,
+    use_gpt_researcher: bool = False,
 ) -> dict[str, Any]:
     """Validate input, run System B (optionally resume), record history.
+
+    When ``use_gpt_researcher=True`` the graph is a single GPT-Researcher node
+    (via Celery or direct), bypassing the native LangGraph pipeline.
 
     Shared entrypoint for CLI (and future HTTP) so checkpoint resume stays consistent.
     """
@@ -550,12 +613,24 @@ def invoke_deep_research_pipeline(
         run_id = history.start(
             "deep_research",
             req.topic,
-            meta={"thread_id": tid, "resume": bool(req.thread_id)},
+            meta={
+                "thread_id": tid,
+                "resume": bool(req.thread_id),
+                "engine": "gpt_researcher" if use_gpt_researcher else "native",
+            },
         )
 
-    compiled = graph if graph is not None else get_deep_research_graph(db_path=db_path)
+    compiled = (
+        graph
+        if graph is not None
+        else get_deep_research_graph(db_path=db_path, use_gpt_researcher=use_gpt_researcher)
+    )
     config = {"configurable": {"thread_id": tid}}
-    inputs: Any = None if req.thread_id else initial_deep_research_state(req.topic)
+    inputs: Any = (
+        None
+        if req.thread_id
+        else initial_deep_research_state(req.topic, use_gpt_researcher=use_gpt_researcher)
+    )
 
     try:
         final_state = compiled.invoke(inputs, config=config)

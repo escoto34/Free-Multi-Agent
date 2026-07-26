@@ -25,6 +25,19 @@ click>=8.1.0
 textual>=0.80.0
 rich>=13.0.0
 
+# --- HTTP / Scraping ---
+requests>=2.31.0               # Core HTTP client (core/requests_client.py)
+scrapy>=2.11.0                 # Static crawling (scrapers/scrapy_project/)
+selenium>=4.20.0               # Headless JS rendering (tools/selenium_driver.py)
+webdriver-manager>=4.0.0       # Auto-download chromedriver
+
+# --- Background Tasks ---
+celery>=5.4.0                  # Distributed task queue
+redis>=5.0.0                   # Redis broker + backend
+
+# --- Deep Research Engine ---
+gpt-researcher>=1.0.0          # Alternative research engine (agents/deep_research/)
+
 # --- Testing ---
 pytest>=8.0.0
 pytest-asyncio>=0.24.0

@@ -29,6 +29,7 @@ from graphs.deep_research_graph import invoke_deep_research_pipeline
 from graphs.vibe_coding_graph import invoke_vibe_coding_pipeline
 
 from cli_app.session import ConversationSession
+from cli_app.icons import get_icon
 
 ROOT = Path(__file__).parent.parent
 
@@ -170,7 +171,7 @@ def _config(args: list[str], _session: ConversationSession) -> CommandResult:
                 )
             ):
                 continue
-            fb = f"  fb→{row['fallback']}" if row.get("fallback") else ""
+            fb = f"  fb{get_icon("arrow")}{row['fallback']}" if row.get("fallback") else ""
             lines.append(
                 f"  {row['id']:32} {row['provider']}/{row['model']}{fb}"
             )
@@ -185,7 +186,7 @@ def _config(args: list[str], _session: ConversationSession) -> CommandResult:
             if row.get("missing"):
                 lines.append(f"  {row['id']:32} (missing)")
                 continue
-            fb = f"  fallback→ {row['fallback']}" if row.get("fallback") else ""
+            fb = f"  fallback{get_icon("arrow")} {row['fallback']}" if row.get("fallback") else ""
             free = f"  free_until={row['free_until']}" if row.get("free_until") else ""
             lines.append(
                 f"  {row['id']:32} {row['provider']}/{row['model']}{free}{fb}"
@@ -223,7 +224,7 @@ def _config(args: list[str], _session: ConversationSession) -> CommandResult:
         node = set_role(system, role, provider=provider, model=model)
         return CommandResult(
             ok=True,
-            text=f"Updated {sys_role} → {node['provider']}/{node['model']}",
+            text=f"Updated {sys_role} {get_icon("arrow")} {node['provider']}/{node['model']}",
         )
 
     if sub == "fallback" and len(args) >= 4:
@@ -238,7 +239,7 @@ def _config(args: list[str], _session: ConversationSession) -> CommandResult:
         fb = node.get("fallback") or {}
         return CommandResult(
             ok=True,
-            text=f"Fallback for {sys_role} → {fb.get('provider')}/{fb.get('model')}",
+            text=f"Fallback for {sys_role} {get_icon("arrow")} {fb.get('provider')}/{fb.get('model')}",
         )
 
     if sub == "clear-fallback" and len(args) >= 2:
@@ -249,7 +250,7 @@ def _config(args: list[str], _session: ConversationSession) -> CommandResult:
 
     return CommandResult(
         ok=False,
-        text="Usage: /config | /config set sys.role provider model | /config reset | …",
+        text="Usage: /config | /config set sys.role provider model | /config reset | " + get_icon("ellipsis"),
     )
 
 
@@ -408,12 +409,23 @@ def _build_planner_context(prompt: str, session: ConversationSession) -> str:
 
 def _do(args: list[str], session: ConversationSession) -> CommandResult:
     """Plan with user-chosen AI, then run vibe and/or research steps."""
-    prompt = " ".join(args).strip()
+    use_gpt = False
+    clean_args: list[str] = []
+    for a in args:
+        if a in ("--gpt", "-g"):
+            use_gpt = True
+        elif a in ("--native", "-n"):
+            use_gpt = False
+        else:
+            clean_args.append(a)
+    prompt = " ".join(clean_args).strip()
     if not prompt:
         return CommandResult(
             ok=False,
             text=(
-                "Usage: /do <task>\n"
+                "Usage: /do [--gpt|--native] <task>\n"
+                "  --gpt / -g     force GPT-Researcher engine for research steps\n"
+                "  --native / -n  force native LangGraph pipeline (default)\n"
                 "A planner AI splits the task into vibe-coding and/or deep-research steps.\n"
                 "Pick the planner first: /planner set <provider> <model>"
             ),
@@ -438,7 +450,7 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
 
     settings = get_cli_settings()
     chat = settings.get("chat") or {}
-    _prog("planning…")
+    _prog("planning" + get_icon("ellipsis"))
     pipeline_prompt = to_english_for_pipelines(
         prompt,
         invoke_fn=invoke_router,
@@ -457,13 +469,18 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
         return CommandResult(ok=False, text=f"Planner failed ({prov}/{model}): {exc}")
 
     plan_text = format_plan(plan)
-    _prog(f"plan ready — running {len(plan.steps)} step(s)…")
+    _prog(f"plan ready — running {len(plan.steps)} step(s)" + get_icon("ellipsis"))
+    engine = "GPT-Researcher" if use_gpt else "native"
+    _prog(f"research engine: {engine}")
     # Execute (blocking; TUI runs this in a worker thread).
     # Pass the full user task (EN) so research still PRIMARY-fetches domains
     # the planner may have dropped from step prompts.
     try:
         result = execute_plan(
-            plan, progress=_prog, origin_prompt=pipeline_prompt
+            plan,
+            progress=_prog,
+            origin_prompt=pipeline_prompt,
+            use_gpt_researcher=use_gpt,
         )
     except Exception as exc:
         return CommandResult(
@@ -471,12 +488,12 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
             text=f"Plan:\n{plan_text}\n\nExecution failed: {exc}",
         )
 
-    header = f"Planner: {prov}/{model}"
+    header = f"Planner: {prov}/{model}  engine: {engine}"
     if translated:
         header += "\n(task translated to English for Systems A/B)"
     text = f"{header}\n\n{plan_text}\n\n---\n\n{result.get('text', '')}"
     # Keep enough of the report in session history for follow-ups; TUI shows full text.
-    session.add("assistant", text if len(text) <= 24000 else text[:23999] + "…")
+    session.add("assistant", text if len(text) <= 24000 else text[:23999] + get_icon("ellipsis"))
     return CommandResult(
         ok=bool(result.get("ok")),
         text=text,
@@ -540,11 +557,25 @@ def _research(args: list[str], session: ConversationSession) -> CommandResult:
     topic = " ".join(args).strip()
     if not topic:
         return CommandResult(ok=False, text="Usage: /research <topic>")
+    use_gpt = False
+    parts = args[:]
+    clean: list[str] = []
+    for p in parts:
+        if p in ("--gpt", "-g"):
+            use_gpt = True
+        elif p in ("--native", "-n"):
+            use_gpt = False
+        else:
+            clean.append(p)
+    topic = " ".join(clean).strip()
+    if not topic:
+        return CommandResult(ok=False, text="Usage: /research <topic>")
     session.add("user", f"/research {topic}")
+    engine = "GPT-Researcher" if use_gpt else "native"
     try:
-        summary = invoke_deep_research_pipeline(topic)
+        summary = invoke_deep_research_pipeline(topic, use_gpt_researcher=use_gpt)
     except Exception as exc:
-        return CommandResult(ok=False, text=f"Deep-research failed: {exc}")
+        return CommandResult(ok=False, text=f"Deep-research ({engine}) failed: {exc}")
 
     if summary.get("error"):
         text = f"Error: {summary['error']} (thread={summary.get('thread_id')})"
@@ -560,8 +591,10 @@ def _research(args: list[str], session: ConversationSession) -> CommandResult:
         )
         if summary.get("thread_id"):
             text += f"\n\nthread_id={summary['thread_id']}"
+        if summary.get("celery_task_id"):
+            text += f"\ncelery_task_id={summary['celery_task_id']}"
     # Full report to the user; session keeps a large slice for follow-ups.
-    session.add("assistant", text if len(text) <= 24000 else text[:23999] + "…")
+    session.add("assistant", text if len(text) <= 24000 else text[:23999] + get_icon("ellipsis"))
     return CommandResult(ok=True, text=text, data=summary)
 
 

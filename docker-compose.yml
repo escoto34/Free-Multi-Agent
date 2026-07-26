@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  celery-worker-default:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A tasks.celery_app worker --loglevel=info --pool=threads --concurrency=4 --queues=default
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-worker-scrapy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A tasks.celery_app worker --loglevel=info --pool=solo --concurrency=1 --queues=scrapy
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+      - SCRAPY_SETTINGS_MODULE=scrapers.scrapy_project.scrapy_project.settings
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-worker-research:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A tasks.celery_app worker --loglevel=info --pool=threads --concurrency=2 --queues=research
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:

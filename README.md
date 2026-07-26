@@ -19,7 +19,7 @@ see **[`systems.md`](systems.md)** (design source of truth — not required for 
 ## Quick start
 
 ```bash
-git clone <repo-url> && cd MultiAgent
+git clone https://github.com/escoto34/Free-Multi-Agent && cd MultiAgent
 python3 -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -e ".[dev]"                            # or: pip install -r requirements.txt
 cp .env.example .env                               # then fill keys (or use multiagent keys set)

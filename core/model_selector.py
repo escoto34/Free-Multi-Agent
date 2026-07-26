@@ -4,7 +4,7 @@ Primary vs fallback model selection from difficulty scores + benchmarks YAML.
 Consumes:
 
 * ``config/model_benchmarks.yaml`` — scores (systems.md §4.2), thresholds (§4.3),
-  hy3 ``free_until``
+  model ``free_until`` dates
 * ``config/model_router.yaml`` — live primary/fallback per role
 * :class:`~core.difficulty_scorer.DifficultyAssessment`
 
