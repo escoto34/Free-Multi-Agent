@@ -768,25 +768,29 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
             return ToolResult(name, True, f"patched {rel}")
 
         if name == "webfetch":
-            import urllib.error
-            import urllib.request
+            # WAVE-13: route through the cache-aware fetch_url + html_to_text so
+            # the model reads readable page text, not raw truncated HTML bytes.
+            from agents.deep_research.contracts import SourceResultStatus
+            from agents.deep_research.source_fetch import fetch_url
 
             url = str(args.get("url") or "").strip()
             if not url.startswith("http://") and not url.startswith("https://"):
                 return ToolResult(name, False, "url must be http(s)")
             max_chars = int(args.get("max_chars") or 8000)
             max_chars = max(500, min(max_chars, 50000))
-            try:
-                req = urllib.request.Request(
-                    url,
-                    headers={"User-Agent": "MultiAgent-chat/1.0"},
+            src = fetch_url(
+                url,
+                timeout=20,
+                max_chars=max_chars,
+                extract_signals=False,
+                follow_outbound=False,
+            )
+            if src.status is SourceResultStatus.SUCCESS and src.text.strip():
+                return ToolResult(
+                    name, True, f"URL: {url}\n\n{src.text[:max_chars]}"
                 )
-                with urllib.request.urlopen(req, timeout=20) as resp:
-                    raw = resp.read(max_chars * 2)
-                text = raw.decode("utf-8", errors="replace")[:max_chars]
-                return ToolResult(name, True, f"URL: {url}\n\n{text}")
-            except Exception as exc:
-                return ToolResult(name, False, f"webfetch failed: {exc}")
+            reason = src.error or src.status.value
+            return ToolResult(name, False, f"webfetch failed: {reason}")
 
         if name == "run_terminal":
             from core.toolbox import soft_rewrite_shell_command

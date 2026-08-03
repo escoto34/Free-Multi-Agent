@@ -591,5 +591,63 @@ def tools_profiles() -> None:
     click.echo("  all            (all catalog entries)")
 
 
+@main.group()
+def pipeline() -> None:
+    """Run research-implement pipelines headlessly (no TUI)."""
+    pass
+
+
+@pipeline.command(name="run")
+@click.argument("task", nargs=-1, required=True)
+@click.option(
+    "--gpt-researcher",
+    is_flag=True,
+    help="Use the GPT-Researcher research engine for the research phase.",
+)
+@click.option(
+    "--provider",
+    default=None,
+    help="Planner provider override (default: config cli.planner).",
+)
+@click.option("--model", default=None, help="Planner model override.")
+@click.option(
+    "--planner-only",
+    is_flag=True,
+    help="Print the plan and stop (don't execute steps).",
+)
+def pipeline_run(
+    task: tuple[str, ...],
+    gpt_researcher: bool,
+    provider: Optional[str],
+    model: Optional[str],
+    planner_only: bool,
+) -> None:
+    """Run `planner -> execute_plan` for TASK, mirroring the TUI /do flow."""
+    from cli_app.pipeline_cli import run_pipeline
+
+    if planner_only:
+        from agents.planner import format_plan, plan_pipelines
+        from cli_app.pipeline_cli import _resolve_planner
+
+        prov, m = _resolve_planner(provider, model)
+        click.echo(f"Planner: {prov}/{m}\n")
+        click.echo(format_plan(plan_pipelines(" ".join(task), provider=prov, model=m)))
+        return
+
+    text = " ".join(task)
+    out = run_pipeline(
+        text,
+        use_gpt_researcher=gpt_researcher,
+        provider=provider,
+        model=model,
+        progress=lambda msg: click.echo(msg),
+    )
+    if out.get("ok"):
+        click.echo(out["text"], nl=False)
+        raise SystemExit(0)
+    click.echo(out.get("text", "pipeline failed"), nl=False)
+    raise SystemExit(1)
+
+
 if __name__ == "__main__":
     main()

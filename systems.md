@@ -524,6 +524,8 @@ Heuristics + compressor JSON fields feed a `ResearchProfile` used by search face
 | **chat** | `agnes` / `agnes-2.0-flash` | `groq` / `openai/gpt-oss-120b` | Interactive volume; tool-using host agent benefits from Agnes agent/coding strengths and free fair-use. Groq 120b backup for quality bursts. |
 | **planner** (`/do`) | `agnes` / `agnes-2.0-flash` | `groq` / `openai/gpt-oss-120b` | Task split into vibe/research steps is agent-style planning — Agnes-fit. Must stay cheap and available every `/do`. |
 
+The `/do` TUI flow (*planner → execute_plan*) is exposed headlessly as `pipeline run [--planner-only] [--provider P] [--model M] [--gpt-researcher] TASK…` (`cli_app/pipeline_cli.py`). It resolves the planner from the same `cli.planner` config, translates non-English tasks with the same chat router, and returns a machine-readable dict — the loop lives only there, so CI/cron/other programs can drive a pipeline with no TUI or session. Chat (agent-loop) hygiene: read-only tools are batched into a single `run_tools` call per turn (approval stays strictly per mutating call via `one_mutating_at_a_time`), and the chat agent's `webfetch` returns readable page text through the cache-aware `agents.deep_research.source_fetch.fetch_url` instead of raw truncated HTML.
+
 ---
 
 ## 8. Fallback cascade (provider DAG)

@@ -15,7 +15,6 @@ from typing import Any, Callable, Optional
 from cli_app.language import chat_language_instruction
 from cli_app.session import ConversationSession
 from cli_app.tools import (
-    exec_tool,
     format_tool_results,
     parse_tool_calls,
     run_tools,
@@ -35,7 +34,6 @@ _ACTION_RE = re.compile(
     r"borra|delete|run|ejecuta|escribe|escrib[ei]|haz|make|add|agrega)\b",
     re.I,
 )
-_HELLO_RE = re.compile(r"hola\s*mundo|hello\s*world", re.I)
 _FAKE_TOOL_RE = re.compile(
     r"(Ejecut[eé]\s+.*graphify|graphify\s+query\s+[\"']|【[^】]+】|→\s*skipped:)",
     re.I,
@@ -164,63 +162,6 @@ def agent_chat_turn(
             "data": {"graph_updated": True, "used_graph": True},
         }
 
-    # --- Host-side hello-world create (model often forgets write_file) ---
-    # Still go through approval when not always_approve
-    if _HELLO_RE.search(user_text) and re.search(
-        r"\b(crea|crear|create|write|archivo|file|haz)\b", user_text, re.I
-    ):
-        from cli_app.tools import ToolCall
-
-        path = "hola_mundo.py"
-        m = re.search(
-            r"(?:archivo|file)\s+[«\"'`]?([A-Za-z0-9_./-]+\.[A-Za-z0-9]+)[»\"'`]?",
-            user_text,
-            re.I,
-        )
-        if m:
-            path = m.group(1)
-        content = 'print("Hola mundo")\n'
-        call = ToolCall(
-            name="write_file",
-            args={"path": path, "content": content},
-        )
-        if not session.always_approve and approve is not None:
-            decision = (approve(call) or "reject").strip().lower()
-            if decision in ("always", "!", "always_approve"):
-                session.always_approve = True
-                decision = "approve"
-            if decision not in ("approve", "yes", "y", "a", "ok", "accept"):
-                session.add("user", user_text[:800])
-                msg = f"Creación de `{path}` rechazada."
-                session.add("assistant", msg)
-                return {
-                    "ok": True,
-                    "text": msg,
-                    "always_approve": session.always_approve,
-                    "tools_used": [],
-                    "data": {"used_graph": False},
-                }
-        res = exec_tool("write_file", call.args)
-        session.add("user", user_text[:800])
-        from cli_app.tools import work_root
-
-        where = work_root()
-        if res.ok:
-            text = (
-                f"Creado `{path}` en `{where}`:\n\n```python\n{content}```\n\n"
-                f"{res.output}"
-            )
-        else:
-            text = f"No se pudo crear `{path}` en `{where}`: {res.output}"
-        session.add("assistant", text[:store_max])
-        return {
-            "ok": res.ok,
-            "text": text,
-            "always_approve": session.always_approve,
-            "tools_used": ["write_file"],
-            "data": {"used_graph": False, "tools": ["write_file"]},
-        }
-
     session.add("user", user_text[:800])
     seed = _seed_context(user_text)
 
@@ -330,23 +271,25 @@ def agent_chat_turn(
         if visible:
             _prog(visible[:400])
 
-        # One tool at a time (approval UI shows a single command header)
+        # WAVE-13: run ALL requested tools in one run_tools batch. run_tools
+        # executes read-only tools freely and prompts mutating tools one-at-a-time,
+        # so read tools are batched (matching what the model is told) while write
+        # approval stays strictly per-call and never weakened.
         messages.append({"role": "assistant", "content": raw[:6000]})
         all_results = []
-        for call in calls:
-            _prog(f"tool: {call.name}")
-            results, always, _ = run_tools(
-                [call],
-                approve=approve,
-                always_approve=always,
-                one_mutating_at_a_time=True,
-            )
-            session.always_approve = always
-            all_results.extend(results)
-            for r in results:
-                tools_used.append(r.name)
-                if r.name in ("graphify_query", "graphify_update") and r.ok:
-                    used_graph = True
+        results, always_, rejected_n = run_tools(
+            calls,
+            approve=approve,
+            always_approve=always,
+            one_mutating_at_a_time=True,
+        )
+        session.always_approve = always_
+        for r in results:
+            _prog(f"tool: {r.name}")
+            all_results.append(r)
+            tools_used.append(r.name)
+            if r.name in ("graphify_query", "graphify_update") and r.ok:
+                used_graph = True
         messages.append(
             {
                 "role": "user",
