@@ -12,11 +12,12 @@ Never log message contents or API keys here — only role path + provider/model.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from typing import Any, Mapping, MutableMapping, Optional, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from core.agent_config import get_agent_config
 from core.difficulty_scorer import DifficultyAssessment, score_task_difficulty
@@ -215,7 +216,52 @@ def run_structured_agent(
         apply_reasoning=apply_reasoning,
         **call_kwargs,
     )
-    return schema.model_validate_json(strip_fences(resp.content))
+    try:
+        return schema.model_validate_json(strip_fences(resp.content))
+    except (ValidationError, json.JSONDecodeError, TypeError, ValueError):
+        # Generic repair-once: feed the schema errors back so the same model
+        # can fix only what's wrong, rather than crashing or burning a cascade.
+        repair_payload = {
+            "request": messages[-1].get("content", "") if messages else "",
+            "invalid_output": resp.content,
+            "validation_errors": _summary_validation_errors(schema, resp.content),
+            "instruction": "fix only what's necessary and reply with valid JSON",
+        }
+        repair_msg = {
+            "role": "user",
+            "content": (
+                "Tu respuesta anterior no era un JSON válido para este esquema. "
+                f"Detalles: {repair_payload['validation_errors']}. Devuelve "
+                "ÚNICAMENTE un objeto JSON válido corrigiendo los errores indicados."
+            ),
+        }
+        logger.warning(
+            "Schema validation failed for %s — issuing one repair pass.",
+            ".".join(role_path),
+        )
+        repaired = invoke_router(
+            router_instance,
+            provider=provider,
+            model=model,
+            messages=messages + [repair_msg],
+            fallback=fb,
+            assessment=assess,
+            role_path=".".join(role_path),
+            apply_reasoning=apply_reasoning,
+            **call_kwargs,
+        )
+        return schema.model_validate_json(strip_fences(repaired.content))
+
+
+def _summary_validation_errors(schema: type[T], content: str) -> str:
+    """Best-effort description of why *content* fails validation for *schema*."""
+    try:
+        schema.model_validate_json(strip_fences(content))
+        return "validation error"
+    except ValidationError as exc:
+        return "; ".join(f"{e['loc']}: {e['msg']}" for e in exc.errors())
+    except Exception as exc:  # noqa: BLE001
+        return str(exc)[:400]
 
 
 def run_role_raw(

@@ -52,6 +52,12 @@ import cohere as cohere_sdk
 import yaml
 from openai import APIStatusError, OpenAI
 
+from core.call_outcome import (
+    NON_RETRIABLE,
+    CallOutcome,
+    classify_http_status,
+    retry_budget_for,
+)
 from core.clients import get_client
 from core.quotas import QuotaTracker
 from core.reasoning_params import sanitize_call_kwargs
@@ -249,6 +255,26 @@ class ModelRouter:
             return int(status)
         return None
 
+    @staticmethod
+    def _extract_body(error: Exception) -> str:
+        """Best-effort body string from an exception (for quota-body classifier)."""
+        for attr in ("body", "response", "message"):
+            obj = getattr(error, attr, None)
+            if obj is None:
+                continue
+            if isinstance(obj, str):
+                return obj
+            text = getattr(obj, "text", None)
+            content = getattr(obj, "content", None)
+            if isinstance(text, str):
+                return text
+            if isinstance(content, bytes):
+                try:
+                    return content.decode("utf-8", "replace")
+                except Exception:
+                    pass
+        return ""
+
     def call_agent(
         self,
         provider: str,
@@ -329,49 +355,60 @@ class ModelRouter:
             except Exception as exc:
                 last_error = exc
                 status = self._extract_status(exc)
+                outcome = (
+                    classify_http_status(status, self._extract_body(exc), provider)
+                    if status is not None
+                    else CallOutcome.NETWORK_TRANSIENT
+                )
+                if status is not None:
+                    logger.debug("Classified %s/%s error as %s", provider, model, outcome)
 
-                # Cohere's 422 NO_VALID_RESPONSE_GENERATED is a semantic
-                # rejection, not a transient rate-limit — retrying the exact
-                # same payload 3 times just wastes Cohere's scarce daily
-                # quota for no benefit. Fail fast to fallback on the first
-                # 422 from Cohere specifically, instead of exhausting all
-                # retries like we do for genuinely transient errors (429/402).
-                if provider == "cohere" and status == 422:
-                    logger.warning(
-                        "HTTP 422 from %s/%s — Cohere semantic rejection, "
-                        "skipping remaining retries to save quota.",
-                        provider,
-                        model,
-                    )
-                    break
-                elif status in _RETRIABLE_STATUSES and attempt < max_retries:
-                    delay = base_delay * (2 ** (attempt - 1))
-                    logger.warning(
-                        "HTTP %s from %s/%s  attempt=%d/%d  retry_in=%.1fs",
-                        status,
-                        provider,
-                        model,
-                        attempt,
-                        max_retries,
-                        delay,
-                    )
-                    time.sleep(delay)
-                elif status in _RETRIABLE_STATUSES:
-                    logger.warning(
-                        "HTTP %s from %s/%s  attempt=%d/%d  retries exhausted",
-                        status,
-                        provider,
-                        model,
-                        attempt,
-                        max_retries,
-                    )
-                    break
-                else:
-                    # 404 model_not_found, 401, etc. — cascade immediately.
-                    logger.error(
-                        "Non-retriable error from %s/%s: %s", provider, model, exc
-                    )
-                    break
+                # Transient-network / rate-limit: retry within the per-class
+                # budget (never exceeding the caller's max_retries), with
+                # exponential backoff.
+                if outcome in (
+                    CallOutcome.NETWORK_TRANSIENT,
+                    CallOutcome.RATE_LIMITED,
+                ):
+                    # Budget counts *retries* (network ≤2 retries = up to 3
+                    # total attempts); never exceed the caller's max_retries.
+                    allowed = min(max_retries, retry_budget_for(outcome) + 1)
+                    if attempt < allowed:
+                        delay = base_delay * (2 ** (attempt - 1))
+                        logger.warning(
+                            "HTTP %s from %s/%s  attempt=%d/%d  retry_in=%.1fs",
+                            status,
+                            provider,
+                            model,
+                            attempt,
+                            max_retries,
+                            delay,
+                        )
+                        time.sleep(delay)
+                    else:
+                        logger.warning(
+                            "HTTP %s from %s/%s  attempt=%d/%d  retries exhausted",
+                            status,
+                            provider,
+                            model,
+                            attempt,
+                            max_retries,
+                        )
+                        break
+                    continue
+
+                # Hard failures that retrying the same call can't fix.
+                # A body-confirmed quota wall, a semantic rejection (Cohere
+                # 422 / generic QUALITY_REJECTED), or permanent provider errors
+                # all cascade immediately.
+                logger.warning(
+                    "%s from %s/%s — %s, skipping remaining retries.",
+                    status,
+                    provider,
+                    model,
+                    outcome.value,
+                )
+                break
 
         if last_error is not None and self._extract_status(last_error) not in _RETRIABLE_STATUSES:
             reason = f"{provider}/{model} failed: {last_error}"
@@ -479,12 +516,19 @@ def get_router(
     config_path: Optional[Path] = None,
     quota_tracker: Optional[QuotaTracker] = None,
 ) -> ModelRouter:
+    """Return a ModelRouter, honoring config_path/quota_tracker on every call.
+
+    When explicit ``config_path``/``quota_tracker`` args are passed we always
+    build a fresh router so the first caller no longer silently wins. When
+    both are ``None`` we reuse (and lazily create) the process-wide default
+    so the module-level :func:`call_agent` shortcut stays cheap.
+    """
     global _default_router
-    if _default_router is None:
-        _default_router = ModelRouter(
-            config_path=config_path, quota_tracker=quota_tracker
-        )
-    return _default_router
+    if config_path is None and quota_tracker is None:
+        if _default_router is None:
+            _default_router = ModelRouter()
+        return _default_router
+    return ModelRouter(config_path=config_path, quota_tracker=quota_tracker)
 
 
 def reset_router() -> None:

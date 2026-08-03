@@ -153,26 +153,7 @@ def run_synthesizer(
             fallback_sources=list(grounded_report.sources or []),
         )
 
-    try:
-        final_report = _call(messages)
-    except Exception as exc:
-        if isinstance(exc, (json.JSONDecodeError, ValidationError, ValueError, TypeError)):
-            retry_messages = messages + [
-                {
-                    "role": "user",
-                    "content": (
-                        "Tu respuesta anterior no era un JSON válido o estaba incompleta/truncada. "
-                        "Responde ÚNICAMENTE con un objeto JSON válido con las claves "
-                        '"content" (string markdown) y "sources" (array de URLs). '
-                        "Si no tienes URLs nuevas, usa las del borrador: "
-                        f"{list(grounded_report.sources or [])[:12]}. "
-                        "Sin texto conversacional ni bloques de código markdown."
-                    ),
-                }
-            ]
-            final_report = _call(retry_messages)
-        else:
-            raise
+    final_report = _call(messages)
 
     # Corpus for scrubbing: primary fetch + live dump only (not model rewrites).
     # Including grounded prose can re-introduce invented URLs; prefer raw search.

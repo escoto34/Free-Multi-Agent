@@ -315,6 +315,9 @@ resolve_reasoning_kwargs(provider, model, assessment, role)
    ▼
 router.call_agent  (1 quota call on success)
    │  sanitize_call_kwargs per hop (cascade strips unsupported effort)
+   │  retry budgets (core/call_outcome.py): network-transient ≤2 w/ backoff;
+   │  402/429/512 retried with per-class budget; body-confirmed quota wall or
+   │  Cohere 422 → skip remaining retries; validated JSON repair-once (1)
    ▼
 Worker agent (architect / coder / …) returns domain schema
 ```
