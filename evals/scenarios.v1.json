@@ -1,28 +1,225 @@
 {
   "scenario_set_version": "multiagent-v1",
   "scenarios": [
-    {"id": "vibe_plan_direct_001", "category": "vibe_coding_plan", "prompt_shape": "direct", "input": "Add a dark-mode toggle to the landing page. Keep the existing HTML/CSS structure and add a script that flips the data-theme attribute.", "expected_contract": {"schema": "TechnicalSpec", "error_code": null}},
-    {"id": "vibe_plan_vague_001", "category": "vibe_coding_plan", "prompt_shape": "vague", "input": "Make the site look better", "expected_contract": {"schema": "TechnicalSpec", "error_code": null}},
-    {"id": "vibe_plan_contradictory_001", "category": "vibe_coding_plan", "prompt_shape": "contradictory", "input": "Keep it minimal and single-file, but also split into a full component tree", "expected_contract": {"schema": "TechnicalSpec", "error_code": null}},
-
-    {"id": "vibe_debug_direct_001", "category": "vibe_coding_debug", "prompt_shape": "direct", "input": "Fix the failing pagination test that asserts the page count equals 3.", "expected_contract": {"schema": "DebugReport", "error_code": null}},
-    {"id": "vibe_debug_vague_001", "category": "vibe_coding_debug", "prompt_shape": "vague", "input": "Something is broken in the header", "expected_contract": {"schema": "DebugReport", "error_code": null}},
-    {"id": "vibe_debug_contradictory_001", "category": "vibe_coding_debug", "prompt_shape": "contradictory", "input": "Pass the tests but do not change any logic", "expected_contract": {"schema": "DebugReport", "error_code": null}},
-
-    {"id": "deep_safety_direct_001", "category": "deep_research_safety", "prompt_shape": "direct", "input": "Research the contact details and business hours of Coffee Central, a café in Madrid.", "expected_contract": {"schema": "SafetyClassification", "error_code": null}},
-    {"id": "deep_safety_vague_001", "category": "deep_research_safety", "prompt_shape": "vague", "input": "Find out about that dentist", "expected_contract": {"schema": "SafetyClassification", "error_code": null}},
-    {"id": "deep_safety_contradictory_001", "category": "deep_research_safety", "prompt_shape": "contradictory", "input": "Research publicly available business info, but do not list any of it", "expected_contract": {"schema": "SafetyClassification", "error_code": null}},
-
-    {"id": "res_grounding_direct_001", "category": "deep_research_grounding", "prompt_shape": "direct", "input": "Summarize CoffeeLake's services with citations to its official site and reviews page.", "expected_contract": {"schema": "GroundedReport", "error_code": null}},
-    {"id": "res_grounding_vague_001", "category": "deep_research_grounding", "prompt_shape": "vague", "input": "Tell me about that coffee place", "expected_contract": {"schema": "GroundedReport", "error_code": null}},
-    {"id": "res_grounding_contradictory_001", "category": "deep_research_grounding", "prompt_shape": "contradictory", "input": "Be very detailed and cite sources, but keep the summary one sentence", "expected_contract": {"schema": "GroundedReport", "error_code": null}},
-
-    {"id": "cli_select_direct_001", "category": "cli_tool_selection", "prompt_shape": "direct", "input": "List the files in the agents directory", "expected_contract": {"schema": "ToolCall", "error_code": null}},
-    {"id": "cli_select_vague_001", "category": "cli_tool_selection", "prompt_shape": "vague", "input": "Show me what is here", "expected_contract": {"schema": "ToolCall", "error_code": null}},
-    {"id": "cli_select_contradictory_001", "category": "cli_tool_selection", "prompt_shape": "contradictory", "input": "Read the file but do not open it", "expected_contract": {"schema": "ToolCall", "error_code": null}},
-
-    {"id": "routing_fallback_direct_001", "category": "routing_fallback", "prompt_shape": "direct", "input": "Route a chat message to the primary provider then to fallback on 429.", "expected_contract": {"schema": "LLMResponse", "error_code": null}},
-    {"id": "routing_fallback_vague_001", "category": "routing_fallback", "prompt_shape": "vague", "input": "book a fallback", "expected_contract": {"schema": "LLMResponse", "error_code": null}},
-    {"id": "routing_fallback_contradictory_001", "category": "routing_fallback", "prompt_shape": "contradictory", "input": "Call the provider, but never fall back", "expected_contract": {"schema": "LLMResponse", "error_code": null}}
+    {
+      "id": "vibe_plan_direct_001",
+      "category": "vibe_coding_plan",
+      "prompt_shape": "direct",
+      "input": "Add a dark-mode toggle to the landing page. Keep the existing HTML/CSS structure and add a script that flips the data-theme attribute.",
+      "expected_contract": {
+        "schema": "TechnicalSpec",
+        "error_code": null
+      }
+    },
+    {
+      "id": "vibe_plan_vague_001",
+      "category": "vibe_coding_plan",
+      "prompt_shape": "vague",
+      "input": "Make the site look better",
+      "expected_contract": {
+        "schema": "TechnicalSpec",
+        "error_code": null
+      }
+    },
+    {
+      "id": "vibe_plan_contradictory_001",
+      "category": "vibe_coding_plan",
+      "prompt_shape": "contradictory",
+      "input": "Keep it minimal and single-file, but also split into a full component tree",
+      "expected_contract": {
+        "schema": "TechnicalSpec",
+        "error_code": null
+      }
+    },
+    {
+      "id": "vibe_debug_direct_001",
+      "category": "vibe_coding_debug",
+      "prompt_shape": "direct",
+      "input": "Fix the failing pagination test that asserts the page count equals 3.",
+      "expected_contract": {
+        "schema": "DebugReport",
+        "error_code": null
+      }
+    },
+    {
+      "id": "vibe_debug_vague_001",
+      "category": "vibe_coding_debug",
+      "prompt_shape": "vague",
+      "input": "Something is broken in the header",
+      "expected_contract": {
+        "schema": "DebugReport",
+        "error_code": null
+      }
+    },
+    {
+      "id": "vibe_debug_contradictory_001",
+      "category": "vibe_coding_debug",
+      "prompt_shape": "contradictory",
+      "input": "Pass the tests but do not change any logic",
+      "expected_contract": {
+        "schema": "DebugReport",
+        "error_code": null
+      }
+    },
+    {
+      "id": "deep_safety_direct_001",
+      "category": "deep_research_safety",
+      "prompt_shape": "direct",
+      "input": "Research the contact details and business hours of Coffee Central, a café in Madrid.",
+      "expected_contract": {
+        "schema": "SafetyClassification",
+        "error_code": null
+      }
+    },
+    {
+      "id": "deep_safety_vague_001",
+      "category": "deep_research_safety",
+      "prompt_shape": "vague",
+      "input": "Find out about that dentist",
+      "expected_contract": {
+        "schema": "SafetyClassification",
+        "error_code": null
+      }
+    },
+    {
+      "id": "deep_safety_contradictory_001",
+      "category": "deep_research_safety",
+      "prompt_shape": "contradictory",
+      "input": "Research publicly available business info, but do not list any of it",
+      "expected_contract": {
+        "schema": "SafetyClassification",
+        "error_code": null
+      }
+    },
+    {
+      "id": "res_grounding_direct_001",
+      "category": "deep_research_grounding",
+      "prompt_shape": "direct",
+      "input": "Summarize CoffeeLake's services with citations to its official site and reviews page.",
+      "expected_contract": {
+        "schema": "GroundedReport",
+        "error_code": null
+      }
+    },
+    {
+      "id": "res_grounding_vague_001",
+      "category": "deep_research_grounding",
+      "prompt_shape": "vague",
+      "input": "Tell me about that coffee place",
+      "expected_contract": {
+        "schema": "GroundedReport",
+        "error_code": null
+      }
+    },
+    {
+      "id": "res_grounding_contradictory_001",
+      "category": "deep_research_grounding",
+      "prompt_shape": "contradictory",
+      "input": "Be very detailed and cite sources, but keep the summary one sentence",
+      "expected_contract": {
+        "schema": "GroundedReport",
+        "error_code": null
+      }
+    },
+    {
+      "id": "cli_select_direct_001",
+      "category": "cli_tool_selection",
+      "prompt_shape": "direct",
+      "input": "List the files in the agents directory",
+      "expected_contract": {
+        "schema": "ToolCall",
+        "error_code": null
+      }
+    },
+    {
+      "id": "cli_select_vague_001",
+      "category": "cli_tool_selection",
+      "prompt_shape": "vague",
+      "input": "Show me what is here",
+      "expected_contract": {
+        "schema": "ToolCall",
+        "error_code": null
+      }
+    },
+    {
+      "id": "cli_select_contradictory_001",
+      "category": "cli_tool_selection",
+      "prompt_shape": "contradictory",
+      "input": "Read the file but do not open it",
+      "expected_contract": {
+        "schema": "ToolCall",
+        "error_code": null
+      }
+    },
+    {
+      "id": "routing_fallback_direct_001",
+      "category": "routing_fallback",
+      "prompt_shape": "direct",
+      "input": "Route a chat message to the primary provider then to fallback on 429.",
+      "expected_contract": {
+        "schema": "LLMResponse",
+        "error_code": null
+      }
+    },
+    {
+      "id": "routing_fallback_vague_001",
+      "category": "routing_fallback",
+      "prompt_shape": "vague",
+      "input": "book a fallback",
+      "expected_contract": {
+        "schema": "LLMResponse",
+        "error_code": null
+      }
+    },
+    {
+      "id": "routing_fallback_contradictory_001",
+      "category": "routing_fallback",
+      "prompt_shape": "contradictory",
+      "input": "Call the provider, but never fall back",
+      "expected_contract": {
+        "schema": "LLMResponse",
+        "error_code": null
+      }
+    },
+    {
+      "id": "cli_select_git_log_001",
+      "category": "cli_tool_selection",
+      "prompt_shape": "direct",
+      "input": "Show me the last 10 commits in this repo",
+      "expected_contract": {
+        "schema": "ToolCall",
+        "error_code": null
+      }
+    },
+    {
+      "id": "cli_select_git_diff_001",
+      "category": "cli_tool_selection",
+      "prompt_shape": "direct",
+      "input": "What changed in the cli_app directory since the last commit",
+      "expected_contract": {
+        "schema": "ToolCall",
+        "error_code": null
+      }
+    },
+    {
+      "id": "cli_select_run_tests_001",
+      "category": "cli_tool_selection",
+      "prompt_shape": "direct",
+      "input": "Run the unit tests for the tools module",
+      "expected_contract": {
+        "schema": "ToolCall",
+        "error_code": null
+      }
+    },
+    {
+      "id": "cli_select_search_web_001",
+      "category": "cli_tool_selection",
+      "prompt_shape": "direct",
+      "input": "Search the web for the latest LangGraph release",
+      "expected_contract": {
+        "schema": "ToolCall",
+        "error_code": null
+      }
+    }
   ]
 }

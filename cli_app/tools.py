@@ -46,6 +46,10 @@ READ_TOOLS = frozenset(
         "grep",
         "glob",
         "webfetch",
+        "search_web",
+        "git_log",
+        "git_diff",
+        "run_tests",
         "toolbox_query",
         "toolbox",  # alias
     }
@@ -179,6 +183,25 @@ needs approval (write/bash/pip). Read tools may be batched.
 ```tool
 {"name": "webfetch", "args": {"url": "https://example.com", "max_chars": 8000}}
 ```
+
+```tool
+{"name": "search_web", "args": {"query": "LangGraph 0.3 release notes", "max_chars": 4000}}
+```
+(no API key; DuckDuckGo lite. READ tool — no approval.)
+
+```tool
+{"name": "git_log", "args": {"count": 20, "path": "cli_app"}}
+```
+
+```tool
+{"name": "git_diff", "args": {"ref": "HEAD~2", "path": "cli_app/tools.py"}}
+```
+(omit ref = unstaged changes. READ tools — no approval.)
+
+```tool
+{"name": "run_tests", "args": {"path": "tests/test_tools.py", "timeout": 300}}
+```
+(omit path = full suite. Uses the project venv if present. READ tool — no approval.)
 
 ```tool
 {"name": "graphify_update", "args": {}}
@@ -336,6 +359,61 @@ def _looks_like_pip_or_venv(cmd: str) -> bool:
             "poetry install",
         )
     )
+
+
+def _guarded_shell(
+    cmd: str,
+    *,
+    timeout: int = 60,
+    no_upgrade: bool = False,
+    raw: bool = False,
+) -> tuple[Optional[int], str]:
+    """WAVE-04 hardened shell runner shared by run_terminal and the read-only
+    shell tools (git_log, git_diff, run_tests).
+
+    Applies the same ``_BLOCKED_CMD`` denylist + modern-catalog soft-upgrade as
+    ``run_terminal`` so new tools inherit the hardened path instead of calling
+    ``subprocess`` directly. Returns ``(None, reason)`` for a blocked command,
+    else ``(returncode, formatted_body)``.
+    """
+    from core.toolbox import soft_rewrite_shell_command
+
+    if _BLOCKED_CMD.search(cmd):
+        return None, f"blocked dangerous command: {cmd[:80]}"
+    upgrade_note = None
+    if not no_upgrade and not raw:
+        cmd, upgrade_note = soft_rewrite_shell_command(cmd)
+    proc = subprocess.run(
+        cmd,
+        shell=True,
+        cwd=str(work_root()),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    out = (proc.stdout or "")[-6000:]
+    err = (proc.stderr or "")[-2000:]
+    body = out
+    if err:
+        body = (body + "\n[stderr]\n" + err).strip()
+    if not body:
+        body = f"(exit {proc.returncode}, no output)"
+    else:
+        body = f"(exit {proc.returncode})\n{body}"
+    if upgrade_note:
+        body = f"[{upgrade_note}]\n{body}"
+    return proc.returncode, body
+
+
+def _find_test_python() -> str:
+    """Pick a Python interpreter that can run the project's test suite."""
+    for cand in (
+        work_root() / "venv" / "bin" / "python",
+        work_root() / ".venv" / "bin" / "python",
+    ):
+        if cand.exists():
+            return str(cand)
+    return "python3"
 
 
 def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
@@ -793,42 +871,73 @@ def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
             return ToolResult(name, False, f"webfetch failed: {reason}")
 
         if name == "run_terminal":
-            from core.toolbox import soft_rewrite_shell_command
-
             cmd = str(args.get("command") or args.get("cmd") or "").strip()
             if not cmd:
                 return ToolResult(name, False, "command required")
-            if _BLOCKED_CMD.search(cmd):
-                return ToolResult(name, False, f"blocked dangerous command: {cmd[:80]}")
-            # Soft-upgrade classic CLIs → modern catalog tools when on PATH.
-            # Skip if caller disables: args.no_upgrade / raw=true
-            upgrade_note = None
-            if not args.get("no_upgrade") and not args.get("raw"):
-                cmd, upgrade_note = soft_rewrite_shell_command(cmd)
             # Longer default for pip/venv style commands
             default_to = 300 if _looks_like_pip_or_venv(cmd) else 60
             timeout = int(args.get("timeout") or default_to)
             timeout = max(5, min(timeout, 900))
-            proc = subprocess.run(
+            rc, body = _guarded_shell(
                 cmd,
-                shell=True,
-                cwd=str(work_root()),
-                capture_output=True,
-                text=True,
                 timeout=timeout,
+                no_upgrade=bool(args.get("no_upgrade")),
+                raw=bool(args.get("raw")),
             )
-            out = (proc.stdout or "")[-6000:]
-            err = (proc.stderr or "")[-2000:]
-            body = out
-            if err:
-                body = (body + "\n[stderr]\n" + err).strip()
-            if not body:
-                body = f"(exit {proc.returncode}, no output)"
+            if rc is None:
+                return ToolResult(name, False, body)
+            return ToolResult(name, rc == 0, body)
+
+        if name in ("git_log", "git_diff"):
+            # READ tools: structured git inspection without run_terminal approval.
+            import shlex
+
+            path = str(args.get("path") or args.get("directory") or "").strip()
+            safe_path = f" -- {shlex.quote(path)}" if path else ""
+            if name == "git_log":
+                count = max(1, min(int(args.get("count") or 20), 200))
+                cmd = f"git log --oneline --decorate -n {count}{safe_path}"
             else:
-                body = f"(exit {proc.returncode})\n{body}"
-            if upgrade_note:
-                body = f"[{upgrade_note}]\n{body}"
-            return ToolResult(name, proc.returncode == 0, body)
+                ref = str(args.get("ref") or "").strip()
+                safe_ref = f" {shlex.quote(ref)}" if ref else ""
+                cmd = f"git diff{safe_ref}{safe_path}"
+            rc, body = _guarded_shell(cmd, timeout=30, no_upgrade=True)
+            if rc is None:
+                return ToolResult(name, False, body)
+            return ToolResult(name, rc == 0, body)
+
+        if name == "run_tests":
+            # READ-adjacent: runs the project suite via the hardened path so a
+            # non-mutating test run needs no approval prompt.
+            target = str(args.get("path") or args.get("target") or "").strip()
+            timeout = max(30, min(int(args.get("timeout") or 300), 900))
+            py = _find_test_python()
+            pytest_cmd = f"{py} -m pytest -q"
+            if target:
+                import shlex
+
+                pytest_cmd += f" {shlex.quote(target)}"
+            rc, body = _guarded_shell(pytest_cmd, timeout=timeout, no_upgrade=True)
+            if rc is None:
+                return ToolResult(name, False, body)
+            summary = "PASSED" if rc == 0 else "FAILED"
+            return ToolResult(name, rc == 0, f"tests: {summary} (exit {rc})\n{body[-3000:]}")
+
+        if name == "search_web":
+            # READ tool: surfaces WAVE-11's DDG search chain to the chat agent.
+            from agents.deep_research.source_fetch import search_duckduckgo
+
+            q = str(args.get("query") or args.get("q") or "").strip()
+            if not q:
+                return ToolResult(name, False, "query required")
+            max_chars = int(args.get("max_chars") or 4000)
+            max_chars = max(500, min(max_chars, 20000))
+            text = search_duckduckgo(q, max_chars=max_chars)
+            if not text:
+                return ToolResult(
+                    name, False, "search returned no results (or the search failed)"
+                )
+            return ToolResult(name, True, text)
 
         return ToolResult(name, False, f"unknown tool: {name}")
     except subprocess.TimeoutExpired:

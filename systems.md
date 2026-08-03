@@ -526,6 +526,8 @@ Heuristics + compressor JSON fields feed a `ResearchProfile` used by search face
 
 The `/do` TUI flow (*planner → execute_plan*) is exposed headlessly as `pipeline run [--planner-only] [--provider P] [--model M] [--gpt-researcher] TASK…` (`cli_app/pipeline_cli.py`). It resolves the planner from the same `cli.planner` config, translates non-English tasks with the same chat router, and returns a machine-readable dict — the loop lives only there, so CI/cron/other programs can drive a pipeline with no TUI or session. Chat (agent-loop) hygiene: read-only tools are batched into a single `run_tools` call per turn (approval stays strictly per mutating call via `one_mutating_at_a_time`), and the chat agent's `webfetch` returns readable page text through the cache-aware `agents.deep_research.source_fetch.fetch_url` instead of raw truncated HTML.
 
+**Agent tools (WAVE-14):** the chat READ set gained `git_log`/`git_diff` (structured repo history without a `run_terminal` approval), `run_tests` (project suite via the project venv, structured pass/fail), and `search_web` (WAVE-11's keyless DuckDuckGo chain surfaced to free-form chat). All are READ-classified; every shell-based one runs through the same WAVE-04 hardened `_guarded_shell` gate as `run_terminal` (`_BLOCKED_CMD` denylist + modern-catalog soft-upgrade), never raw `subprocess`.
+
 ---
 
 ## 8. Fallback cascade (provider DAG)
