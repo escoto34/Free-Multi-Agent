@@ -610,6 +610,16 @@ The legacy `quota_usage.call_count` table remains for backward compatibility
 
 ## 11. Optional profiles (not default)
 
+> **Optional: Lightpanda JS rendering (off by default, WAVE-12).**
+> MultiAgent has no JS rendering on any live path. You may opt in a renderer for
+> SPA/login-wall social fetches (`fetch_outbound_presence_pages`) by installing
+> the [Lightpanda](https://github.com/lightpanda-io/browser) binary and enabling
+> it via `core/render` (`render="lightpanda"` on `fetch_url`). It degrades
+> silently: if the binary is absent (`LIGHTPANDA_BIN` or `PATH`) the pipeline
+> behaves byte-identically to a no-render run — one log line, no exception, no
+> hang, no extra dependency (no Playwright/Puppeteer). A rendered-but-empty page
+> is `SourceResultStatus.EMPTY`, distinct from a fetch that failed.
+
 | Profile | When | Sketch |
 |---------|------|--------|
 | **free-durable** | Default (this doc) | As above |

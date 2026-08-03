@@ -20,6 +20,7 @@ from typing import Iterable, Optional
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 from core.http_cache import cache_key, get_default_cache
+from core.render import render_html
 
 from agents.deep_research.contracts import (
     SourceResultStatus,
@@ -929,6 +930,7 @@ def fetch_outbound_presence_pages(
             max_chars=max_chars,
             extract_signals=True,
             follow_outbound=False,
+            render="lightpanda",
         )
         if src.status is SourceResultStatus.SUCCESS and src.text:
             header = (
@@ -1326,6 +1328,50 @@ def _decode_source(raw: bytes) -> Optional["FetchedSource"]:
         return None
 
 
+# Rendering is slower than a raw GET, so the render path gets a longer floor.
+_RENDER_MIN_TIMEOUT = 45.0
+
+
+def _source_from_markup(
+    markup: str,
+    *,
+    url: str,
+    max_chars: int,
+    extract_signals: bool,
+    follow_outbound: bool,
+    http_status: Optional[int],
+    empty_error: str,
+) -> "FetchedSource":
+    """Extract text/signals/outbound from raw markup into a FetchedSource."""
+    outbound: list[OutboundPresence] = []
+    text = html_to_text(markup, max_chars=max_chars)
+    if extract_signals:
+        signals = extract_structured_signals(markup, base_url=url, max_chars=6000)
+        if signals:
+            budget = max_chars + 6000
+            combined = (text + "\n\n" + signals).strip() if text.strip() else signals
+            text = combined[:budget]
+    if follow_outbound:
+        outbound = extract_outbound_presence(markup, base_url=url)
+    if not text.strip():
+        return FetchedSource(
+            url=url,
+            status=SourceResultStatus.EMPTY,
+            http_status=http_status,
+            text="",
+            error=empty_error,
+            outbound=outbound,
+        )
+    return FetchedSource(
+        url=url,
+        status=SourceResultStatus.SUCCESS,
+        http_status=http_status,
+        text=text,
+        error="",
+        outbound=outbound,
+    )
+
+
 def _fetch_url_uncached(
     url: str,
     *,
@@ -1334,8 +1380,28 @@ def _fetch_url_uncached(
     user_agent: str,
     extract_signals: bool,
     follow_outbound: bool,
+    render: str = "none",
 ) -> "FetchedSource":
-    """The raw fetch+extract body (shared by cache-miss path and tests)."""
+    """The raw fetch+extract body (shared by cache-miss path and tests).
+
+    When *render* is ``"lightpanda"`` and a Lightpanda binary is present, the
+    rendered DOM (if any) is used as the source markup; if Lightpanda is absent
+    or its render fails, the call degrades to the plain-HTTP path unchanged.
+    ``SourceResultStatus`` keeps "rendered but empty" (EMPTY) distinct from a
+    render that failed / was never available (which falls back to plain-HTTP).
+    """
+    if render == "lightpanda":
+        rendered_dom = render_html(url, timeout=max(timeout, _RENDER_MIN_TIMEOUT))
+        if rendered_dom is not None:
+            return _source_from_markup(
+                rendered_dom,
+                url=url,
+                max_chars=max_chars,
+                extract_signals=extract_signals,
+                follow_outbound=follow_outbound,
+                http_status=None,
+                empty_error="rendered empty (lightpanda)",
+            )
     try:
         req = urllib.request.Request(
             url,
@@ -1413,16 +1479,22 @@ def fetch_url(
     user_agent: str = _DEFAULT_UA,
     extract_signals: bool = True,
     follow_outbound: bool = True,
+    render: str = "none",
 ) -> FetchedSource:
-    """HTTP GET + text extraction. Never raises — returns ok=False on failure.
+    """HTTP GET + text extraction. Never raises — returns a status on failure.
 
     Cache-aware (WAVE-09B): identical fetches within a process are served from
     the in-memory HttpCache (single-flight coalesced — concurrent callers for
     the same URL share one real request). The cache key includes the URL,
-    ``_ADAPTER_VERSION`` and the fetch parameters, so changes to extraction
-    logic or to how a page is requested auto-invalidate old entries. The
-    "empty body after extract" case is negative-cached with a shorter TTL so a
-    persistently-empty source is not hammered, yet recovers quickly.
+    ``_ADAPTER_VERSION``, the fetch parameters *and* ``render``, so a rendered
+    and an unrendered fetch of the same URL are different cache entries. The
+    "empty body after extract" case is negative-cached with a shorter TTL.
+
+    *render* is ``"none"`` by default. When ``"lightpanda"`` (Lightpanda binary
+    present) the rendered DOM is used; if Lightpanda is absent or its render
+    fails, the call silently degrades to the plain-HTTP path (identical to the
+    ``"none"`` behavior) with a single log line — never a dependency, exception
+    or hang.
 
     When *extract_signals* is True, append STRUCTURED EXTRACTS (brand/contact).
     When *follow_outbound* is True, populate ``FetchedSource.outbound`` for
@@ -1445,6 +1517,7 @@ def fetch_url(
         extract_signals=str(extract_signals),
         follow_outbound=str(follow_outbound),
         user_agent=user_agent,
+        render=render if render and render != "none" else None,
     )
 
     def _load() -> FetchedSource:
@@ -1455,13 +1528,14 @@ def fetch_url(
             user_agent=user_agent,
             extract_signals=extract_signals,
             follow_outbound=follow_outbound,
+            render=render,
         )
         encoded = _encode_source(src)
         if encoded is not None:
             cache = get_default_cache()
             if src.status is SourceResultStatus.SUCCESS:
                 cache.put(key, encoded)
-            elif src.error == "empty body after extract":
+            elif src.error in ("empty body after extract", "rendered empty (lightpanda)"):
                 cache.put(key, encoded, negative=True)
             # Other failures (HTTP errors, network) are transient — not cached.
         return src
