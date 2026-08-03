@@ -17,7 +17,6 @@ import re
 from typing import Callable, Optional
 
 from agents.deep_research.entity_focus import (
-    entity_focus_block,
     extract_entity_anchors,
     extract_location_phrases,
     extract_name_variants,
@@ -25,7 +24,6 @@ from agents.deep_research.entity_focus import (
 from agents.deep_research.research_types import (
     ResearchProfile,
     classify_research,
-    research_profile_block,
     search_facet_hints,
 )
 from agents.deep_research.source_fetch import (
@@ -43,39 +41,6 @@ from agents.deep_research.source_fetch import (
 logger = logging.getLogger(__name__)
 
 ProgressCb = Optional[Callable[[str], None]]
-
-SEARCH_RESULTS_FORMATTER_PROMPT = """You are a web-search results formatter.
-Your ONLY job is to read the real search results below and organize them into a
-structured dump. You do NOT perform searches — the host already fetched these
-results automatically from DuckDuckGo and HTTP-fetched the actual pages.
-
-The content you receive has four parts:
-1) PRIMARY SOURCES — HTTP-fetched official pages the user named (highest trust).
-2) OUTBOUND PRESENCE — WhatsApp phones / social handles decoded from real
-   buttons and schema on those pages.
-3) LINKED PRESENCE FETCHES — HTTP attempts on social profile pages.
-4) REAL WEB SEARCH RESULTS — actual DuckDuckGo results + fetched page content.
-
-Required output sections (adapt to what was found):
-- Official website findings
-- Contact from official buttons (WhatsApp phones, mailto, tel)
-- Social profiles & posts
-- Third-party web findings (with real URLs)
-- Confirmed facts (with URLs from the search results)
-- Locations
-- Brand / visual identity (only if evidenced)
-- Offerings / products / services
-- Reputation / reviews (if found)
-- Information gaps (what real search did not find)
-
-STRICT RULES:
-- ONLY use information that appears in the search results attached above.
-- Do NOT add any information from your training data.
-- Do NOT invent facts, emails, phones, URLs, hex colors, or archive links.
-- If a URL appears in the search results, you may cite it.
-- If real search found nothing for a facet, state "No results found".
-- Keep the output factual and grounded in the attached results only.
-"""
 
 MAX_SEARCH_TERMS: int = 8
 MAX_QUERY_CHARS: int = 150
@@ -206,7 +171,6 @@ def _build_query_list(
 
 def run_web_search(
     search_terms: list[str],
-    router_instance=None,
     *,
     original_query: str = "",
     max_queries: int = MAX_LIVE_QUERIES,
@@ -221,9 +185,6 @@ def run_web_search(
         max_queries=max(max_queries, 6),
         profile=profile,
     )
-    focus = entity_focus_block(original_query or " ".join(search_terms[:3]))
-    profile_block = research_profile_block(profile)
-    facet_block = "\n".join(f"- {f}" for f in facets) if facets else f"- {original_query}"
 
     if progress:
         progress("fetching user-provided official page(s)…")
@@ -247,7 +208,6 @@ def run_web_search(
     if social_facets:
         # Prepend so live search prioritizes exact profile URLs / posts
         facets = list(dict.fromkeys([*social_facets, *facets]))[:MAX_FACET_HINTS]
-        facet_block = "\n".join(f"- {f}" for f in facets) if facets else facet_block
 
     if progress and outbound:
         kinds = sorted({o.kind for o in outbound})
