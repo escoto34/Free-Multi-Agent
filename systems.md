@@ -1,6 +1,6 @@
 # Systems orchestration — free-durable profile
 
-**Document status:** mid-2026 research snapshot (last updated 2026-07-17)  
+**Document status:** mid-2026 research snapshot (last updated 2026-08-03, WAVE-16 coherence pass)  
 **Live config:** `config/model_router.yaml` (loaded by `core/agent_config.py`)  
 **Factory defaults:** `config/defaults_model_router.yaml`  
 **Quota soft-caps:** `core/quotas.py` (must stay ≤ real provider limits)  
@@ -37,7 +37,7 @@ The `web_search` role is **wired, not reserved**: one bounded LLM call per run e
 
 **Catalog-only (not currently assigned as primary/fallback to those roles):**  
 `tencent/hy3:free` remains in the OpenRouter free catalog and is scored below for historical/optional use.  
-**⚠ `tencent/hy3:free` expires 2026-07-21** — treat as **temporal; verify availability before every run**. Do not assume it is durable free capacity.
+**⚠ `tencent/hy3:free` promo window ended 2026-07-21** — treat as **expired / non-durable**; verified absent from any hot-path default. Keep the row only for historical/optional profiles, never as free-durable capacity.
 
 CLI (`chat`, `planner`) uses Agnes → Groq 120b; see §7. Provider-level `fallback_cascade` is §8.
 
@@ -59,10 +59,17 @@ CLI (`chat`, `planner`) uses Agnes → Groq 120b; see §7. Provider-level `fallb
 | Pipeline | LLM steps (typical) | Notes |
 |----------|---------------------|--------|
 | **System A — Vibe** | 2–5 | Architect (1) + Coder (1) + Debugger (0–3 fix cycles) |
-| **System B — Research** | 5 | Safety + compressor + web_search + grounding + synthesizer |
-| **CLI `/do`** | +1 planner | Then N× vibe and/or research |
+| **System B — Research** | 5–6 | Safety + compressor + web_search + grounding + synthesizer; web_search includes **+1 optional** bounded query-expansion LLM call (WAVE-11) that falls back to heuristic facets on any failure |
+| **CLI `/do`** | +1 planner | Then N× vibe and/or research (independent steps may run in parallel, WAVE-15) |
 
-Implication: if three research nodes all hit **Cohere (~28/day)**, theoretical max is ~9 full reports; with Cohere **only on grounding**, max is ~28 reports/day (or ~250 if limited by `compound-mini` RPD instead).
+**RPD picture after WAVE-09B/10/11/15 (recomputed):** LLM *call counts* are
+unchanged by WAVE-09B (HTTP cache cuts network fetches, not LLM calls), WAVE-10
+(parallelism cuts wall-clock, not calls), and WAVE-15 (parallel plan steps make
+the same per-step calls concurrently). The only count change is the **+1
+optional web_search expansion call** above. So the budget ceiling stands: if
+Cohere (~28/day) sat only on grounding, the bound is ~28 full reports/day (or
+~250/day when `compound-mini`'s RPD is the tighter limit); three Cohere roles
+would still collapse to ~9/day — see §10.
 
 ### 2.1 Latency (WAVE-10 — concurrent fetching)
 
@@ -270,7 +277,7 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **`mistral` / `mistral-small-latest`** | 58 | 62 | 55 | 65 | 40 | Mid free generalist (Small line; Small 4 claims competitive LiveCodeBench vs OSS 120B in vendor blogs — treat as upper bound if alias drifts). Grounding fallback only. `vendor`+`inferred` |
 | **`groq` / `groq/compound-mini`** | 50 | 58 | **88** | 52 | 30 | **System** (GPT-OSS + Llama + tools), not a bare LLM. Built-in **Tavily web search**; RealtimeEval **> GPT-4o-search-preview** (Groq). Single tool call / low latency. Unique free live-search path. `vendor`+`public` |
 | **`groq` / `openai/gpt-oss-safeguard-20b`** | 35 | 55 | 30 | 40 | **92** | OpenAI open safety classifier (post-trained from gpt-oss); BYO policy; purpose-built for Trust & Safety — **not** a general coder. `vendor`+`public` |
-| **`openrouter` / `tencent/hy3:free`** ⚠ | 55 | 60 | 38 | 58 | 35 | **Temporal promo.** **Expires 2026-07-21.** Sparse independent benches; historically general free chat. **Verify availability before every execution.** Cap auto-score ≤49 if 404/expired. `sparse` |
+| **`openrouter` / `tencent/hy3:free`** ⚠ | 55 | 60 | 38 | 58 | 35 | **Expired promo (window ended 2026-07-21).** Sparse independent benches; historically general free chat. **Not durable free capacity.** Cap auto-score ≤49 (expired). `sparse` |
 
 **Catalog backfill (WAVE-06):** rows below were added so every model registered in `config/model_router.yaml` has a benchmark entry — the silent flat-60 fallback for unscored models is now a loud CI failure. Scores are **provisional** (adequate band, 50–69) pending real usage data; do not treat them as the evidence-backed rows above.
 
@@ -333,7 +340,7 @@ Política **implementada** en `core/model_selector.py` + umbrales en `config/mod
 
 **Runtime selection rules (code):**
 
-1. **Expired promo** (`free_until` past, e.g. hy3 after **2026-07-21**) → role/catalog fallback; scores capped ≤49.  
+1. **Expired promo** (`free_until` past — e.g. `tencent/hy3:free` after **2026-07-21**) → role/catalog fallback; scores capped ≤49.  
 2. **`primary_status` degraded** (`quota_exhausted` | `rate_limited_429` | `empty_completion` | `unavailable` | `degraded`) → role fallback if configured.  
 3. **Mis-specialized:** for a relevant area, `score_fb − score_p ≥ score_advantage_threshold` (default **8**) **and** primary score ≤ `weak_specialization_max` (default **49**) — e.g. Safeguard forced onto coding.  
 4. Else **keep primary** (even if fallback edges higher by a few points on a secondary area).  
@@ -440,7 +447,7 @@ If hop 1 is GPT-OSS with `reasoning_effort=high` and hop 2 is Agnes, `sanitize_c
 - Cohere response blocks of type `thinking` = response shape parsing only (Command A+), not a request param we set.  
 - Prompt-only “think step by step” is **not** a substitute for `reasoning_effort` on GPT-OSS when the API supports it.
 
-**hy3 explicit policy:** include in benchmark tables for continuity; **do not** assign as default primary/fallback for A/B roles while free-durable defaults hold. If used under an optional `openrouter-boosted` profile, re-check availability **every execution** until after 2026-07-21 (then remove or replace). Cap scores ≤49 when expired.
+**hy3 explicit policy:** include in benchmark tables for continuity; **do not** assign as default primary/fallback for A/B roles while free-durable defaults hold. Its promo window ended **2026-07-21**; it is only usable under an optional `openrouter-boosted` profile after an explicit availability probe, and scores stay capped ≤49. Prefer removing the row once the provider drops it.
 
 ---
 
@@ -534,22 +541,26 @@ The `/do` TUI flow (*planner → execute_plan*) is exposed headlessly as `pipeli
 
 ## 8. Fallback cascade (provider DAG)
 
-When a role has no usable role-level fallback, or the fallback fails, `core/router.py` walks `fallback_cascade`:
+When a role has no usable role-level fallback, or the fallback fails, `core/router.py` walks `fallback_cascade`. The DAG below is the live `config/model_router.yaml` graph (WAVE-16 redraw — matches `fallback_cascade:` exactly, including the WAVE-08 `opencode_zen` node and `ollama`):
 
 ```text
-cohere     → mistral-small-latest
-mistral    → agnes-2.0-flash
-openrouter → agnes-2.0-flash
-agnes      → groq openai/gpt-oss-120b
-groq       → gemini-2.0-flash
-gemini     → cerebras gemma-4-31b
-cerebras   → groq openai/gpt-oss-120b
+cohere       → mistral / mistral-small-latest
+mistral      → agnes  / agnes-2.0-flash
+openrouter   → agnes  / agnes-2.0-flash
+opencode_zen → agnes  / agnes-2.0-flash
+ollama       → mistral / mistral-small-latest
+agnes        → groq   / openai/gpt-oss-120b
+groq         → gemini / gemini-2.0-flash
+gemini       → cerebras / gemma-4-31b
+cerebras     → groq   / openai/gpt-oss-120b
 ```
 
 | Edge | Rationale |
 |------|-----------|
 | cohere → mistral | Leave free-durable path if trial exhausted |
 | openrouter → agnes | **Do not** cascade into another `:free` model (same 50 RPD bucket) |
+| opencode_zen → agnes | WAVE-08 node: catalog/fallback tier only, also must not sink into `:free`-style shared buckets |
+| ollama → mistral | Local model unavailable → closest free cloud fallback |
 | gemini → cerebras | Quality leaf; **not** OpenRouter free (historical starve) |
 | cerebras → groq | Catalog 404 / empty content escapes Cerebras |
 | agnes → groq | Dual free backbones (Agnes volume + Groq reasoning) |
@@ -690,4 +701,4 @@ multiagent quota
 | Reasoning effort (GPT-OSS / Qwen) | [Groq Reasoning docs](https://console.groq.com/docs/reasoning) + `core/reasoning_params.py` |
 | Handoff audit | `docs/handoff_protocol.md` + `core/handoff.py` |
 
-Re-validate limits and **promo expiry** (`tencent/hy3:free` → **2026-07-21**) in each provider console before production-ish unattended runs; update this file, YAML soft-caps, and reasoning capability entries together when free tiers change.
+Re-validate limits and any **remaining promo expiries** in each provider console before production-ish unattended runs; update this file, YAML soft-caps, and reasoning capability entries together when free tiers change. (`tencent/hy3:free`'s promo already ended 2026-07-21.)

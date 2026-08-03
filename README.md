@@ -41,6 +41,7 @@ Keys live only in this install’s `.env` (never print full values).
 | `GEMINI_API_KEY` | Role / cascade fallbacks |
 | `CEREBRAS_API_KEY` | Cascade leaf (~5 RPM) — optional |
 | `OPENROUTER_API_KEY` | Optional catalog only (not on the default hot path) |
+| `OPENCODE_ZEN_API_KEY` | Optional catalog / cascade tier only (not a default primary) |
 | Ollama | No key — optional local override |
 
 ```bash
@@ -302,8 +303,8 @@ task / role
 | Pipeline | Typical LLM steps | Notes |
 |----------|-------------------|--------|
 | Vibe (A) | 2–5 | Architect + Coder + Debugger (0–3 fix cycles) |
-| Research (B) | 5 | Safety → compress → web_search → grounding → synth |
-| `/do` | +1 planner | Then N× A and/or B |
+| Research (B) | 5–6 | Safety → compress → web_search → grounding → synth (+1 optional web_search query-expansion call, WAVE-11) |
+| `/do` | +1 planner | Then N× A and/or B (independent steps may run in parallel, WAVE-15) |
 
 ### Reasoning used for model placement
 
@@ -325,9 +326,10 @@ Design goals (free-durable profile):
 
 **Reasoning effort** (not an extra daily call): difficulty bands map to low / medium / high. Injected only for models that support it (Groq GPT-OSS family). Debugger / synthesizer / planner floor at **medium**. Raising effort is preferred over cascading models on hard fix/report work.
 
-**Provider cascade** (after role fallback fails):  
+**Provider cascade** (after role fallback fails, matching `config/model_router.yaml`):  
 `cohere → mistral → agnes → groq → gemini → cerebras → groq`  
-(OpenRouter failures hop to Agnes — not deeper `:free` models.)
+with the WAVE-08 node `opencode_zen → agnes` and `ollama → mistral` also wired
+(OpenRouter and OpenCode Zen failures hop to Agnes — not deeper `:free` models).
 
 ---
 
@@ -344,6 +346,7 @@ Public free/trial **reference** values (~mid-2026). Providers change tiers witho
 | **Gemini** `GEMINI_API_KEY` | Flash ~**10–15 RPM**; RPD varies (~250–1 500 class) | **400**/day shared soft | Role / cascade fallbacks |
 | **Cerebras** `CEREBRAS_API_KEY` | ~**5 RPM**, ~1M TPD | **150**/day | Cascade **leaf** (quality burst, not volume) |
 | **OpenRouter** `OPENROUTER_API_KEY` | `:free` **20 RPM**, **50 RPD shared** (&lt;$10 credits); 1 000 free RPD after credits | **45**/day shared | Catalog only (not hot path) |
+| **OpenCode Zen** `OPENCODE_ZEN_API_KEY` | Free tier, no card — per-model limits not publicly documented | **100**/day shared (placeholder) | Catalog / cascade tier only |
 | **Ollama** *(none)* | Hardware only | Local tracker only | Optional privacy/offline override |
 
 Quota unit in this stack is almost always **calls/day**, not tokens. Cascading after 429 **costs another call** on the next model; raising `reasoning_effort` on the same model does **not**.
@@ -371,7 +374,7 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026 in `co
 | `mistral` / `mistral-small-latest` | 58 | 62 | 55 | 65 | 40 | Grounding **fallback** |
 | `groq` / `groq/compound-mini` | 50 | 58 | **88** | 52 | 30 | **Web search only** — only free live-search path |
 | `groq` / `openai/gpt-oss-safeguard-20b` | 35 | 55 | 30 | 40 | **92** | **Safety filter only** — not a general coder |
-| `openrouter` / `tencent/hy3:free` ⚠ | 55 | 60 | 38 | 58 | 35 | Catalog / temporal (**expires 2026-07-21**); auto-skip when expired |
+| `openrouter` / `tencent/hy3:free` ⚠ | 55 | 60 | 38 | 58 | 35 | Catalog / **expired promo (ended 2026-07-21)**; not durable free — auto-skip when expired |
 
 | Capability | Prefer | Avoid as primary |
 |------------|--------|------------------|
