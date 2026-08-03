@@ -93,7 +93,10 @@ _SECRET_NAMES = {".env", ".env.local", ".env.production", "secrets.yaml", "crede
 _BLOCKED_CMD = re.compile(
     r"(rm\s+-rf\s+/|sudo\s+|mkfs|dd\s+if=|:(){:|:&};|"
     r"curl\s+[^\n]*\|\s*(ba)?sh|wget\s+[^\n]*\|\s*(ba)?sh|"
-    r">\s*/etc/|chmod\s+-R\s+777\s+/)",
+    r">\s*/etc/|chmod\s+-R\s+777\s+/|"
+    r"format\s+[a-z]:|\bcacls|\bdeltree\s+[a-z]:|"
+    r"net\s+user\s+\w+\s+\w+\s+/add|net\s+localgroup\s+administrators\s+\w+\s+/add|"
+    r"reg\s+(add|delete|import)\b)",  # Windows destructive tools
     re.I,
 )
 

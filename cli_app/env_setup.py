@@ -52,7 +52,7 @@ def ensure_utf8_and_ansi() -> None:
             if (
                 hasattr(stream, "reconfigure")
                 and stream.encoding
-                and stream.encoding.upper() not in ("UTF-8", "UTF-8")
+                and stream.encoding.upper() not in ("UTF-8", "UTF8")
             ):
                 stream.reconfigure(encoding="utf-8")
         except Exception:

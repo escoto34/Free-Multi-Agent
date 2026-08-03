@@ -298,6 +298,38 @@ def test_tool_approval_reject():
     assert "rejected" in results[0].output.lower()
 
 
+def test_dangerous_command_blocked_posix():
+    from cli_app import tools
+
+    for bad in ("rm -rf /", "sudo rm -rf /", "dd if=/dev/zero of=/dev/sda", ":(){:|:&};:"):
+        res = tools.exec_tool("run_terminal", {"command": bad})
+        assert not res.ok, bad
+        assert "blocked" in res.output.lower(), bad
+
+
+def test_dangerous_command_blocked_windows():
+    from cli_app import tools
+
+    for bad in (
+        "format c:",
+        "deltree c:/windows",
+        "net user hack pass /add",
+        "reg delete HKLM\\Software /f",
+        "cacls C:\\ / /T /G everyone:F",
+    ):
+        res = tools.exec_tool("run_terminal", {"command": bad})
+        assert not res.ok, bad
+        assert "blocked" in res.output.lower(), bad
+
+
+def test_safe_command_not_blocked():
+    from cli_app import tools
+
+    res = tools.exec_tool("run_terminal", {"command": "echo safe && ls"})
+    assert res.ok
+    assert "blocked" not in res.output.lower()
+
+
 def test_bash_alias_and_grep_glob_parse():
     from cli_app import tools
 

@@ -63,6 +63,31 @@ multiagent tools doctor --profile core   # eza, bat, rg, fd, …
 
 ---
 
+## Windows support
+
+Native Windows (CMD / PowerShell) is supported for UTF-8 + ANSI output
+(`cli_app/env_setup.py`) and the `run_terminal` sandbox blocks destructive
+Windows commands (`format`, `deltree`, `cacls`, `net user`, `reg delete`, …) as
+well as the POSIX denylist (`rm -rf /`, `sudo`, `mkfs`, `dd`, fork bombs, pipe-to-sh).
+
+For the full experience (chat file tools, Git checkpoint/rollback, toolbox CLIs)
+we recommend running inside **WSL2**:
+
+```bash
+# Inside the WSL2 distro:
+sudo apt update && sudo apt install -y python3 python3-venv git
+git clone https://github.com/escoto34/Free-Multi-Agent && cd MultiAgent
+python3 -m venv venv && source venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env        # fill keys (or multiagent keys set …)
+multiagent
+```
+
+WSL2 gives you real POSIX shell semantics, GitHub SSH forwarding, and the same
+behavior as Linux/macOS, while still sharing files with Windows via `\\wsl$`.
+
+---
+
 ## Using the TUI
 
 ```bash
