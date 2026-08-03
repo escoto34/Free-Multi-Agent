@@ -329,9 +329,23 @@ class ModelRouter:
 
         last_error: Optional[Exception] = None
         for attempt in range(1, max_retries + 1):
+            # Reserve a ledger slot *before* going out on the wire, so a
+            # pending call already eats into today's bucket (WAVE-07).
+            row_id = self._quota.try_reserve(provider, model)
+            if row_id is None:
+                logger.warning(
+                    "Quota exhausted for %s/%s (remaining: %d). Cascading…",
+                    provider,
+                    model,
+                    self._quota.remaining(provider, model),
+                )
+                last_error = QuotaExhaustedError(
+                    f"Quota exhausted for {provider}/{model}"
+                )
+                break
             try:
                 content, raw = self._dispatch(provider, model, messages, **kwargs)
-                self._quota.record_call(provider, model)
+                self._quota.confirm(row_id)
                 logger.info(
                     "✔ %s/%s  attempt=%d  remaining=%d",
                     provider,
@@ -347,6 +361,9 @@ class ModelRouter:
                 )
 
             except EmptyCompletionError as exc:
+                # Provider *was* reached (HTTP 200, empty body) — the call
+                # counts against the bucket, so confirm rather than refund.
+                self._quota.confirm(row_id)
                 # Go straight to fallback — retrying the same call won't help.
                 last_error = exc
                 logger.error("Empty completion from %s/%s: %s", provider, model, exc)
@@ -355,6 +372,14 @@ class ModelRouter:
             except Exception as exc:
                 last_error = exc
                 status = self._extract_status(exc)
+                if status is None:
+                    # No HTTP response at all (connection died before any
+                    # bytes came back) — the provider never reached, refund.
+                    self._quota.refund(row_id)
+                else:
+                    # The provider answered; it may well have counted the
+                    # call, so the slot stays consumed.
+                    self._quota.confirm(row_id)
                 outcome = (
                     classify_http_status(status, self._extract_body(exc), provider)
                     if status is not None

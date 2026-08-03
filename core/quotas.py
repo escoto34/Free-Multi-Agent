@@ -38,11 +38,13 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from datetime import date
+from datetime import date, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Optional
 
 from core.agent_config import get_agent_config
+from core.provider_registry import is_per_model_provider, provider_limit_key
 
 # ---------------------------------------------------------------------------
 # Fallback safe-margin limits — used only if config/model_router.yaml can't
@@ -58,25 +60,25 @@ CEREBRAS_DAILY_LIMIT: int = 150  # Free ~5 RPM / ~1M TPD — call soft-cap
 OLLAMA_DAILY_LIMIT: int = 100_000  # Local — effectively unlimited for tracking
 AGNES_DAILY_LIMIT: int = 2000  # Free fair-use (~20 RPM text); soft local cap
 
-# Maps provider -> the YAML key under providers.<provider>.* that holds its
-# daily limit. Each provider uses a differently-named key because the scope
-# differs (per-model vs. shared-across-account).
-_YAML_LIMIT_KEY = {
-    "groq": "daily_limit_per_model",
-    "openrouter": "daily_limit_shared",
-    "cohere": "daily_limit",
-    "mistral": "daily_limit",
-    "gemini": "daily_limit",
-    "cerebras": "daily_limit",
-    "ollama": "daily_limit",
-    "agnes": "daily_limit",
-}
-
-# Providers that track quota per model name (vs shared account bucket).
-_PER_MODEL_PROVIDERS = frozenset({"groq"})
-
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "quotas.db"
+
+
+class ReserveState(StrEnum):
+    """Lifecycle of a reserved quota row ("the wallet").
+
+    A row is created in ``RESERVED`` before an LLM call goes out on the wire,
+    then transitioned exactly once to either ``confirmed`` (the provider was
+    reached, so the call counts against the bucket) or ``refunded`` (the
+    provider was never reached — e.g. a network blip before any bytes left the
+    process). Refunds preserve today's reserved amount; confirmed rows roll the
+    amount into the daily tally, so a reservation that starts just before
+    midnight and resolves just after is attributed to the day it was *reserved*.
+    """
+
+    RESERVED = "reserved"
+    CONFIRMED = "confirmed"
+    REFUNDED = "refunded"
 
 
 class QuotaTracker:
@@ -86,8 +88,9 @@ class QuotaTracker:
 
         tracker = QuotaTracker()
         if tracker.can_call("groq", "openai/gpt-oss-120b"):
+            row_id = tracker.reserve("groq", "openai/gpt-oss-120b")
             # ... make the call ...
-            tracker.record_call("groq", "openai/gpt-oss-120b")
+            tracker.confirm(row_id)
 
     The database file is created automatically on first use, always under the
     MultiAgent install tree (not the caller's cwd).
@@ -106,7 +109,7 @@ class QuotaTracker:
     # ------------------------------------------------------------------
 
     def _init_db(self) -> None:
-        """Create the usage table if it doesn't exist yet."""
+        """Create the usage and reservation tables if they don't exist yet."""
         with self._connect() as conn:
             conn.execute(
                 """
@@ -116,6 +119,18 @@ class QuotaTracker:
                     usage_date TEXT    NOT NULL,
                     call_count INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (provider, quota_key, usage_date)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS quota_reservations (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider   TEXT    NOT NULL,
+                    quota_key  TEXT    NOT NULL,
+                    usage_date TEXT    NOT NULL,
+                    state      TEXT    NOT NULL,
+                    created_at TEXT    NOT NULL
                 )
                 """
             )
@@ -137,7 +152,7 @@ class QuotaTracker:
         * **Others** (OpenRouter free, Cohere, Mistral, Gemini, Cerebras) —
           shared daily budget across models on that account.
         """
-        if provider in _PER_MODEL_PROVIDERS:
+        if is_per_model_provider(provider):
             return model
         return "__shared__"
 
@@ -170,7 +185,7 @@ class QuotaTracker:
             return 200
 
         # Prefer the limit key declared for this provider, then any common key.
-        yaml_key = _YAML_LIMIT_KEY.get(provider)
+        yaml_key = provider_limit_key(provider)
         if yaml_key and yaml_key in provider_cfg:
             return int(provider_cfg[yaml_key])
         for key in (
@@ -186,17 +201,34 @@ class QuotaTracker:
     # Public API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _used_locked(
+        conn: sqlite3.Connection, provider: str, key: str, today: str
+    ) -> int:
+        """Committed usage (legacy count + active reservations) on an open connection."""
+        row = conn.execute(
+            "SELECT call_count FROM quota_usage "
+            "WHERE provider = ? AND quota_key = ? AND usage_date = ?",
+            (provider, key, today),
+        ).fetchone()
+        reserved = conn.execute(
+            "SELECT COUNT(*) FROM quota_reservations "
+            "WHERE provider = ? AND quota_key = ? AND usage_date = ? "
+            "AND state IN (?, ?)",
+            (provider, key, today, ReserveState.RESERVED, ReserveState.CONFIRMED),
+        ).fetchone()[0]
+        return (row[0] if row else 0) + reserved
+
     def get_usage(self, provider: str, model: str) -> int:
-        """Return today's call count for *provider*/*model*."""
+        """Return today's committed call count for *provider*/*model*.
+
+        Counts confirmed legacy rows plus every active reservation (reserved
+        or confirmed), so a pending reservation already eats into the bucket.
+        """
         key = self._quota_key(provider, model)
         today = self._today()
         with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "SELECT call_count FROM quota_usage "
-                "WHERE provider = ? AND quota_key = ? AND usage_date = ?",
-                (provider, key, today),
-            ).fetchone()
-        return row[0] if row else 0
+            return self._used_locked(conn, provider, key, today)
 
     def remaining(self, provider: str, model: str) -> int:
         """Return how many calls remain today for *provider*/*model*."""
@@ -206,8 +238,92 @@ class QuotaTracker:
         """Check whether a call is allowed within today's quota."""
         return self.remaining(provider, model) > 0
 
+    def reserve(self, provider: str, model: str) -> int:
+        """Reserve one call against today's bucket; return the ledger row id.
+
+        The reservation must later be resolved with :meth:`confirm` or
+        :meth:`refund`.  Prefer :meth:`try_reserve` when the caller wants the
+        limit check to be atomic with the reservation.
+        """
+        key = self._quota_key(provider, model)
+        now = datetime.now()
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO quota_reservations "
+                "(provider, quota_key, usage_date, state, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    provider,
+                    key,
+                    self._today(),
+                    ReserveState.RESERVED,
+                    now.isoformat(),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def try_reserve(self, provider: str, model: str) -> Optional[int]:
+        """Atomically check the bucket and reserve one call if there's room.
+
+        Returns the ledger row id on success, or ``None`` when today's limit is
+        already exhausted.  The limit check and the insert run under the same
+        connection and lock, so concurrent callers can never over-commit past
+        the limit.
+        """
+        key = self._quota_key(provider, model)
+        today = self._today()
+        now = datetime.now()
+        with self._lock, self._connect() as conn:
+            used = self._used_locked(conn, provider, key, today)
+            if self._limit_for(provider) - used <= 0:
+                return None
+            cur = conn.execute(
+                "INSERT INTO quota_reservations "
+                "(provider, quota_key, usage_date, state, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    provider,
+                    key,
+                    today,
+                    ReserveState.RESERVED,
+                    now.isoformat(),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def confirm(self, row_id: int) -> None:
+        """Mark a reservation as consumed: the provider was reached.
+
+        The amount stays in today's bucket.  Transitions are only valid from
+        ``RESERVED``; confirming twice is a no-op guard.
+        """
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE quota_reservations SET state = ? "
+                "WHERE id = ? AND state = ?",
+                (ReserveState.CONFIRMED, row_id, ReserveState.RESERVED),
+            )
+
+    def refund(self, row_id: int) -> None:
+        """Release a reservation back into today's bucket.
+
+        Only meaningful for rows still in ``RESERVED``: the provider was never
+        reached, so the slot must not count against the limit.  The row stays
+        in the ledger (marked ``refunded``) for auditability.
+        """
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE quota_reservations SET state = ? "
+                "WHERE id = ? AND state = ?",
+                (ReserveState.REFUNDED, row_id, ReserveState.RESERVED),
+            )
+
     def record_call(self, provider: str, model: str) -> None:
-        """Record a successful API call, incrementing today's counter."""
+        """Record a successful API call, incrementing today's counter.
+
+        Legacy helper retained for backward compatibility — the router now
+        uses :meth:`reserve`/:meth:`confirm` instead.
+        """
         key = self._quota_key(provider, model)
         today = self._today()
         with self._lock, self._connect() as conn:
@@ -234,9 +350,17 @@ class QuotaTracker:
                     "DELETE FROM quota_usage WHERE provider = ? AND usage_date = ?",
                     (provider, today),
                 )
+                conn.execute(
+                    "DELETE FROM quota_reservations WHERE provider = ? AND usage_date = ?",
+                    (provider, today),
+                )
             else:
                 conn.execute(
                     "DELETE FROM quota_usage WHERE usage_date = ?",
+                    (today,),
+                )
+                conn.execute(
+                    "DELETE FROM quota_reservations WHERE usage_date = ?",
                     (today,),
                 )
 
@@ -250,6 +374,9 @@ class QuotaTracker:
                 "openrouter/__shared__": {"used": 3, "remaining": 42},
                 "cohere/__shared__": {"used": 1, "remaining": 27},
             }
+
+        ``used`` includes active reservations, so a pending reservation shows
+        up before the call has resolved.
         """
         today = self._today()
         result: dict[str, dict[str, int]] = {}
@@ -259,8 +386,19 @@ class QuotaTracker:
                 "FROM quota_usage WHERE usage_date = ?",
                 (today,),
             ).fetchall()
+            reservations = conn.execute(
+                "SELECT provider, quota_key, COUNT(*) "
+                "FROM quota_reservations WHERE usage_date = ? "
+                "AND state IN (?, ?) GROUP BY provider, quota_key",
+                (today, ReserveState.RESERVED, ReserveState.CONFIRMED),
+            ).fetchall()
         for provider, key, count in rows:
             limit = self._limit_for(provider)
             label = f"{provider}/{key}"
             result[label] = {"used": count, "remaining": limit - count}
+        for provider, key, count in reservations:
+            limit = self._limit_for(provider)
+            label = f"{provider}/{key}"
+            used = result.get(label, {}).get("used", 0) + count
+            result[label] = {"used": used, "remaining": limit - used}
         return result

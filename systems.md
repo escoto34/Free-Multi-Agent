@@ -535,6 +535,31 @@ Empty HTTP 200 completions are treated as failures and cascade (see `EmptyComple
 | Agnes | 2 000 | ~20 RPM fair-use | Soft local gate |
 | Ollama | 100 000 | Local | Tracking only |
 
+### 9.1 Quota ledger (WAVE-07): reserve → confirm/refund
+
+Every LLM call goes through a **reservation ledger** (`core/quotas.py`,
+table `quota_reservations`) that decides *when* a call is counted:
+
+1. **Reserve** — before any bytes go out on the wire, `try_reserve()` atomically
+   checks the day's bucket and inserts a `RESERVED` row (same connection +
+   lock, so concurrent callers can never over-commit past the limit). A
+   pending reservation already eats into today's quota.
+2. **Confirm** — after the call, if the provider was reached (success, any
+   HTTP error, or an empty HTTP-200 completion) the row becomes `CONFIRMED`.
+3. **Refund** — only when the provider was never reached: the exception carried
+   no HTTP status at all (connection died before a response). The row stays
+   in the ledger marked `REFUNDED` for auditability and the slot returns to
+   the bucket.
+
+Day attribution: a row is dated by its **reservation day**, so a call
+reserved at 23:59 and resolved at 00:01 counts against the day it was
+reserved, never the resolution day. Transitions are one-way from `RESERVED`
+(double-confirm / refund-after-confirm are guarded no-ops).
+
+The legacy `quota_usage.call_count` table remains for backward compatibility
+(`record_call()`), but the router only uses the ledger; `get_usage` /
+`status_summary` sum both sources. — Tests: `tests/test_quota_ledger.py`.
+
 ---
 
 ## 10. Anti-patterns deliberately avoided
