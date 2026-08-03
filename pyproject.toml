@@ -60,6 +60,11 @@ include = ["agents*", "cli_app*", "core*", "graphs*", "schemas*"]
 testpaths = ["tests"]
 addopts = "-q"
 asyncio_mode = "auto"
+markers = [
+    "real_ai: hits a live LLM provider, costs quota, never runs in default CI",
+    "real_web: hits a live HTTP/search endpoint, never runs in default CI",
+    "e2e: full pipeline run, may combine real_ai and real_web",
+]
 
 [tool.ruff]
 line-length = 100

@@ -193,10 +193,26 @@ When tools are on `PATH`, chat host helpers prefer them (`eza`, `rg`, `fd`, `bat
 ## Tests
 
 ```bash
-pytest tests/ -v
+pytest -m "not e2e and not real_ai and not real_web"
 ```
 
-Network tests mock HTTP; no real API calls in normal CI-style runs.
+This is the default local and CI command: it runs the full deterministic
+suite with **zero secrets and zero live API calls**. HTTP is mocked (respx /
+manual mocks) and the LLM seam (`core.clients.get_client`) can be routed
+through the deterministic `FakeLLMProvider` (`tests/fakes/llm_provider.py`)
+via the `fake_llm_provider` fixture — no real provider quota is ever spent.
+
+Markers (see `pyproject.toml`):
+
+- `real_ai` — hits a live LLM provider, costs quota, never runs in default CI.
+- `real_web` — hits a live HTTP/search endpoint, never runs in default CI.
+- `e2e` — full pipeline run, may combine `real_ai` and `real_web`.
+
+A versioned regression scenario suite is added in WAVE-03 (`evals/scenarios.v1.json`).
+
+```bash
+pytest tests/ -v   # verbose, still deterministic
+```
 
 ---
 

@@ -33,6 +33,7 @@ os.environ.setdefault("AGNES_API_KEY", "test-agnes-key-fake")
 def _isolate_clients():
     """Clear cached LLM clients between tests to avoid cross-contamination."""
     from core.clients import clear_client_cache
+
     clear_client_cache()
     yield
     clear_client_cache()
@@ -42,3 +43,25 @@ def _isolate_clients():
 def tmp_quota_db(tmp_path: Path):
     """Provide a temporary SQLite path for QuotaTracker in tests."""
     return tmp_path / "test_quotas.db"
+
+
+@pytest.fixture()
+def fake_llm_provider(monkeypatch):
+    """WAVE-02: route every get_client() call through a FakeLLMProvider.
+
+    Enables the factory-level test-mode flag (``MULTIAGENT_FAKE_PROVIDER``) that
+    ``core.clients.get_client`` consults, so code paths that bind ``get_client``
+    at import time (including the router) transparently get the fake without any
+    per-call-site monkeypatching. The provider instance is returned so tests can
+    configure canned responses / failure modes.
+    """
+    from tests.fakes.llm_provider import FakeLLMProvider
+    from core.clients import fake_provider_override
+
+    monkeypatch.setenv("MULTIAGENT_FAKE_PROVIDER", "1")
+    provider = FakeLLMProvider()
+    fake_provider_override.set(provider)
+    try:
+        yield provider
+    finally:
+        fake_provider_override.clear()

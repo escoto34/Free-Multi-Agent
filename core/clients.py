@@ -274,6 +274,48 @@ def get_cohere_client() -> cohere.ClientV2:
     return cohere.ClientV2(api_key=api_key)
 
 
+def _fake_provider() -> Optional[Any]:
+    """Return a FakeLLMProvider when the test-mode flag is set, else None.
+
+    Wired through this single factory so the router (which binds ``get_client``
+    at import time) and every other call site transparently get the fake once
+    ``MULTIAGENT_FAKE_PROVIDER=1`` is set. Kept behind the explicit flag so a
+    real provider is never substituted in normal operation.
+    """
+    if os.environ.get("MULTIAGENT_FAKE_PROVIDER", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return None
+    try:
+        from tests.fakes.llm_provider import FakeLLMProvider
+
+        return FakeLLMProvider()
+    except Exception:
+        return None
+
+
+class _FakeProviderOverride:
+    """Settable holder so tests can inject a specific FakeLLMProvider instance."""
+
+    def __init__(self) -> None:
+        self._value: Optional[Any] = None
+
+    def set(self, provider: Any) -> None:
+        self._value = provider
+
+    def clear(self) -> None:
+        self._value = None
+
+    def get(self) -> Optional[Any]:
+        return self._value
+
+
+# Global holder for the fake provider (test injection / cached instance).
+fake_provider_override = _FakeProviderOverride()
+
+
 # Back-compat aliases used by older tests / docs
 def get_groq_client() -> OpenAI:
     meta = get_provider_meta("groq")
@@ -290,10 +332,25 @@ def get_openrouter_client() -> OpenAI:
 def get_client(provider: str) -> LLMClient:
     """Return the cached client for *provider*."""
     alias = provider.strip().lower()
+    if fake_provider_override.get() is not None:
+        return fake_provider_override.get()
+    if os.environ.get("MULTIAGENT_FAKE_PROVIDER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        fake = _fake_provider()
+        if fake is not None:
+            return fake
     if alias == "cohere":
         return get_cohere_client()
     meta = get_provider_meta(alias)
     return _openai_compat_client(alias, meta["base_url"], meta["env_key"])
+
+
+def clear_fake_provider() -> None:
+    """Drop the cached fake provider instance."""
+    fake_provider_override.clear()
 
 
 def clear_client_cache() -> None:
