@@ -297,15 +297,30 @@ def verify_cited_urls(
     verified: set[str] = set()
     notes: list[str] = []
 
-    for url in to_check:
+    # WAVE-10: parallelize the per-URL HTTP check with the same
+    # ThreadPoolExecutor convention used in source_fetch.py.
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _verify_one(url: str) -> tuple[str, Optional[bool]]:
         if not url.startswith(("http://", "https://")):
-            continue
+            return (url, None)  # skipped
         page = fetch_url(url, timeout=timeout, max_chars=2000)
         if page.ok and page.text and len(page.text.strip()) > 50:
+            return (url, True)
+        reason = page.error or (f"HTTP {page.status}" if page.status else "no content")
+        return (url, reason or "no content")
+
+    workers = min(3, len(to_check)) or 1
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        outcomes = list(pool.map(_verify_one, to_check))
+
+    for url, result in outcomes:
+        if result is None:
+            continue
+        if result is True:
             verified.add(url.lower().rstrip("/"))
         else:
-            reason = page.error or f"HTTP {page.status}" if page.status else "no content"
-            notes.append(f"Cited URL failed verification: {url} ({reason})")
+            notes.append(f"Cited URL failed verification: {url} ({result})")
 
     verified_sources: list[str] = []
     for s in sources:

@@ -62,6 +62,18 @@ CLI (`chat`, `planner`) uses Agnes → Groq 120b; see §7. Provider-level `fallb
 
 Implication: if three research nodes all hit **Cohere (~28/day)**, theoretical max is ~9 full reports; with Cohere **only on grounding**, max is ~28 reports/day (or ~250 if limited by `compound-mini` RPD instead).
 
+### 2.1 Latency (WAVE-10 — concurrent fetching)
+
+The three HTTP loops that were serial are now parallel (ThreadPoolExecutor, `min(3, n)` workers), so their wall-clock is ~`ceil(n/3)×` per-request timeout instead of `n×`:
+
+| Loop | Before (worst case) | After (measured bound) |
+|------|---------------------|------------------------|
+| Per-facet DDG search (≤12 facets × 12 s) | ~144 s | ~48 s |
+| Up-to-8 result-page fetches (× 12 s) | ~96 s | ~36 s |
+| `verify_cited_urls` ≤ 8 URLs (× 6 s) | ~48 s | ~24 s (first/cold call) |
+
+Per-request timeouts unchanged; WAVE-09B's cache makes the second `verify_cited_urls` (synthesis) essentially free regardless.
+
 ---
 
 ## 3. Provider rate limits (research summary)

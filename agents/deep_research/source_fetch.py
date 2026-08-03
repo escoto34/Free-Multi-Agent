@@ -1802,8 +1802,22 @@ def fetch_search_documents(
 
     seen_urls: set[str] = set()
     all_search_text_parts: list[str] = []
+    # WAVE-10: per-facet DDG searches run concurrently (worst case was ~N×12s).
+    workers = min(3, len(queries))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        raw_by_query = dict(
+            zip(
+                queries,
+                pool.map(
+                    lambda q: search_duckduckgo(
+                        q, max_chars=max_chars * 2, timeout=timeout
+                    ),
+                    queries,
+                ),
+            )
+        )
     for q in queries:
-        raw = search_duckduckgo(q, max_chars=max_chars * 2, timeout=timeout)
+        raw = raw_by_query[q]
         if not raw:
             continue
         for m in re.finditer(r"^URL:\s*(\S+)", raw, re.M):
@@ -1821,10 +1835,16 @@ def fetch_search_documents(
     urls_to_fetch = list(seen_urls)[:max_fetches]
     fetched_blocks: list[str] = []
     fetched_count = 0
-    for url in urls_to_fetch:
+    # WAVE-10: force the fetched pages concurrently (worst case was ~96s).
+    workers = min(3, len(urls_to_fetch)) or 1
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        pages = pool.map(
+            lambda url: (url, fetch_url(url, timeout=timeout, max_chars=max_chars // 2)),
+            urls_to_fetch,
+        )
+    for url, page in pages:
         if fetched_count >= max_results_per_query * max(len(queries), 1):
             break
-        page = fetch_url(url, timeout=timeout, max_chars=max_chars // 2)
         if page.ok and page.text.strip():
             snippet = page.text[:600].strip()
             fetched_blocks.append(
