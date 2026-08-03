@@ -106,6 +106,25 @@ providers:
     daily_limit: 2000
     models:
     - agnes-2.0-flash
+  opencode_zen:
+    base_url: https://opencode.ai/zen/v1
+    env_key: OPENCODE_ZEN_API_KEY
+    signup: https://opencode.ai/auth
+    notes: >-
+      Free tier, no card required. Per-model rate limits not publicly documented
+      as of mid-2026 — daily_limit_shared below is a conservative estimate, not a
+      confirmed ceiling (WAVE-08). Catalog / fallback tier only — not assigned
+      as any primary role.
+    daily_limit_shared: 100
+    models:
+    - big-pickle
+    - deepseek-v4-flash-free
+    - nemotron-3-ultra-free
+    - mimo-v2.5-free
+    - north-mini-code-free
+    - laguna-s-2.1-free
+    - ling-3.0-flash-free
+    - hy3-free
 deprecated:
 - llama-3.1-8b-instant
 - llama-3.3-70b-versatile
@@ -193,6 +212,9 @@ fallback_cascade:
   ollama_fallback:
     provider: mistral
     model: mistral-small-latest
+  opencode_zen_fallback:
+    provider: agnes
+    model: agnes-2.0-flash
 cli:
   chat:
     provider: agnes

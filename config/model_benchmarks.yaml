@@ -97,6 +97,24 @@ models:
     scores: {code: 64, reason: 66, ground: 44, synth: 60, safety: 38}
   openrouter/qwen/qwen3-32b:free:
     scores: {code: 64, reason: 70, ground: 44, synth: 62, safety: 38}
+  # WAVE-08 opencode_zen — provisional scores pending real usage data.
+  # Catalog / fallback tier only; not assigned as any primary role.
+  opencode_zen/big-pickle:
+    scores: {code: 62, reason: 60, ground: 38, synth: 58, safety: 34}
+  opencode_zen/deepseek-v4-flash-free:
+    scores: {code: 64, reason: 66, ground: 40, synth: 60, safety: 36}
+  opencode_zen/nemotron-3-ultra-free:
+    scores: {code: 60, reason: 62, ground: 38, synth: 56, safety: 34}
+  opencode_zen/mimo-v2.5-free:
+    scores: {code: 60, reason: 58, ground: 36, synth: 54, safety: 32}
+  opencode_zen/north-mini-code-free:
+    scores: {code: 58, reason: 54, ground: 36, synth: 50, safety: 32}
+  opencode_zen/laguna-s-2.1-free:
+    scores: {code: 56, reason: 54, ground: 34, synth: 48, safety: 30}
+  opencode_zen/ling-3.0-flash-free:
+    scores: {code: 62, reason: 60, ground: 38, synth: 54, safety: 34}
+  opencode_zen/hy3-free:
+    scores: {code: 50, reason: 54, ground: 34, synth: 50, safety: 30}
 
 # ---------------------------------------------------------------------------
 # Selection policy (systems.md §4.3) — editable, not hardcoded in Python

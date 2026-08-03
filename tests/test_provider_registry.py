@@ -91,3 +91,26 @@ def test_cascade_targets_have_benchmark_rows():
         and f"{t['provider']}/{t['model']}" not in bench_keys
     ]
     assert not missing, f"Cascade targets with no benchmark row: {missing}"
+
+
+def test_opencode_zen_client_resolves():
+    """WAVE-08 smoke: get_client('opencode_zen') must resolve without error.
+
+    opencode_zen is added through the YAML catalog alone — no Python change.
+    The conftest fake-key loop derives OPENCODE_ZEN_API_KEY from the registry,
+    so constructing the OpenAI client must not raise ValueError.
+    """
+    from openai import OpenAI
+
+    from core.clients import get_client, clear_client_cache
+    from core.provider_registry import get_provider_meta
+
+    meta = get_provider_meta("opencode_zen")
+    assert meta["kind"] == "openai_compatible"
+    assert meta["base_url"] == "https://opencode.ai/zen/v1"
+    assert meta["env_key"] == "OPENCODE_ZEN_API_KEY"
+    assert len(meta["models"]) == 8
+
+    client = get_client("opencode_zen")
+    assert isinstance(client, OpenAI)
+    clear_client_cache()

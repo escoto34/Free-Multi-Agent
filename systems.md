@@ -172,6 +172,15 @@ Limits below are **public free/trial reference values** as of ~2026-06/07. Provi
 | Models | **Only** what `ollama list` reports — no static catalog |
 | Role fit | Optional override for privacy / offline; not default cloud path |
 
+### 3.9 OpenCode Zen (WAVE-08)
+
+| Item | Value |
+|------|--------|
+| Limits | Free tier, no card — per-model rate limits **not publicly documented**; tracker soft-cap 100 shared/day (conservative placeholder, adjust once observed) |
+| Endpoint | `https://opencode.ai/zen/v1` (OpenAI-compatible), signup `opencode.ai/auth` |
+| Free models | `big-pickle`, `deepseek-v4-flash-free`, `nemotron-3-ultra-free`, `mimo-v2.5-free`, `north-mini-code-free`, `laguna-s-2.1-free`, `ling-3.0-flash-free`, `hy3-free` |
+| Role fit | **Catalog / fallback tier only** — not assigned as any primary role (WAVE-08 prohibition) |
+
 ---
 
 ## 4. Scoring rubric and model benchmarks (0–100)
@@ -271,6 +280,14 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **`openrouter` / `google/gemma-3-27b-it:free`** | 66 | 70 | 46 | 62 | 40 | Open 27B alternate. `provisional` |
 | **`openrouter` / `meta-llama/llama-3.3-70b-instruct:free`** | 64 | 66 | 44 | 60 | 38 | General 70B alternate. `provisional` |
 | **`openrouter` / `qwen/qwen3-32b:free`** | 64 | 70 | 44 | 62 | 38 | Catalog alternate. `provisional` |
+| **`opencode_zen` / `big-pickle`** | 62 | 60 | 38 | 58 | 34 | WAVE-08 catalog tier. `provisional` |
+| **`opencode_zen` / `deepseek-v4-flash-free`** | 64 | 66 | 40 | 60 | 36 | WAVE-08 catalog tier. `provisional` |
+| **`opencode_zen` / `nemotron-3-ultra-free`** | 60 | 62 | 38 | 56 | 34 | WAVE-08 catalog tier. `provisional` |
+| **`opencode_zen` / `mimo-v2.5-free`** | 60 | 58 | 36 | 54 | 32 | WAVE-08 catalog tier. `provisional` |
+| **`opencode_zen` / `north-mini-code-free`** | 58 | 54 | 36 | 50 | 32 | WAVE-08 catalog tier. `provisional` |
+| **`opencode_zen` / `laguna-s-2.1-free`** | 56 | 54 | 34 | 48 | 30 | WAVE-08 catalog tier. `provisional` |
+| **`opencode_zen` / `ling-3.0-flash-free`** | 62 | 60 | 38 | 54 | 34 | WAVE-08 catalog tier. `provisional` |
+| **`opencode_zen` / `hy3-free`** | 50 | 54 | 34 | 50 | 30 | WAVE-08 catalog tier. `provisional` |
 
 **Quick capability matrix (stack defaults):**
 
@@ -534,6 +551,7 @@ Empty HTTP 200 completions are treated as failures and cascade (see `EmptyComple
 | Cerebras | 150 | 5 RPM + ~1M TPD | Call soft-cap under token limit |
 | Agnes | 2 000 | ~20 RPM fair-use | Soft local gate |
 | Ollama | 100 000 | Local | Tracking only |
+| OpenCode Zen | 100 shared | Not publicly documented (WAVE-08) | Conservative placeholder |
 
 ### 9.1 Quota ledger (WAVE-07): reserve → confirm/refund
 
