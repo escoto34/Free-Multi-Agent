@@ -16,6 +16,7 @@ import time
 
 import agents.deep_research.source_fetch as sf
 from agents.deep_research.source_fetch import FetchedSource
+from agents.deep_research.contracts import SourceResultStatus
 
 _SEARCH_DELAY = 0.2
 _FETCH_DELAY = 0.2
@@ -30,7 +31,13 @@ _PAGE = (
 def _sleeper(delay: float):
     def fake(url: str, *, timeout: float = 18.0, max_chars: int = 12000, **kwargs) -> FetchedSource:
         time.sleep(delay)
-        return FetchedSource(url=url, ok=True, status=200, text=_PAGE, error="")
+        return FetchedSource(
+            url=url,
+            status=SourceResultStatus.SUCCESS,
+            http_status=200,
+            text=_PAGE,
+            error="",
+        )
 
     return fake
 

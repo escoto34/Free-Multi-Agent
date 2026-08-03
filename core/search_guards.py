@@ -8,7 +8,9 @@ search live" — used by both web_search and grounding so the lists cannot drift
 from __future__ import annotations
 
 import re
-from typing import Iterable, Optional
+from typing import Optional
+
+from agents.deep_research.contracts import SourceResultStatus
 
 _URL_PATTERN = re.compile(r"https?://[^\s\)\]\"'>,;]+")
 
@@ -305,9 +307,9 @@ def verify_cited_urls(
         if not url.startswith(("http://", "https://")):
             return (url, None)  # skipped
         page = fetch_url(url, timeout=timeout, max_chars=2000)
-        if page.ok and page.text and len(page.text.strip()) > 50:
+        if page.status is SourceResultStatus.SUCCESS and page.text and len(page.text.strip()) > 50:
             return (url, True)
-        reason = page.error or (f"HTTP {page.status}" if page.status else "no content")
+        reason = page.error or (f"HTTP {page.http_status}" if page.http_status else "no content")
         return (url, reason or "no content")
 
     workers = min(3, len(to_check)) or 1

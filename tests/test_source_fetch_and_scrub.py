@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agents.deep_research.contracts import SourceResultStatus
 from agents.deep_research.entity_focus import entity_focus_block, extract_entity_anchors
 from agents.deep_research.source_fetch import (
     FetchedSource,
@@ -216,8 +217,8 @@ def test_outbound_from_json_ld_same_as():
 def test_collect_outbound_from_fetched_source():
     src = FetchedSource(
         url="https://acme.test.com",
-        ok=True,
-        status=200,
+        status=SourceResultStatus.SUCCESS,
+        http_status=200,
         text="See us on https://wa.me/15550001111 and https://x.com/acme_handle",
         outbound=[
             OutboundPresence(
@@ -236,7 +237,7 @@ def test_collect_outbound_from_fetched_source():
 
 def test_format_primary_block_failed():
     block = format_primary_source_block(
-        [FetchedSource(url="https://acmeclinic.test.com", ok=False, status=404, text="", error="Not Found")]
+        [FetchedSource(url="https://acmeclinic.test.com", status=SourceResultStatus.ERROR, http_status=404, text="", error="Not Found")]
     )
     assert "PRIMARY FETCH FAILED" in block
     assert "Do NOT invent" in block

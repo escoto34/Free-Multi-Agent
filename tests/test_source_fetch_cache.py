@@ -22,6 +22,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import agents.deep_research.source_fetch as sf
+from agents.deep_research.contracts import SourceResultStatus
 from core.http_cache import HttpCache
 
 _PAGE = b"<html><body><h1>Acme Clinic</h1><p>Acme Clinic is the district's specialist centre offering medical consultations, physiotherapy, dentistry and emergency care with extended weekday hours.</p></body></html>"
@@ -62,7 +63,7 @@ def test_fetch_url_second_call_is_cache_hit(monkeypatch):
     a = sf.fetch_url("https://example.test/")
     b = sf.fetch_url("https://example.test/")
 
-    assert a.ok and b.ok
+    assert a.status is SourceResultStatus.SUCCESS and b.status is SourceResultStatus.SUCCESS
     assert a.text == b.text
     assert len(calls) == 1  # second call served from cache
 
@@ -104,7 +105,7 @@ def test_negative_cache_empty_body_expires_faster_than_positive(monkeypatch):
     _mock_urlopen(monkeypatch, _EMPTY, calls)
 
     first = sf.fetch_url("https://empty.test/")
-    assert not first.ok and first.error == "empty body after extract"
+    assert first.status is SourceResultStatus.EMPTY and first.error == "empty body after extract"
     assert len(calls) == 1
 
     # Negative-cached: immediate re-request does NOT re-fetch.
@@ -144,7 +145,9 @@ def test_fetch_url_single_flight_concurrent(monkeypatch):
         futures = [pool.submit(sf.fetch_url, "https://one.test/") for _ in range(12)]
         results = [f.result() for f in futures]
 
-    assert all(r.ok for r in results)
+    assert all(
+        r.status is SourceResultStatus.SUCCESS for r in results
+    )
     assert len(calls) == 1
 
 
@@ -163,6 +166,6 @@ def test_fetch_url_errors_are_not_poisoned(monkeypatch):
     a = sf.fetch_url("https://down.test/")
     b = sf.fetch_url("https://down.test/")
 
-    assert not a.ok and a.status == 503
-    assert not b.ok and b.status == 503
+    assert a.status is SourceResultStatus.TIMEOUT and a.http_status == 503
+    assert b.status is SourceResultStatus.TIMEOUT and b.http_status == 503
     assert len(calls) == 2  # non-empty-body failures are not cached (only negative empties)

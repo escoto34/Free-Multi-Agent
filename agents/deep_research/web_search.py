@@ -26,6 +26,7 @@ from agents.deep_research.research_types import (
     classify_research,
     search_facet_hints,
 )
+from agents.deep_research.contracts import SourceResultStatus
 from agents.deep_research.source_fetch import (
     collect_outbound_from_sources,
     extract_user_domains,
@@ -190,8 +191,12 @@ def run_web_search(
         progress("fetching user-provided official page(s)…")
     primary = fetch_user_primary_sources(original_query or "", max_urls=3)
     primary_block = format_primary_source_block(primary)
-    ok_count = sum(1 for p in primary if p.ok)
-    fail_count = sum(1 for p in primary if not p.ok and p.url)
+    ok_count = sum(
+        1 for p in primary if p.status is SourceResultStatus.SUCCESS
+    )
+    fail_count = sum(
+        1 for p in primary if p.status is not SourceResultStatus.SUCCESS and p.url
+    )
     logger.info(
         "Primary sources: %d ok, %d failed, domains=%s",
         ok_count,
@@ -218,7 +223,9 @@ def run_web_search(
         progress("fetching linked social profile page(s)…")
     linked = fetch_outbound_presence_pages(outbound, max_fetch=2, timeout=8.0)
     linked_block = format_linked_presence_fetch_block(linked)
-    linked_ok = sum(1 for L in linked if L.ok)
+    linked_ok = sum(
+        1 for L in linked if L.status is SourceResultStatus.SUCCESS
+    )
     if linked:
         logger.info(
             "Linked presence fetches: %d ok / %d total; outbound=%d",

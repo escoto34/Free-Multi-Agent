@@ -21,6 +21,12 @@ from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
 from core.http_cache import cache_key, get_default_cache
 
+from agents.deep_research.contracts import (
+    SourceResultStatus,
+    SearchResult,
+    http_status_to_source_status,
+    score_result,
+)
 logger = logging.getLogger(__name__)
 
 # Brand / contact signals stripped by plain html_to_text (style/script dropped)
@@ -218,8 +224,8 @@ _DEFAULT_UA = (
 @dataclass
 class FetchedSource:
     url: str
-    ok: bool
-    status: Optional[int]
+    status: SourceResultStatus
+    http_status: Optional[int]
     text: str
     error: str = ""
     # Social / messaging channels discovered on this page (not inventable)
@@ -924,15 +930,15 @@ def fetch_outbound_presence_pages(
             extract_signals=True,
             follow_outbound=False,
         )
-        if src.ok and src.text:
+        if src.status is SourceResultStatus.SUCCESS and src.text:
             header = (
                 f"[Linked {op.kind} profile fetch | handle={op.handle or '—'} | "
                 f"from_official={op.source_page or '—'}]\n"
             )
             return FetchedSource(
                 url=src.url,
-                ok=src.ok,
                 status=src.status,
+                http_status=src.http_status,
                 text=(header + src.text)[: max_chars + 500],
                 error=src.error,
                 outbound=src.outbound,
@@ -951,8 +957,8 @@ def fetch_outbound_presence_pages(
                 results.append(
                     FetchedSource(
                         url=normalize_url(op.url),
-                        ok=False,
-                        status=None,
+                        status=SourceResultStatus.ERROR,
+                        http_status=None,
                         text="",
                         error=str(exc),
                     )
@@ -985,14 +991,14 @@ def format_linked_presence_fetch_block(sources: Iterable[FetchedSource]) -> str:
         "",
     ]
     for src in items:
-        if src.ok:
-            parts.append(f"--- LINKED OK | URL: {src.url} | HTTP {src.status} ---")
+        if src.status is SourceResultStatus.SUCCESS:
+            parts.append(f"--- LINKED OK | URL: {src.url} | HTTP {src.http_status} ---")
             parts.append(src.text)
             parts.append(f"--- END LINKED {src.url} ---")
         else:
             parts.append(
                 f"--- LINKED FETCH FAILED | URL: {src.url} | "
-                f"status={src.status} error={src.error} ---"
+                f"{src.status.value} http={src.http_status} error={src.error} ---"
             )
             parts.append(
                 "Profile page could not be retrieved via HTTP. "
@@ -1012,7 +1018,7 @@ def collect_outbound_from_sources(
     seen: set[str] = set()
     for src in sources:
         candidates = list(src.outbound or [])
-        if src.ok and src.text:
+        if src.status is SourceResultStatus.SUCCESS and src.text:
             candidates.extend(
                 extract_outbound_presence(text=src.text, base_url=src.url)
             )
@@ -1276,10 +1282,10 @@ _ADAPTER_VERSION = "source-fetch-v1"
 def _encode_source(src: "FetchedSource") -> Optional[bytes]:
     """Serialize a FetchedSource for the cache (must fit the size guard)."""
     payload = {
-        "format": "fetched-source-v1",
+        "format": "fetched-source-v2",
         "url": src.url,
-        "ok": src.ok,
-        "status": src.status,
+        "status": src.status.value,
+        "http_status": src.http_status,
         "text": src.text,
         "error": src.error,
         "outbound": [
@@ -1303,15 +1309,15 @@ def _decode_source(raw: bytes) -> Optional["FetchedSource"]:
     """Deserialize a cached FetchedSource; None if malformed (re-validate)."""
     try:
         payload = json.loads(raw.decode("utf-8"))
-        if not isinstance(payload, dict) or payload.get("format") != "fetched-source-v1":
+        if not isinstance(payload, dict) or payload.get("format") != "fetched-source-v2":
             return None
         outbound = [
             OutboundPresence(**o) for o in (payload.get("outbound") or [])
         ]
         return FetchedSource(
             url=payload["url"],
-            ok=bool(payload["ok"]),
-            status=payload.get("status"),
+            status=SourceResultStatus(payload["status"]),
+            http_status=payload.get("http_status"),
             text=payload.get("text", ""),
             error=payload.get("error", ""),
             outbound=outbound,
@@ -1361,28 +1367,42 @@ def _fetch_url_uncached(
         if not text.strip():
             return FetchedSource(
                 url=url,
-                ok=False,
-                status=int(status) if status else None,
+                status=SourceResultStatus.EMPTY,
+                http_status=int(status) if status else None,
                 text="",
                 error="empty body after extract",
                 outbound=outbound,
             )
         return FetchedSource(
             url=url,
-            ok=True,
-            status=int(status) if status else 200,
+            status=SourceResultStatus.SUCCESS,
+            http_status=int(status) if status else 200,
             text=text,
             error="",
             outbound=outbound,
         )
     except urllib.error.HTTPError as exc:
         logger.info("Primary fetch HTTP %s for %s", exc.code, url)
+        try:
+            body = exc.read().decode("utf-8", errors="replace")[:2000]
+        except Exception:
+            body = ""
         return FetchedSource(
-            url=url, ok=False, status=exc.code, text="", error=str(exc.reason or exc)
+            url=url,
+            status=http_status_to_source_status(exc.code, body),
+            http_status=exc.code,
+            text="",
+            error=str(exc.reason or exc),
         )
     except Exception as exc:
         logger.info("Primary fetch failed for %s: %s", url, exc)
-        return FetchedSource(url=url, ok=False, status=None, text="", error=str(exc))
+        return FetchedSource(
+            url=url,
+            status=SourceResultStatus.ERROR,
+            http_status=None,
+            text="",
+            error=str(exc),
+        )
 
 
 def fetch_url(
@@ -1410,7 +1430,13 @@ def fetch_url(
     """
     url = normalize_url(url)
     if not url:
-        return FetchedSource(url="", ok=False, status=None, text="", error="empty url")
+        return FetchedSource(
+            url="",
+            status=SourceResultStatus.ERROR,
+            http_status=None,
+            text="",
+            error="empty url",
+        )
 
     key = cache_key(
         url,
@@ -1433,7 +1459,7 @@ def fetch_url(
         encoded = _encode_source(src)
         if encoded is not None:
             cache = get_default_cache()
-            if src.ok:
+            if src.status is SourceResultStatus.SUCCESS:
                 cache.put(key, encoded)
             elif src.error == "empty body after extract":
                 cache.put(key, encoded, negative=True)
@@ -1488,7 +1514,11 @@ def fetch_user_primary_sources(
                 results[u] = fut.result()
             except Exception as exc:
                 results[u] = FetchedSource(
-                    url=u, ok=False, status=None, text="", error=str(exc)
+                    url=u,
+                    status=SourceResultStatus.ERROR,
+                    http_status=None,
+                    text="",
+                    error=str(exc),
                 )
     return [results[u] for u in selected if u in results]
 
@@ -1507,14 +1537,14 @@ def format_primary_source_block(sources: Iterable[FetchedSource]) -> str:
     any_src = False
     for src in sources:
         any_src = True
-        if src.ok:
-            parts.append(f"--- PRIMARY OK | URL: {src.url} | HTTP {src.status} ---")
+        if src.status is SourceResultStatus.SUCCESS:
+            parts.append(f"--- PRIMARY OK | URL: {src.url} | HTTP {src.http_status} ---")
             parts.append(src.text)
             parts.append(f"--- END PRIMARY {src.url} ---")
         else:
             parts.append(
                 f"--- PRIMARY FETCH FAILED | URL: {src.url} | "
-                f"status={src.status} error={src.error} ---"
+                f"{src.status.value} http={src.http_status} error={src.error} ---"
             )
             parts.append(
                 "The site could not be retrieved in this run. "
@@ -1690,24 +1720,29 @@ def merge_host_verified_primary(
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class SearchResult:
-    url: str
-    title: str
-    snippet: str
-
-
 _DDG_URL = "https://lite.duckduckgo.com/lite/"
 _DDG_UA = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+# Recognizable DDG-lite markup markers used to tell "parse failure / markup
+# changed" apart from a legitimate empty result set.
+_DDG_MARKER_RE = re.compile(
+    r'(?is)class="result-snippet"|class="result-link"|result__a|ddg\.duckduckgo|'
+    r'<table[^>]*class="results"'
+)
 
-def _parse_ddg_results(html: str) -> list[SearchResult]:
-    """Parse DuckDuckGo lite HTML results table."""
+
+def _parse_ddg_results(html: str) -> tuple[list[SearchResult], SourceResultStatus]:
+    """Parse DuckDuckGo lite HTML results table.
+
+    Returns ``(results, status)``. Malformed individual rows are dropped one at
+    a time (partial validation) instead of discarding the whole page. When the
+    page contains DDG markup but nothing parses cleanly, the status is
+    ``INVALID`` (not a silent empty) so a markup change is loud, never silent.
+    """
     results: list[SearchResult] = []
-    saw_heading = False
     for m in re.finditer(
         r'(?is)<tr>\s*<td[^>]*class="result-snippet"[^>]*>\s*'
         r'<a[^>]*href="([^"]+)"[^>]*>([^<]*)</a>\s*</td>\s*</tr>\s*'
@@ -1718,13 +1753,14 @@ def _parse_ddg_results(html: str) -> list[SearchResult]:
         url = m.group(1).strip()
         title = m.group(2).strip()
         snippet = m.group(3).strip() if m.group(3) else ""
-        if url and not url.startswith("http"):
-            continue
-        if url and not any(
+        if not url or not url.startswith("http"):
+            continue  # partial validation: drop this row, keep the rest
+        if any(
             skip in url.lower()
             for skip in ("duckduckgo.com", "duck.co", "spreadprivacy")
         ):
-            results.append(SearchResult(url=url, title=title, snippet=snippet))
+            continue  # skip internal navigation rows, not search results
+        results.append(SearchResult(url=url, title=title, snippet=snippet))
     if not results:
         for m in re.finditer(
             r'(?is)<a[^>]*href="(https?://[^"]+)"[^>]*class="result-link"[^>]*>([^<]*)</a>',
@@ -1732,10 +1768,12 @@ def _parse_ddg_results(html: str) -> list[SearchResult]:
         ):
             url = m.group(1).strip()
             title = m.group(2).strip()
-            results.append(
-                SearchResult(url=url, title=title, snippet="")
-            )
-    return results
+            results.append(SearchResult(url=url, title=title, snippet=""))
+    if results:
+        return results, SourceResultStatus.SUCCESS
+    if _DDG_MARKER_RE.search(html):
+        return results, SourceResultStatus.INVALID
+    return results, SourceResultStatus.EMPTY
 
 
 def search_duckduckgo(
@@ -1765,12 +1803,23 @@ def search_duckduckgo(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read(max(max_chars * 2, 200_000))
         decoded = raw.decode("utf-8", errors="replace")
-        results = _parse_ddg_results(decoded)
+        results, status = _parse_ddg_results(decoded)
         if not results:
-            logger.info("DDG search returned 0 results for: %s", query)
+            logger.info("DDG search returned 0 results for: %s (%s)", query, status.value)
+            if status is SourceResultStatus.INVALID:
+                logger.warning(
+                    "DDG page contained result markup but nothing parsed — markup "
+                    "may have changed (query=%r); treating as no-results", query,
+                )
             return ""
+        # Versioned decomposed ranking (SCORING_VERSION=search-v1): rank by score.
+        ranked = sorted(
+            results,
+            key=lambda r: score_result(r)[1],  # total
+            reverse=True,
+        )[:10]
         lines = [f"--- DuckDuckGo results for: {query} ---"]
-        for r in results[:10]:
+        for r in ranked:
             lines.append(f"URL: {r.url}")
             lines.append(f"Title: {r.title}")
             if r.snippet:
@@ -1845,14 +1894,14 @@ def fetch_search_documents(
     for url, page in pages:
         if fetched_count >= max_results_per_query * max(len(queries), 1):
             break
-        if page.ok and page.text.strip():
+        if page.status is SourceResultStatus.SUCCESS and page.text.strip():
             snippet = page.text[:600].strip()
             fetched_blocks.append(
                 f"=== FETCHED: {url} ===\n{snippet}\n=== END FETCH ==="
             )
             fetched_count += 1
         else:
-            reason = page.error or f"HTTP {page.status}" if page.status else "unknown"
+            reason = page.error or f"HTTP {page.http_status}" if page.http_status else "unknown"
             fetched_blocks.append(
                 f"=== FETCH FAILED: {url} ({reason}) ==="
             )
