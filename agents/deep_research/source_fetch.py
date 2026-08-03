@@ -19,6 +19,8 @@ from html.parser import HTMLParser
 from typing import Iterable, Optional
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
+from core.http_cache import cache_key, get_default_cache
+
 logger = logging.getLogger(__name__)
 
 # Brand / contact signals stripped by plain html_to_text (style/script dropped)
@@ -1264,24 +1266,70 @@ def extract_structured_signals(html: str, base_url: str = "", *, max_chars: int 
     return block[:max_chars]
 
 
-def fetch_url(
+# Bump this string whenever the HTML→text extraction logic changes
+# (html_to_text / extract_structured_signals / html_to_text in this module).
+# It is part of the HTTP cache key, so a material parser change auto-invalidates
+# every cached page from before the change with no manual cache-busting.
+_ADAPTER_VERSION = "source-fetch-v1"
+
+
+def _encode_source(src: "FetchedSource") -> Optional[bytes]:
+    """Serialize a FetchedSource for the cache (must fit the size guard)."""
+    payload = {
+        "format": "fetched-source-v1",
+        "url": src.url,
+        "ok": src.ok,
+        "status": src.status,
+        "text": src.text,
+        "error": src.error,
+        "outbound": [
+            {
+                "kind": o.kind,
+                "url": o.url,
+                "handle": o.handle,
+                "phone_digits": o.phone_digits,
+                "email": o.email,
+                "source_page": o.source_page,
+                "note": o.note,
+            }
+            for o in src.outbound
+        ],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return encoded
+
+
+def _decode_source(raw: bytes) -> Optional["FetchedSource"]:
+    """Deserialize a cached FetchedSource; None if malformed (re-validate)."""
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("format") != "fetched-source-v1":
+            return None
+        outbound = [
+            OutboundPresence(**o) for o in (payload.get("outbound") or [])
+        ]
+        return FetchedSource(
+            url=payload["url"],
+            ok=bool(payload["ok"]),
+            status=payload.get("status"),
+            text=payload.get("text", ""),
+            error=payload.get("error", ""),
+            outbound=outbound,
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _fetch_url_uncached(
     url: str,
     *,
-    timeout: float = 18.0,
-    max_chars: int = 12000,
-    user_agent: str = _DEFAULT_UA,
-    extract_signals: bool = True,
-    follow_outbound: bool = True,
-) -> FetchedSource:
-    """HTTP GET + text extraction. Never raises — returns ok=False on failure.
-
-    When *extract_signals* is True, append STRUCTURED EXTRACTS (brand/contact).
-    When *follow_outbound* is True, populate ``FetchedSource.outbound`` for
-    downstream social/WhatsApp follow-up (no second hop inside this call).
-    """
-    url = normalize_url(url)
-    if not url:
-        return FetchedSource(url="", ok=False, status=None, text="", error="empty url")
+    timeout: float,
+    max_chars: int,
+    user_agent: str,
+    extract_signals: bool,
+    follow_outbound: bool,
+) -> "FetchedSource":
+    """The raw fetch+extract body (shared by cache-miss path and tests)."""
     try:
         req = urllib.request.Request(
             url,
@@ -1335,6 +1383,66 @@ def fetch_url(
     except Exception as exc:
         logger.info("Primary fetch failed for %s: %s", url, exc)
         return FetchedSource(url=url, ok=False, status=None, text="", error=str(exc))
+
+
+def fetch_url(
+    url: str,
+    *,
+    timeout: float = 18.0,
+    max_chars: int = 12000,
+    user_agent: str = _DEFAULT_UA,
+    extract_signals: bool = True,
+    follow_outbound: bool = True,
+) -> FetchedSource:
+    """HTTP GET + text extraction. Never raises — returns ok=False on failure.
+
+    Cache-aware (WAVE-09B): identical fetches within a process are served from
+    the in-memory HttpCache (single-flight coalesced — concurrent callers for
+    the same URL share one real request). The cache key includes the URL,
+    ``_ADAPTER_VERSION`` and the fetch parameters, so changes to extraction
+    logic or to how a page is requested auto-invalidate old entries. The
+    "empty body after extract" case is negative-cached with a shorter TTL so a
+    persistently-empty source is not hammered, yet recovers quickly.
+
+    When *extract_signals* is True, append STRUCTURED EXTRACTS (brand/contact).
+    When *follow_outbound* is True, populate ``FetchedSource.outbound`` for
+    downstream social/WhatsApp follow-up (no second hop inside this call).
+    """
+    url = normalize_url(url)
+    if not url:
+        return FetchedSource(url="", ok=False, status=None, text="", error="empty url")
+
+    key = cache_key(
+        url,
+        _ADAPTER_VERSION,
+        max_chars=str(max_chars),
+        extract_signals=str(extract_signals),
+        follow_outbound=str(follow_outbound),
+        user_agent=user_agent,
+    )
+
+    def _load() -> FetchedSource:
+        src = _fetch_url_uncached(
+            url,
+            timeout=timeout,
+            max_chars=max_chars,
+            user_agent=user_agent,
+            extract_signals=extract_signals,
+            follow_outbound=follow_outbound,
+        )
+        encoded = _encode_source(src)
+        if encoded is not None:
+            cache = get_default_cache()
+            if src.ok:
+                cache.put(key, encoded)
+            elif src.error == "empty body after extract":
+                cache.put(key, encoded, negative=True)
+            # Other failures (HTTP errors, network) are transient — not cached.
+        return src
+
+    return get_default_cache().coalesce(
+        key, _load, decoder=_decode_source, deadline_seconds=timeout + 5.0
+    )
 
 
 def fetch_user_primary_sources(

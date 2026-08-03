@@ -39,8 +39,20 @@ def _isolate_clients():
     from core.clients import clear_client_cache
 
     clear_client_cache()
+    _clear_http_cache()
     yield
     clear_client_cache()
+    _clear_http_cache()
+
+
+def _clear_http_cache() -> None:
+    """Drop the process-wide HTTP cache between tests (WAVE-09B)."""
+    try:
+        from core.http_cache import get_default_cache
+
+        get_default_cache().clear()
+    except Exception:
+        pass
 
 
 @pytest.fixture()

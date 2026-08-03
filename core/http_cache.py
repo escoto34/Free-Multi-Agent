@@ -207,6 +207,7 @@ class HttpCache:
         fetch: Callable[[], T],
         *,
         deadline_seconds: float,
+        decoder: Optional[Callable[[bytes], Optional[T]]] = None,
     ) -> T:
         """Share one in-flight *fetch* among concurrent requesters of *key*.
 
@@ -215,6 +216,11 @@ class HttpCache:
         fetch callback runs *once*: the first requester acquires a refcounted
         per-key lock, runs the fetch and populates the cache; waiters block on
         the lock and then resolve to the already-cached value.
+
+        When *decoder* is given, cached payloads are passed through it before
+        being returned (re-validating the value's *domain* shape on read; a
+        ``None`` result from the decoder falls through to a real fetch). This
+        lets callers cache arbitrary objects that serialize to bytes.
 
         If the lock cannot be acquired within ``deadline_seconds`` seconds the
         caller falls back to a direct fetch rather than starving forever.
@@ -230,7 +236,11 @@ class HttpCache:
             try:
                 cached = self.get(key)
                 if cached is not None:
-                    return cached  # type: ignore[return-value]
+                    if decoder is None:
+                        return cached  # type: ignore[return-value]
+                    decoded = decoder(cached)
+                    if decoded is not None:
+                        return decoded
                 return fetch()
             finally:
                 lock.release()
