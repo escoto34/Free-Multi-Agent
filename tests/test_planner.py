@@ -39,7 +39,7 @@ def test_pipeline_plan_schema():
 def test_execute_plan_chains_prior(monkeypatch):
     calls: list[tuple[str, str]] = []
 
-    def fake_research(prompt: str):
+    def fake_research(prompt: str, *_args, **_kwargs):
         calls.append(("research", prompt))
         return {
             "content": "API X is free",
@@ -102,7 +102,7 @@ def test_execute_plan_shows_full_research_report(monkeypatch):
         "modern dental practice in Example City with implants and aesthetics.\n"
     ) + ("Detail paragraph about services and locations. " * 40)
 
-    def fake_research(prompt: str):
+    def fake_research(prompt: str, *_args, **_kwargs):
         return {
             "content": long_body,
             "sources": ["https://acmebrand.test.com", "https://example.com/reviews"],
@@ -138,7 +138,7 @@ def test_execute_plan_research_then_vibe_with_long_prior(monkeypatch):
     long_body = "Research findings on AcmeBrand. " * 200  # >4k when wrapped
     vibe_prompts: list[str] = []
 
-    def fake_research(prompt: str):
+    def fake_research(prompt: str, *_args, **_kwargs):
         return {
             "content": long_body,
             "sources": ["https://www.acmebrand.test.com"],
@@ -202,7 +202,7 @@ def test_execute_plan_injects_origin_url_into_research(monkeypatch):
     """Planner dropping the official domain must not starve PRIMARY fetch."""
     research_prompts: list[str] = []
 
-    def fake_research(prompt: str):
+    def fake_research(prompt: str, *_args, **_kwargs):
         research_prompts.append(prompt)
         return {
             "content": "Business found at official site.",

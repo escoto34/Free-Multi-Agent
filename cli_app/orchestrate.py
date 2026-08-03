@@ -6,6 +6,7 @@ prior outputs so research can inform code (and vice versa when ordered that way)
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Optional
 
 from cli_app.research_constraints import format_grounded_constraints_block
@@ -160,6 +161,93 @@ def _display_step_output(action: str, result: dict[str, Any]) -> str:
     return _summarize_step_output(action, result)
 
 
+def _run_step(
+    index: int,
+    step: PipelineStep,
+    *,
+    origin: str,
+    use_gpt_researcher: bool,
+    prior_context: Optional[str],
+) -> tuple[dict[str, Any], str]:
+    """Execute one plan step; returns ``(step_result, chain_blob)``.
+
+    *prior_context* is the pre-formatted PRIOR block for a dependent step
+    (``uses_prior=True``), or ``None`` for an independent step. Independent
+    steps never read prior output, so this is safe to call from a worker thread.
+    """
+    action = (step.action or "").strip().lower()
+    if action not in ("vibe", "research"):
+        return {
+            "index": index,
+            "action": action,
+            "ok": False,
+            "error": f"unknown action {action!r} (only vibe|research)",
+            "prompt": step.prompt,
+            "rationale": step.rationale,
+        }, ""
+
+    prompt = step.prompt.strip()
+    if action == "research" and origin:
+        prompt = ensure_origin_urls_in_research_prompt(prompt, origin)
+    if prior_context:
+        if action == "vibe":
+            prompt = (
+                f"{prompt}\n\n"
+                "=== PRIOR RESEARCH CONTEXT (authoritative for facts) ===\n"
+                "Implement using GROUNDED FACTS first. Never invent contact,\n"
+                "brand colors, maps, doctor bios, or reviews not listed there.\n"
+                "Static landing (HTML/CSS/JS) unless the user named a framework.\n"
+                "Do NOT require an email form if EMAILS are none/gap — use wa.me.\n"
+                "Content tests: never assert bare \"@\" absent (CSS @media has @);\n"
+                "use mailto: / email-regex. Ship a usable hero+services+contact page.\n"
+                f"{prior_context}\n"
+                "=== END PRIOR RESEARCH CONTEXT ==="
+            )
+        else:
+            prompt = (
+                f"{prompt}\n\n"
+                f"--- Context from prior pipeline steps (use as input) ---\n"
+                f"{prior_context}"
+            )
+
+    try:
+        if action == "research":
+            raw = _run_research(prompt, use_gpt_researcher=use_gpt_researcher)
+        else:
+            raw = _run_vibe(prompt)
+    except Exception as exc:
+        result = {
+            "index": index,
+            "action": action,
+            "ok": False,
+            "error": str(exc),
+            "prompt": step.prompt,
+            "rationale": step.rationale,
+        }
+        return result, f"[{action} failed] {exc}"
+
+    chain_blob = _summarize_step_output(action, raw)
+    display = _display_step_output(action, raw)
+    ok = not raw.get("error") and raw.get("is_safe") is not False
+    if action == "vibe":
+        ok = ok and (raw.get("passed") is not False or raw.get("passed") is None)
+        # treat explicit failed tests as not-ok for summary
+        if raw.get("passed") is False:
+            ok = False
+
+    result = {
+        "index": index,
+        "action": action,
+        "ok": ok,
+        "prompt": step.prompt,
+        "rationale": step.rationale,
+        "result": raw,
+        "summary": chain_blob[:1500],
+        "display": display,
+    }
+    return result, chain_blob
+
+
 def execute_plan(
     plan: PipelinePlan,
     *,
@@ -167,99 +255,85 @@ def execute_plan(
     origin_prompt: str = "",
     use_gpt_researcher: bool = False,
 ) -> dict[str, Any]:
-    """Run each plan step in order. Returns aggregate result for the CLI.
+    """Run plan steps. Independent (``uses_prior=False``) steps run
+    concurrently; dependent steps run sequentially in order.
 
     *origin_prompt* is the original /do task (after optional EN translation).
     Research steps are enriched with any official domains named there so the
     planner cannot drop primary URLs and empty the PRIMARY source fetch.
+
+    The external return shape is unchanged — only the internal execution
+    strategy for independent steps changes.
     """
     prior_blobs: list[str] = []
     step_results: list[dict[str, Any]] = []
     origin = (origin_prompt or "").strip()
+    n = len(plan.steps)
+    i = 0
 
-    for i, step in enumerate(plan.steps, 1):
-        action = (step.action or "").strip().lower()
-        if action not in ("vibe", "research"):
-            step_results.append(
-                {
-                    "index": i,
-                    "action": action,
-                    "ok": False,
-                    "error": f"unknown action {action!r} (only vibe|research)",
-                }
+    while i < n:
+        if not plan.steps[i].uses_prior:
+            # Consecutive independent steps: one parallel wave. Results are
+            # collected in plan order and appended to prior_blobs in that same
+            # order, so a later dependent step sees identical context whether
+            # the wave ran sequentially or concurrently.
+            group: list[int] = []
+            while i < n and not plan.steps[i].uses_prior:
+                group.append(i)
+                i += 1
+            _emit(
+                progress,
+                f"steps {group[0] + 1}..{i}: {len(group)} independent step(s) "
+                f"in parallel …",
             )
+            with ThreadPoolExecutor(max_workers=len(group)) as pool:
+                futures = {
+                    pool.submit(
+                        _run_step,
+                        idx + 1,
+                        plan.steps[idx],
+                        origin=origin,
+                        use_gpt_researcher=use_gpt_researcher,
+                        prior_context=None,
+                    ): idx
+                    for idx in group
+                }
+                outcomes: dict[int, tuple[dict[str, Any], str]] = {}
+                for fut in as_completed(futures):
+                    idx = futures[fut]
+                    try:
+                        outcomes[idx] = fut.result()
+                    except Exception as exc:  # worker crashed outside _run_step
+                        outcomes[idx] = (
+                            {
+                                "index": idx + 1,
+                                "action": plan.steps[idx].action,
+                                "ok": False,
+                                "error": f"parallel worker crashed: {exc}",
+                            },
+                            f"[{plan.steps[idx].action} failed] {exc}",
+                        )
+            for idx in group:  # plan order
+                res, blob = outcomes[idx]
+                step_results.append(res)
+                if blob:
+                    prior_blobs.append(blob)
             continue
 
-        prompt = step.prompt.strip()
-        if action == "research" and origin:
-            prompt = ensure_origin_urls_in_research_prompt(prompt, origin)
-        if step.uses_prior and prior_blobs:
-            prior = "\n\n".join(prior_blobs[-3:])
-            if action == "vibe":
-                prompt = (
-                    f"{prompt}\n\n"
-                    "=== PRIOR RESEARCH CONTEXT (authoritative for facts) ===\n"
-                    "Implement using GROUNDED FACTS first. Never invent contact,\n"
-                    "brand colors, maps, doctor bios, or reviews not listed there.\n"
-                    "Static landing (HTML/CSS/JS) unless the user named a framework.\n"
-                    "Do NOT require an email form if EMAILS are none/gap — use wa.me.\n"
-                    "Content tests: never assert bare \"@\" absent (CSS @media has @);\n"
-                    "use mailto: / email-regex. Ship a usable hero+services+contact page.\n"
-                    f"{prior}\n"
-                    "=== END PRIOR RESEARCH CONTEXT ==="
-                )
-            else:
-                prompt = (
-                    f"{prompt}\n\n"
-                    f"--- Context from prior pipeline steps (use as input) ---\n"
-                    f"{prior}"
-                )
-
-        _emit(progress, f"step {i}/{len(plan.steps)}: {action} …")
-        try:
-            if action == "research":
-                engine = "GPT-Researcher" if use_gpt_researcher else "native"
-                _emit(progress, f"deep-research: {engine}")
-                raw = _run_research(prompt, use_gpt_researcher=use_gpt_researcher)
-            else:
-                _emit(progress, "vibe-coding: architect → code → test …")
-                raw = _run_vibe(prompt)
-        except Exception as exc:
-            step_results.append(
-                {
-                    "index": i,
-                    "action": action,
-                    "ok": False,
-                    "error": str(exc),
-                    "prompt": step.prompt,
-                    "rationale": step.rationale,
-                }
-            )
-            prior_blobs.append(f"[{action} failed] {exc}")
-            continue
-
-        chain_blob = _summarize_step_output(action, raw)
-        display = _display_step_output(action, raw)
-        prior_blobs.append(chain_blob)
-        ok = not raw.get("error") and raw.get("is_safe") is not False
-        if action == "vibe":
-            ok = ok and (raw.get("passed") is not False or raw.get("passed") is None)
-            # treat explicit failed tests as not-ok for summary
-            if raw.get("passed") is False:
-                ok = False
-
-        step_results.append(
-            {
-                "index": i,
-                "action": action,
-                "ok": ok,
-                "prompt": step.prompt,
-                "rationale": step.rationale,
-                "result": raw,
-                "summary": chain_blob[:1500],
-                "display": display,
-            }
+        # Dependent step: runs alone, reads the latest prior blobs.
+        prior = "\n\n".join(prior_blobs[-3:]) if prior_blobs else None
+        _emit(progress, f"step {i + 1}/{n}: {plan.steps[i].action} …")
+        res, blob = _run_step(
+            i + 1,
+            plan.steps[i],
+            origin=origin,
+            use_gpt_researcher=use_gpt_researcher,
+            prior_context=prior,
         )
+        step_results.append(res)
+        if blob:
+            prior_blobs.append(blob)
+        i += 1
 
     all_ok = all(s.get("ok") for s in step_results) if step_results else False
     lines = [plan.summary or "Execution finished", ""]
