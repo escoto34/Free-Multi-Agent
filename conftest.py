@@ -19,14 +19,18 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 # Inject fake API keys so client factories don't error during import.
 # These are NEVER sent to any real endpoint — all HTTP is mocked in tests.
-os.environ.setdefault("GROQ_API_KEY", "test-groq-key-fake")
-os.environ.setdefault("OPENROUTER_API_KEY", "test-openrouter-key-fake")
-os.environ.setdefault("COHERE_API_KEY", "test-cohere-key-fake")
-os.environ.setdefault("MISTRAL_API_KEY", "test-mistral-key-fake")
-os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key-fake")
-os.environ.setdefault("CEREBRAS_API_KEY", "test-cerebras-key-fake")
-os.environ.setdefault("OLLAMA_API_KEY", "ollama")
-os.environ.setdefault("AGNES_API_KEY", "test-agnes-key-fake")
+# Derived from the single provider registry so a new provider added to
+# config/model_router.yaml automatically gets a fake key here (WAVE-06).
+from core.provider_registry import NO_KEY_PROVIDERS, get_registered_providers
+
+for _name, _meta in get_registered_providers().items():
+    _env_key = _meta.get("env_key")
+    if not _env_key:
+        continue
+    if _name in NO_KEY_PROVIDERS:
+        os.environ.setdefault(_env_key, "ollama")
+    else:
+        os.environ.setdefault(_env_key, f"test-{_name}-key-fake")
 
 
 @pytest.fixture(autouse=True)

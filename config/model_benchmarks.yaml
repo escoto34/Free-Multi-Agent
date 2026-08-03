@@ -4,7 +4,7 @@
 # Edit thresholds here — do not hardcode them in Python.
 
 version: 1
-updated: "2026-07-17"
+updated: "2026-08-03"
 
 # Rubric bands (0-100) — mirrors systems.md §4.1
 rubric_bands:
@@ -58,6 +58,45 @@ models:
     expired_fallback:
       provider: groq
       model: openai/gpt-oss-120b
+  # WAVE-06 backfill — every model referenced by model_router.yaml must have a
+  # benchmark row (silent flat-60 is now a loud CI failure). Catalog alternates
+  # are scored conservatively (adequate band, 50-69) pending real usage data.
+  groq/openai/gpt-oss-20b:
+    scores: {code: 72, reason: 80, ground: 44, synth: 72, safety: 40}
+  groq/qwen/qwen3.6-27b:
+    scores: {code: 70, reason: 82, ground: 42, synth: 70, safety: 38}
+  cohere/command-r-plus-08-2024:
+    scores: {code: 54, reason: 68, ground: 88, synth: 72, safety: 44}
+  cohere/command-r7b-12-2024:
+    scores: {code: 50, reason: 60, ground: 80, synth: 62, safety: 40}
+  mistral/mistral-medium-latest:
+    scores: {code: 66, reason: 68, ground: 48, synth: 64, safety: 38}
+  mistral/open-mistral-nemo:
+    scores: {code: 64, reason: 62, ground: 44, synth: 58, safety: 36}
+  mistral/devstral-latest:
+    scores: {code: 80, reason: 58, ground: 36, synth: 52, safety: 34}
+  mistral/ministral-8b-latest:
+    scores: {code: 56, reason: 54, ground: 40, synth: 50, safety: 34}
+  gemini/gemini-2.5-flash:
+    scores: {code: 74, reason: 82, ground: 58, synth: 78, safety: 52}
+  gemini/gemini-2.5-flash-lite:
+    scores: {code: 66, reason: 74, ground: 52, synth: 70, safety: 48}
+  gemini/gemma-3-27b-it:
+    scores: {code: 68, reason: 72, ground: 50, synth: 66, safety: 42}
+  cerebras/gemma-4-31b:
+    scores: {code: 74, reason: 80, ground: 46, synth: 72, safety: 42}
+  cerebras/gpt-oss-120b:
+    scores: {code: 82, reason: 90, ground: 48, synth: 85, safety: 45}
+  cerebras/zai-glm-4.7:
+    scores: {code: 68, reason: 74, ground: 44, synth: 66, safety: 40}
+  openrouter/cohere/north-mini-code:free:
+    scores: {code: 62, reason: 56, ground: 38, synth: 50, safety: 32}
+  openrouter/google/gemma-3-27b-it:free:
+    scores: {code: 66, reason: 70, ground: 46, synth: 62, safety: 40}
+  openrouter/meta-llama/llama-3.3-70b-instruct:free:
+    scores: {code: 64, reason: 66, ground: 44, synth: 60, safety: 38}
+  openrouter/qwen/qwen3-32b:free:
+    scores: {code: 64, reason: 70, ground: 44, synth: 62, safety: 38}
 
 # ---------------------------------------------------------------------------
 # Selection policy (systems.md §4.3) — editable, not hardcoded in Python

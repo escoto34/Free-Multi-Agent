@@ -22,7 +22,8 @@ import yaml
 
 from core.agent_config import get_agent_config, get_full_config, get_max_fix_cycles, reload_config
 from core.model_selector import reload_benchmarks
-from core.quotas import QuotaTracker, _PER_MODEL_PROVIDERS
+from core.provider_registry import is_per_model_provider
+from core.quotas import QuotaTracker
 
 _BENCHMARKS_PATH = Path(__file__).resolve().parent.parent / "config" / "model_benchmarks.yaml"
 
@@ -129,7 +130,7 @@ def resolve_role_endpoint(
 
 def quota_bucket(provider: str, model: str) -> str:
     """Stable key matching :class:`~core.quotas.QuotaTracker` accounting."""
-    if provider in _PER_MODEL_PROVIDERS:
+    if is_per_model_provider(provider):
         return f"{provider}/{model}"
     return f"{provider}/__shared__"
 

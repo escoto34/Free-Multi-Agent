@@ -34,26 +34,12 @@ KNOWN_ROLES: list[tuple[str, str]] = [
     ("cli", "planner"),
 ]
 
-# Extended by runtime list from model_router.yaml / clients (mistral, gemini, …)
-KNOWN_PROVIDERS = (
-    "groq",
-    "openrouter",
-    "cohere",
-    "mistral",
-    "gemini",
-    "cerebras",
-    "ollama",
-    "agnes",
-)
-
 
 def known_providers() -> tuple[str, ...]:
-    try:
-        from core.clients import list_provider_names
+    """Provider list from the single registry (config/model_router.yaml)."""
+    from core.provider_registry import list_provider_names
 
-        return tuple(list_provider_names())
-    except Exception:
-        return KNOWN_PROVIDERS
+    return tuple(list_provider_names())
 
 
 def _read(path: Path) -> dict[str, Any]:

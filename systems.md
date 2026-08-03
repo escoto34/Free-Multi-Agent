@@ -249,6 +249,29 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **`groq` / `openai/gpt-oss-safeguard-20b`** | 35 | 55 | 30 | 40 | **92** | OpenAI open safety classifier (post-trained from gpt-oss); BYO policy; purpose-built for Trust & Safety — **not** a general coder. `vendor`+`public` |
 | **`openrouter` / `tencent/hy3:free`** ⚠ | 55 | 60 | 38 | 58 | 35 | **Temporal promo.** **Expires 2026-07-21.** Sparse independent benches; historically general free chat. **Verify availability before every execution.** Cap auto-score ≤49 if 404/expired. `sparse` |
 
+**Catalog backfill (WAVE-06):** rows below were added so every model registered in `config/model_router.yaml` has a benchmark entry — the silent flat-60 fallback for unscored models is now a loud CI failure. Scores are **provisional** (adequate band, 50–69) pending real usage data; do not treat them as the evidence-backed rows above.
+
+| Model (provider ID) | (a) code | (b) reason | (c) ground | (d) synth | (e) safety | Notes |
+|---------------------|--------:|----------:|----------:|---------:|----------:|-------|
+| **`groq` / `openai/gpt-oss-20b`** | 72 | 80 | 44 | 72 | 40 | Lighter sibling of gpt-oss-120b. `provisional` |
+| **`groq` / `qwen/qwen3.6-27b`** | 70 | 82 | 42 | 70 | 38 | Catalog alternate, strong reasoning. `provisional` |
+| **`cohere` / `command-r-plus-08-2024`** | 54 | 68 | 88 | 72 | 44 | Alternate RAG tier. `provisional` |
+| **`cohere` / `command-r7b-12-2024`** | 50 | 60 | 80 | 62 | 40 | Lighter RAG alternate. `provisional` |
+| **`mistral` / `mistral-medium-latest`** | 66 | 68 | 48 | 64 | 38 | Mid generalist. `provisional` |
+| **`mistral` / `open-mistral-nemo`** | 64 | 62 | 44 | 58 | 36 | Open 12B. `provisional` |
+| **`mistral` / `devstral-latest`** | 80 | 58 | 36 | 52 | 34 | Coding-oriented sibling of codestral. `provisional` |
+| **`mistral` / `ministral-8b-latest`** | 56 | 54 | 40 | 50 | 34 | Small endpoint. `provisional` |
+| **`gemini` / `gemini-2.5-flash`** | 74 | 82 | 58 | 78 | 52 | Newer Flash-class. `provisional` |
+| **`gemini` / `gemini-2.5-flash-lite`** | 66 | 74 | 52 | 70 | 48 | Lite Flash-class. `provisional` |
+| **`gemini` / `gemma-3-27b-it`** | 68 | 72 | 50 | 66 | 42 | Open 27B on AI Studio. `provisional` |
+| **`cerebras` / `gemma-4-31b`** | 74 | 80 | 46 | 72 | 42 | Strong open quality; cascade target (gemini_fallback). `provisional` |
+| **`cerebras` / `gpt-oss-120b`** | 82 | 90 | 48 | 85 | 45 | Same weights as Groq's gpt-oss-120b. `provisional` |
+| **`cerebras` / `zai-glm-4.7`** | 68 | 74 | 44 | 66 | 40 | Catalog alternate. `provisional` |
+| **`openrouter` / `cohere/north-mini-code:free`** | 62 | 56 | 38 | 50 | 32 | Fast code-ish; shares 50 RPD. `provisional` |
+| **`openrouter` / `google/gemma-3-27b-it:free`** | 66 | 70 | 46 | 62 | 40 | Open 27B alternate. `provisional` |
+| **`openrouter` / `meta-llama/llama-3.3-70b-instruct:free`** | 64 | 66 | 44 | 60 | 38 | General 70B alternate. `provisional` |
+| **`openrouter` / `qwen/qwen3-32b:free`** | 64 | 70 | 44 | 62 | 38 | Catalog alternate. `provisional` |
+
 **Quick capability matrix (stack defaults):**
 
 | Capability | Strong free options | Weaker / avoid as primary |

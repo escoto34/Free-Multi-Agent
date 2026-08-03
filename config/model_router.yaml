@@ -190,6 +190,9 @@ fallback_cascade:
   agnes_fallback:
     provider: groq
     model: openai/gpt-oss-120b
+  ollama_fallback:
+    provider: mistral
+    model: mistral-small-latest
 cli:
   chat:
     provider: agnes
