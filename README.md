@@ -214,6 +214,18 @@ A versioned regression scenario suite is added in WAVE-03 (`evals/scenarios.v1.j
 pytest tests/ -v   # verbose, still deterministic
 ```
 
+### Scenario suite
+
+`evals/scenarios.v1.json` is a versioned fixture of agent regression scenarios
+covering 6 categories (`vibe_coding_plan`, `vibe_coding_debug`,
+`deep_research_safety`, `deep_research_grounding`, `cli_tool_selection`,
+`routing_fallback`) × 3 prompt shapes (`direct`, `vague`, `contradictory`).
+`tests/test_scenarios.py` runs one deterministic structural test per scenario
+through the fake provider and a coverage meta-test that fails CI if any cell
+is removed — the fixture cannot silently rot. To add a scenario, append it to
+the fixture JSON (unique `id`, a known `category`/`prompt_shape`, and a matching
+`expected_contract.schema`).
+
 ---
 
 ## Technical reference
