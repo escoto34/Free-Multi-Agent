@@ -2,9 +2,13 @@
 Web Search agent for System B (Deep Research).
 
 Provider/model from config/model_router.yaml (typically groq/compound-mini).
+The deep_research.web_search role backs ONE bounded LLM call for query
+expansion (turn a vague topic into concrete DuckDuckGo facets) via
+:func:`expand_query_facets`; that call is optional — on quota/network failure
+the heuristic facet builder is used unchanged.
 
 1. Fetches user-provided official URLs (PRIMARY SOURCES) via HTTP.
-2. One live compound multi-facet search — official site *and* third-party web.
+2. Expands the topic into concrete facets, then one live multi-facet search next.
 3. Merges primary + live dump for grounding.
 
 Domain-agnostic: works for any research subject (business, person, product, topic).
@@ -21,12 +25,12 @@ from agents.deep_research.entity_focus import (
     extract_location_phrases,
     extract_name_variants,
 )
+from agents.deep_research.contracts import SourceResultStatus
 from agents.deep_research.research_types import (
     ResearchProfile,
     classify_research,
     search_facet_hints,
 )
-from agents.deep_research.contracts import SourceResultStatus
 from agents.deep_research.source_fetch import (
     collect_outbound_from_sources,
     extract_user_domains,
@@ -38,6 +42,8 @@ from agents.deep_research.source_fetch import (
     format_primary_source_block,
     outbound_presence_search_facets,
 )
+from core.agent_config import get_agent_config
+from core.router import call_agent, QuotaExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,7 @@ __all__ = [
     "MAX_QUERY_CHARS",
     "MAX_LIVE_QUERIES",
     "run_web_search",
+    "expand_query_facets",
     "_build_safe_query",
     "_build_query_list",
 ]
@@ -170,6 +177,88 @@ def _build_query_list(
     return queries[:limit]
 
 
+# The deep_research.web_search role (groq/compound-mini, ~250 RPD) is wired here
+# for query expansion: one bounded LLM call that turns a vague topic into more
+# concrete DDG facets than the heuristic builder alone. It is an optimization —
+# if quota/key/parse fails we fall back to the heuristic facets unchanged.
+_QUERY_EXPANSION_SYSTEM = (
+    "You are a web-search query planner. Given ONE vague research topic, emit "
+    "up to {max_facets} concise DuckDuckGo search queries that surface concrete, "
+    "factual results (official site, news, reviews, contact, map listing). "
+    "Rules: reply with ONLY the queries, one per line; no numbering, bullets, "
+    "quotes or commentary; lowercase; each under 100 characters; add a "
+    "location qualifier when the topic implies one; never repeat the same "
+    "keywords across lines."
+)
+_QUERY_LINE_RE = re.compile(r"\A[\s\d\-.•]*\s?(.+?)\s*\Z")
+
+
+def _parse_expanded_facets(
+    raw: str,
+    *,
+    existing: Optional[list[str]] = None,
+    max_facets: int = 6,
+) -> list[str]:
+    """Parse a free-form LLM query-expansion reply into a bounded facet list."""
+    seen: set[str] = set()
+    existing_keys = {q.casefold() for q in (existing or [])}
+    out: list[str] = []
+    for line in (raw or "").splitlines():
+        m = _QUERY_LINE_RE.match(line or "")
+        q = (m.group(1) if m else line).strip()
+        if not q or len(q) < 4 or len(q) > MAX_QUERY_CHARS:
+            continue
+        key = q.casefold()
+        if key in seen or key in existing_keys:
+            continue
+        seen.add(key)
+        out.append(q)
+        if len(out) >= max_facets:
+            break
+    return out
+
+
+def expand_query_facets(
+    topic: str,
+    *,
+    existing: Optional[list[str]] = None,
+    max_facets: int = 6,
+) -> list[str]:
+    """One bounded deep_research.web_search call -> better facets.
+
+    Never raises and never blocks the pipeline: on any LLM failure (empty
+    completion, quota exhausted, network, unparseable reply) it returns ``[]``
+    so the html heuristic facets are used unchanged.
+    """
+    topic = (topic or "").strip()
+    if not topic:
+        return []
+    try:
+        cfg = get_agent_config("deep_research", "web_search")
+        resp = call_agent(
+            provider=cfg["provider"],
+            model=cfg["model"],
+            messages=[
+                {
+                    "role": "system",
+                    "content": _QUERY_EXPANSION_SYSTEM.format(max_facets=max_facets),
+                },
+                {"role": "user", "content": topic},
+            ],
+            fallback=cfg.get("fallback"),
+            max_retries=1,
+        )
+    except Exception as exc:
+        logger.warning(
+            "web_search query expansion skipped (%s) — using heuristic facets",
+            type(exc).__name__ if not isinstance(exc, QuotaExhaustedError) else "quota",
+        )
+        return []
+    return _parse_expanded_facets(
+        resp.content or "", existing=existing, max_facets=max_facets
+    )
+
+
 def run_web_search(
     search_terms: list[str],
     *,
@@ -186,6 +275,14 @@ def run_web_search(
         max_queries=max(max_queries, 6),
         profile=profile,
     )
+
+    # WAVE-11B: the web_search role is wired for query expansion — one bounded
+    # call that turns the vague topic into more concrete facets. It is optional:
+    # on any LLM failure the heuristic facets below are used unchanged.
+    if original_query:
+        expanded = expand_query_facets(original_query, existing=facets, max_facets=6)
+        if expanded:
+            facets = list(dict.fromkeys([*expanded, *facets]))[:MAX_FACET_HINTS]
 
     if progress:
         progress("fetching user-provided official page(s)…")

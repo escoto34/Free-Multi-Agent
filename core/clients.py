@@ -15,8 +15,10 @@ Supported out of the box (see model_router.yaml):
 
 IMPORTANT:
   - Cohere ClientV2 does NOT support the ``connectors`` parameter (that was v1).
-    Web search is handled externally (e.g. groq/compound-mini); grounding uses
-    ``documents=[{"data": {"text": ...}}]`` on ``ClientV2.chat()``.
+    Web search facets are produced by the ``deep_research.web_search`` role
+    (groq/compound-mini) via bounded query expansion and by the DDG scrape;
+    grounding uses ``documents=[{"data": {"text": ...}}]`` on
+    ``ClientV2.chat()``.
   - Ollama is local OpenAI-compatible (``http://localhost:11434/v1``); no real
     API key required. Override host with ``OLLAMA_BASE_URL`` / ``OLLAMA_HOST``.
   - Agnes AI is a free OpenAI-compatible multimodal gateway

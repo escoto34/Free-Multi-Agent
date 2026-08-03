@@ -27,6 +27,8 @@ Roles requested for scoring: System A (`architect`, `coder`, `debugger`) and Sys
 | **B — Research** | `safety_filter` | `groq` / `openai/gpt-oss-safeguard-20b` | `gemini` / `gemini-2.0-flash` |
 | **B — Research** | `context_compressor` | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
 | **B — Research** | `web_search` | `groq` / `groq/compound-mini` | **none** (hard-fail if no live search) |
+
+The `web_search` role is **wired, not reserved**: one bounded LLM call per run expands a vague topic into concrete DuckDuckGo facets (`expand_query_facets`), then the live DDG scrape + page fetches run. The expansion call is optional — if quota/network fails, the heuristic facet builder is used unchanged; the live-search requirement is unchanged (pipeline still hard-aborts if the search admits it did not run live).
 | **B — Research** | `grounding` | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` |
 | **B — Research** | `synthesizer` | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
 
@@ -468,7 +470,7 @@ Safety → Context compressor → Web search (+ primary URL fetch) → Grounding
 |------|---------|----------|--------------------|
 | **safety_filter** | `groq` / `openai/gpt-oss-safeguard-20b` | `gemini` / `gemini-2.0-flash` | Purpose-aligned safeguard model with **its own** ~1k RPD counter — one cheap classify call per run. Gemini is a binary-classify backup. |
 | **context_compressor** | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` | Keyword/trend extraction is medium difficulty, high frequency. Agnes free volume replaces OpenRouter/hy3. Gemini Flash is a reliable structured alternative. |
-| **web_search** | `groq` / `groq/compound-mini` | *(none — hard fail if no live search)* | **Only free stack model with integrated Tavily-class search.** ~250 RPD — must not be reused for chat/plan. Pipeline aborts if search admits it did not run live (anti-fabrication). **Also HTTP-fetches user-named domains** into a PRIMARY SOURCES block before the live dump. |
+| **web_search** | `groq` / `groq/compound-mini` | *(none — hard fail if no live search)* | **Only free stack role with integrated search.** ~250 RPD — **used** for one optional bounded query-expansion LLM call per run (vague topic → concrete DDG facets; on failure the heuristic builder stands in). Also HTTP-fetches user-named domains into a PRIMARY SOURCES block before the live dump. Live-search emptiness still aborts the run (anti-fabrication). |
 | **grounding** | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` | **Single Cohere primary** in the whole product. Best trial-tier anti-hallucination / documents grounding for claims+citations. Mistral Small preserves pipeline if Cohere trial is empty (lower grounding quality). Post-step **scrub** strips emails/phones/archive URLs/hex colors not present in the corpus. |
 | **synthesizer** | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Long report assembly needs strong reasoning + large output; Groq 120b has headroom separate from safeguard and compound-mini. Agnes large-context fallback if Groq synth is exhausted. **Not Cohere** — that would double-tax the 28/day pool with grounding. Scrub again + drop sources absent from the search dump. |
 
