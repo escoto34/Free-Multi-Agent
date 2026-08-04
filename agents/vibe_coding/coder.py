@@ -1,14 +1,16 @@
 """
-Coder agent for System A (Vibe Coding).
+Coordinator-implementer agent for System A (Vibe Coding) — WAVE-18.
 
-Implements the Architect's TechnicalSpec. When existing file contents are
-provided, merges changes while preserving useful logic not contradicted by
-the idea (unless it is redundant in context).
+The former architect + coder roles are folded into ONE call: the agent
+plans (surgical file list + test cases) and immediately writes the full
+implementation, producing a CodeArtifact. The repo tree (paths only) is
+provided because existing file *contents* cannot be pre-read before the
+file list is decided. Merge discipline and preservation are enforced
+after the call by the host (preservation-warning diff) and by the
+debugger fix loop.
 """
 
 from __future__ import annotations
-
-from typing import Optional
 
 from agents.vibe_coding.web_quality import WEB_LANDING_QUALITY_RULES
 from core.agent_runtime import run_structured_agent
@@ -18,26 +20,37 @@ from core.prompt_fragments import (
     NO_JSON_CODEBLOCK,
     STATIC_SITE_RULES,
 )
-from schemas.vibe_coding import CodeArtifact, TechnicalSpec
+from schemas.vibe_coding import CodeArtifact
 
 SYSTEM_PROMPT = (
-    "You are an expert programmer working on an EXISTING codebase.\n"
+    "You are an expert software architect AND implementer working on an EXISTING\n"
+    "project (or a greenfield one when the idea is a new app).\n"
     "\n"
-    "Your job is to implement the Technical Specification with MINIMAL disruption.\n"
+    "You receive: the user request, and the REPO FILE TREE (existing file paths).\n"
+    "Plan FIRST, then implement in the SAME response — one call, two duties.\n"
     "\n"
-    "## Preservation rules (critical)\n"
-    "1. If EXISTING FILE CONTENTS are provided for a path, treat them as the source of truth.\n"
-    "2. MERGE your changes into that code. Prefer surgical edits over full rewrites.\n"
-    "3. PRESERVE useful logic that is NOT part of the user idea but is still valuable:\n"
-    "   helpers, edge-case handling, comments that document non-obvious behavior,\n"
-    "   imports still needed, public APIs other modules may rely on, error handling.\n"
-    "4. You may REMOVE or rewrite logic ONLY when:\n"
-    "   - it directly conflicts with the new idea / tests, OR\n"
-    "   - it is clearly redundant or dead in the new context (duplicate of new code,\n"
-    "     unused after the change, or obsolete with the new design).\n"
-    "5. Do NOT drop unrelated functions/classes just because the idea did not mention them.\n"
-    "6. For brand-new paths (no existing content), write complete, working files.\n"
-    "7. Output the FULL final content of every file you touch (not a unified diff).\n"
+    "## Planning rules (architect duty)\n"
+    "- Decide the SMALLEST set of files to create/modify. Prefer NEW dedicated\n"
+    "  modules for green features instead of rewriting large core files.\n"
+    "- If you must modify an existing file (it is in the REPO FILE TREE), you are\n"
+    "  responsible for preserving its useful logic: only change what the idea\n"
+    "  needs, keep helpers, imports, edge-case handling, public APIs and error\n"
+    "  handling intact. You do NOT see the file's current contents — be surgical\n"
+    "  and explicit about what you keep.\n"
+    "- List every output path (including the pytest file(s)) in files_to_create.\n"
+    "- architecture should call out \"preserve X / do not remove Y\" when relevant.\n"
+    "- test_cases MUST describe GOOD assertions (substring / regex). Explicitly\n"
+    "  FORBID fragile checks like assert \"@\" not in html (CSS @media contains @).\n"
+    "- test_cases should check mailto: absence via safe patterns, not bare \"@\".\n"
+    "\n"
+    "## Implementation rules (coder duty)\n"
+    "1. For brand-new paths, write complete, working files.\n"
+    "2. For existing paths, MERGE mentally: you only have the path, so be\n"
+    "   conservative — never drop unrelated functions/classes the idea did not\n"
+    "   mention. When in doubt, prefer a new file over rewriting an existing one.\n"
+    "3. Output the FULL final content of every file you touch (not a unified diff).\n"
+    "4. summary must state what changed AND what existing logic you preserved\n"
+    "   (and why).\n"
     "\n"
     + GROUNDED_FACTS_RULES
     + "\n"
@@ -49,6 +62,9 @@ SYSTEM_PROMPT = (
     + "\n\n"
     + "You MUST output your response strictly as a JSON object matching this schema:\n"
     + '{\n'
+    + '  "files_to_create": ["relative/path/to/file1.py", "relative/path/to/test_file.py"],\n'
+    + '  "test_cases": ["critical test / content-check descriptions"],\n'
+    + '  "architecture": "short rationale + preservation requirements",\n'
     + '  "files": {\n'
     + '     "relative/path/to/file1.py": "full source code for file1",\n'
     + '     "relative/path/to/file2.py": "full source code for file2"\n'
@@ -56,48 +72,49 @@ SYSTEM_PROMPT = (
     + '  "summary": "What you changed AND what existing logic you intentionally preserved or removed (and why)."\n'
     + '}\n'
     + "\n"
+    + "files_to_create MUST match the keys of files. Every path in files_to_create\n"
+    + "must appear in files with full content.\n"
+    + "\n"
     + NO_JSON_CODEBLOCK
 )
 
 
-def _format_existing_block(existing_files: dict[str, str]) -> str:
-    if not existing_files:
+def _format_tree_block(repo_tree: str) -> str:
+    if not (repo_tree or "").strip():
         return (
-            "EXISTING FILE CONTENTS: (none — all paths are new; implement from scratch)\n"
+            "REPO FILE TREE: (unavailable — treat every path you write as new)\n"
         )
-    parts = [
-        "EXISTING FILE CONTENTS (preserve useful logic; merge, do not casually rewrite):\n"
-    ]
-    for path, content in existing_files.items():
-        parts.append(f"### FILE: {path}\n```\n{content}\n```\n")
-    return "\n".join(parts)
+    return (
+        "REPO FILE TREE (existing paths only; contents not shown — if you modify\n"
+        "one of these, preserve its logic carefully):\n"
+        f"{repo_tree}\n"
+        "=== END REPO FILE TREE ===\n"
+    )
 
 
 def run_coder(
-    spec: TechnicalSpec,
+    task_text: str,
     router_instance=None,
-    existing_files: Optional[dict[str, str]] = None,
+    repo_tree: str = "",
     assessment=None,
     selection_out=None,
-    task_text: Optional[str] = None,
     **runtime_kwargs,
 ) -> CodeArtifact:
-    """Implement the TechnicalSpec, merging into *existing_files* when present."""
-    existing_files = existing_files or {}
+    """Plan + implement *task_text* in one call, returning a CodeArtifact.
+
+    *repo_tree* is the bounded list of existing repo paths (paths only) so the
+    model can decide what to modify without us pre-reading candidate files.
+    """
     prompt_payload = (
-        f"Architecture design:\n{spec.architecture}\n\n"
-        f"Files to create/modify:\n{spec.files_to_create}\n\n"
-        f"Test cases to pass:\n{spec.test_cases}\n\n"
-        f"{_format_existing_block(existing_files)}"
+        f"USER REQUEST:\n{task_text}\n\n"
+        f"{_format_tree_block(repo_tree)}"
+        f"Now plan and implement. Return the full JSON artifact."
     )
     system = SYSTEM_PROMPT
     try:
         from core.skills import build_vibe_skills_block
 
-        # Prefer full task_text (includes GROUNDED FACTS); fall back to architecture.
-        skills_block = build_vibe_skills_block(
-            (task_text or "") + "\n" + (spec.architecture or "")
-        )
+        skills_block = build_vibe_skills_block(task_text or "")
         if skills_block:
             system = f"{SYSTEM_PROMPT}\n\n{skills_block}"
     except Exception:

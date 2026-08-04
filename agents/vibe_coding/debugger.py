@@ -22,7 +22,8 @@ SYSTEM_PROMPT = (
     '{\n'
     '  "passed": true_or_false,\n'
     '  "issues": ["List of error logs, failing assertions, or code bugs found."],\n'
-    '  "suggested_fix": "Detailed description of the required fix (or null if passed)"\n'
+    '  "suggested_fix": "Detailed description of the required fix (or null if passed)",\n'
+    '  "fixed_files": {"relative/path": "full corrected source", ...}  // optional, or null\n'
     '}\n'
     "\n"
     "Rules:\n"
@@ -32,6 +33,17 @@ SYSTEM_PROMPT = (
     "  dedicated folder; drop Next.js/Jest unless the user required Node.\n"
     "- If grounded brand strings (hex, wa.me, logo URL) are missing, require adding them.\n"
     "- Do not suggest installing Selenium or npm for simple marketing sites.\n"
+    "\n"
+    "## Editing directly (fixed_files) — only when safe\n"
+    "- You receive the FULL source of every file (plus the full test logs). If you are\n"
+    "  confident about the exact fix and the affected file is fully visible (not\n"
+    "  truncated), output the FULL corrected content of each file to change in\n"
+    "  fixed_files. This makes the fix apply without a second LLM call.\n"
+    "- Never use fixed_files for a file you could not fully read, or when the fix\n"
+    "  needs exploratory rewriting — leave fixed_files null and give suggested_fix\n"
+    "  (the Coder applies it with full merge context).\n"
+    "- When fixed_files is provided, it must include the complete corrected source\n"
+    "  (not a diff), and may fix BOTH the code and the tests in the same payload.\n"
     "\n"
     "## Critical: do not mis-diagnose content tests\n"
     "- If a test fails because HTML contains \"@\" from CSS `@media` / `@keyframes` /\n"
@@ -43,7 +55,7 @@ SYSTEM_PROMPT = (
     "- PRESERVATION WARNING about missing symbols like `soup` is OK when tests drop\n"
     "  BeautifulSoup intentionally — do not reintroduce bs4 just to keep the symbol.\n"
     "- Prefer fixing both a weak page (stub layout, missing grounded strings) AND bad\n"
-    "  tests in one suggested_fix when both are broken.\n"
+    "  tests in one suggested_fix (or one fixed_files payload) when both are broken.\n"
     "\n"
     + WEB_LANDING_QUALITY_RULES
     + "\n\n"
@@ -60,17 +72,19 @@ def run_debugger(
     selection_out=None,
     **runtime_kwargs,
 ) -> DebugReport:
-    """Review code and test logs; return pass/fail + fix suggestion."""
-    # Cap source dump so free models do not truncate the JSON schema reply
+    """Review code and test logs; return pass/fail + fix (text and/or files)."""
+    # WAVE-18: full-file preview (12k/file) so the debugger can diagnose and
+    # optionally produce correct fixed_files. Huge artifacts are capped to
+    # protect free models from truncating the JSON schema reply.
     files_preview: dict[str, str] = {}
     for path, code in (artifact.files or {}).items():
         c = code or ""
-        if len(c) > 4000:
-            c = c[:4000] + "\n…[truncated]…"
+        if len(c) > 12000:
+            c = c[:12000] + "\n…[truncated]…"
         files_preview[path] = c
     prompt_payload = (
         f"Source Code Files:\n{json.dumps(files_preview, indent=2)}\n\n"
-        f"Test execution logs/results:\n{test_logs[:12000]}"
+        f"Test execution logs/results:\n{test_logs[:20000]}"
     )
     system = SYSTEM_PROMPT
     try:

@@ -65,7 +65,6 @@ def test_set_role_and_list(tmp_path: Path):
     # Minimal config with known roles
     data = {
         "vibe_coding": {
-            "architect": {"provider": "cohere", "model": "command-a-plus-05-2026"},
             "coder": {"provider": "openrouter", "model": "cohere/north-mini-code:free"},
             "debugger": {
                 "provider": "openrouter",
@@ -75,10 +74,6 @@ def test_set_role_and_list(tmp_path: Path):
             "max_fix_cycles": 3,
         },
         "deep_research": {
-            "safety_filter": {
-                "provider": "groq",
-                "model": "openai/gpt-oss-safeguard-20b",
-            },
             "context_compressor": {
                 "provider": "openrouter",
                 "model": "tencent/hy3:free",
@@ -115,15 +110,15 @@ def test_set_role_and_list(tmp_path: Path):
     # mutate then reset
     set_role(
         "vibe_coding",
-        "architect",
+        "coder",
         provider="groq",
         model="openai/gpt-oss-20b",
         config_path=live,
     )
     reset_to_defaults(config_path=live, defaults_path=defaults)
     rows2 = list_roles(config_path=live)
-    arch = next(r for r in rows2 if r["id"] == "vibe_coding.architect")
-    assert arch["provider"] == "cohere"
+    coder = next(r for r in rows2 if r["id"] == "vibe_coding.coder")
+    assert coder["provider"] == "openrouter"
 
 
 def test_dispatch_help():
@@ -402,13 +397,11 @@ def test_reset_role_to_default(tmp_path: Path):
     defaults = tmp_path / "defaults_model_router.yaml"
     data = {
         "vibe_coding": {
-            "architect": {"provider": "cohere", "model": "command-a-plus-05-2026"},
             "coder": {"provider": "openrouter", "model": "cohere/north-mini-code:free"},
             "debugger": {"provider": "groq", "model": "openai/gpt-oss-120b"},
             "max_fix_cycles": 3,
         },
         "deep_research": {
-            "safety_filter": {"provider": "groq", "model": "openai/gpt-oss-safeguard-20b"},
             "context_compressor": {"provider": "openrouter", "model": "tencent/hy3:free"},
             "web_search": {"provider": "groq", "model": "groq/compound-mini"},
             "grounding": {"provider": "cohere", "model": "command-a-plus-05-2026"},
@@ -423,16 +416,16 @@ def test_reset_role_to_default(tmp_path: Path):
     defaults.write_text(yaml.safe_dump(data), encoding="utf-8")
     set_role(
         "vibe_coding",
-        "architect",
+        "coder",
         provider="groq",
         model="openai/gpt-oss-20b",
         config_path=live,
     )
     node = reset_role_to_default(
-        "vibe_coding", "architect", config_path=live, defaults_path=defaults
+        "vibe_coding", "coder", config_path=live, defaults_path=defaults
     )
-    assert node["provider"] == "cohere"
-    assert node["model"] == "command-a-plus-05-2026"
+    assert node["provider"] == "openrouter"
+    assert node["model"] == "cohere/north-mini-code:free"
 
 
 def test_context_tools_path_extract_and_read(tmp_path: Path, monkeypatch):

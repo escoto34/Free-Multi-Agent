@@ -132,7 +132,7 @@ def transfer_control(
         Must **not** clear or overwrite the user-input key with empty.
     require_keys:
         Keys that must be present and truthy in the *merged* view after this
-        handoff (e.g. ``[\"spec\"]`` after architect). Raises :class:`HandoffError`
+        handoff (e.g. ``[\"trends\"]`` after the compressor). Raises :class:`HandoffError`
         if any are missing.
     note:
         Optional diagnostic string stored on the handoff record.

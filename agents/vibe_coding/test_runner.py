@@ -39,7 +39,7 @@ def select_pytest_targets(
     """Return relative pytest file paths safe to run for this vibe run only.
 
     Never returns a bare ``tests/`` that would execute the MultiAgent monorepo
-    suite. Only concrete ``test_*.py`` / ``*_test.py`` paths from the architect
+    suite. Only concrete ``test_*.py`` / ``*_test.py`` paths from the coder
     list or the artifact file set, and only if they exist on disk when
     *repo_root* is provided.
     """
@@ -302,6 +302,13 @@ def execute_vibe_tests(
     parts: list[str] = []
     overall_ok = True
 
+    # WAVE-18: the architect fold means the artifact carries the file list
+    # (spec may be a legacy empty holder when callers pass one).
+    files_to_create = list(
+        (getattr(artifact, "files_to_create", None) or [])
+        or (getattr(spec, "files_to_create", None) or [])
+    )
+
     if artifact and artifact_looks_like_node_project(artifact):
         parts.append(
             "NODE/JEST PROJECT DETECTED\n"
@@ -327,7 +334,7 @@ def execute_vibe_tests(
             overall_ok = False
 
     targets = select_pytest_targets(
-        files_to_create=list(spec.files_to_create or []),
+        files_to_create=files_to_create,
         artifact=artifact,
         repo_root=repo_root,
     )

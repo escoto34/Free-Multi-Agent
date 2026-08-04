@@ -12,10 +12,14 @@ from pathlib import Path
 import git
 import pytest
 
-from graphs.deep_research_graph import get_deep_research_graph
+from graphs.deep_research_graph import (
+    get_deep_research_graph,
+    initial_deep_research_state,
+    summarize_deep_research_state,
+)
 from graphs.vibe_coding_graph import get_vibe_coding_graph, initial_vibe_coding_state
-from schemas.deep_research import CondensedTrends, GroundedReport, SafetyClassification
-from schemas.vibe_coding import CodeArtifact, DebugReport, TechnicalSpec
+from schemas.deep_research import CondensedTrends, GroundedReport
+from schemas.vibe_coding import CodeArtifact, DebugReport
 
 
 # ---------------------------------------------------------------------------
@@ -50,16 +54,7 @@ def test_vibe_coding_git_rollback_forced(temp_git_repo, monkeypatch):
     """Test that if vibe-coding fails 3 cycles, git rolls back to the initial commit."""
     repo, repo_dir = temp_git_repo
 
-    # Mock the Architect agent to return a valid spec
-    spec = TechnicalSpec(
-        architecture="Test architecture",
-        test_cases=["Test 1"],
-        files_to_create=["src/main.py"],
-    )
-    monkeypatch.setattr(
-        "graphs.vibe_coding_graph.run_architect",
-        lambda idea: spec,
-    )
+    # WAVE-18: no separate architect — the coder plans AND writes.
 
     # Mock the Coder agent to write a buggy file
     buggy_code = "def hello():\n    return 'buggy'\n"
@@ -116,14 +111,7 @@ def test_vibe_coding_stops_when_debugger_always_raises(temp_git_repo, monkeypatc
     """
     repo, repo_dir = temp_git_repo
 
-    monkeypatch.setattr(
-        "graphs.vibe_coding_graph.run_architect",
-        lambda idea: TechnicalSpec(
-            architecture="Test architecture",
-            test_cases=["Test 1"],
-            files_to_create=["src/main.py"],
-        ),
-    )
+    # WAVE-18: the former architect stage is folded into the coder.
     monkeypatch.setattr(
         "graphs.vibe_coding_graph.run_coder",
         lambda *args, **kwargs: CodeArtifact(
@@ -159,34 +147,26 @@ def test_vibe_coding_stops_when_debugger_always_raises(temp_git_repo, monkeypatc
     assert not (repo_dir / "src" / "main.py").exists()
 
 
-def test_vibe_coding_architect_failure_does_not_loop(temp_git_repo, monkeypatch):
-    """Architect failure must go to rollback/end, not spin into coder forever."""
-    monkeypatch.setattr(
-        "graphs.vibe_coding_graph.run_architect",
-        lambda idea: (_ for _ in ()).throw(RuntimeError("architect down")),
-    )
-    coder_calls = {"n": 0}
+def test_vibe_coding_coder_failure_does_not_loop(temp_git_repo, monkeypatch):
+    """Coder failure must go to rollback/end, not spin into a coder→test→debugger loop."""
+    def boom_coder(*args, **kwargs):
+        raise RuntimeError("coder down")
 
-    def fake_coder(*a, **k):
-        coder_calls["n"] += 1
-        return CodeArtifact(files={"x.py": "x=1"}, summary="x")
-
-    monkeypatch.setattr("graphs.vibe_coding_graph.run_coder", fake_coder)
+    monkeypatch.setattr("graphs.vibe_coding_graph.run_coder", boom_coder)
 
     graph = get_vibe_coding_graph()
     final_state = graph.invoke(
         initial_vibe_coding_state("anything"),
         config={"recursion_limit": 20},
     )
-    assert coder_calls["n"] == 0
     assert final_state.get("error")
-    assert "Architect" in (final_state.get("error") or "")
+    assert "Coder" in (final_state.get("error") or "")
 
 
 def test_vibe_coding_preserves_preexisting_dirty_work(temp_git_repo, monkeypatch):
     """Pre-existing uncommitted work must survive a 3-cycle git rollback.
 
-    architect_node stashes dirty state before snapshotting HEAD; rollback
+    coder_node stashes dirty state before snapshotting HEAD; rollback
     restores that stash after reset --hard so MCP/CLI use in a dirty repo
     does not silently destroy user WIP.
     """
@@ -195,14 +175,6 @@ def test_vibe_coding_preserves_preexisting_dirty_work(temp_git_repo, monkeypatch
     wip_file = repo_dir / "my_wip_notes.txt"
     wip_file.write_text("IMPORTANT USER WORK — do not destroy\n")
 
-    monkeypatch.setattr(
-        "graphs.vibe_coding_graph.run_architect",
-        lambda idea: TechnicalSpec(
-            architecture="Test architecture",
-            test_cases=["Test 1"],
-            files_to_create=["src/main.py"],
-        ),
-    )
     monkeypatch.setattr(
         "graphs.vibe_coding_graph.run_coder",
         lambda *args, **kwargs: CodeArtifact(
@@ -249,21 +221,14 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
 
     # Tracking calls to verify which nodes get executed in each run
     calls = {
-        "safety": 0,
         "compressor": 0,
         "web_search": 0,
         "grounding": 0,
         "synthesizer": 0,
     }
 
-    # 1. Setup agent mocks
-    monkeypatch.setattr(
-        "graphs.deep_research_graph.run_safety_filter",
-        lambda query, *args, **kwargs: (
-            calls.update({"safety": calls["safety"] + 1})
-            or SafetyClassification(is_safe=True)
-        ),
-    )
+    # 1. Setup agent mocks. WAVE-18: the safety gate lives inside the
+    # context_compressor (safe by default) — no dedicated safety node.
     monkeypatch.setattr(
         "graphs.deep_research_graph.run_context_compressor",
         lambda query, *args, **kwargs: (
@@ -314,7 +279,6 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
 
     initial_state = {
         "query": "Quantum AI",
-        "safety": None,
         "trends": None,
         "search_results": None,
         "grounded_report": None,
@@ -329,7 +293,6 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
     first_state = graph.invoke(initial_state, config=config)
 
     # Verify node call counts after first run (grounding failed but fallback was used)
-    assert calls["safety"] == 1
     assert calls["compressor"] == 1
     assert calls["web_search"] == 1
     assert calls["grounding"] == 1
@@ -348,7 +311,6 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
     assert final_state["final_report"].content == "Final synthesized executive report."
 
     # Verify NO nodes were re-run (graph was already complete)
-    assert calls["safety"] == 1
     assert calls["compressor"] == 1
     assert calls["web_search"] == 1
     assert calls["grounding"] == 1
@@ -356,7 +318,190 @@ def test_deep_research_checkpoint_resumption(tmp_path, monkeypatch):
 
     # Formal handoffs must preserve the original user query end-to-end
     history = final_state.get("handoff_history") or []
-    assert len(history) >= 5  # safety, compressor, search, grounding, synth
+    assert len(history) >= 4  # compressor, search, grounding, synth
     assert all(h.get("user_input") == "Quantum AI" for h in history)
     assert history[-1]["from_agent"] == "synthesizer"
     assert history[-1]["to_agent"] == "END"
+
+
+# ---------------------------------------------------------------------------
+# WAVE-18 — role consolidation tests
+# ---------------------------------------------------------------------------
+
+def test_vibe_fixed_files_skips_coder_in_fix_cycle(temp_git_repo, monkeypatch):
+    """WAVE-18: debugger-shipped fixed_files must skip a second coder call.
+
+    Flow: coder (1 call) → tests fail → debugger returns fixed_files → local
+    fix_applier writes + re-runs tests → debugger passes → git_commit.
+    """
+    repo, repo_dir = temp_git_repo
+
+    coder_calls = {"n": 0}
+
+    def fake_coder(*args, **kwargs):
+        coder_calls["n"] += 1
+        return CodeArtifact(
+            files={"src/main.py": "def hello():\n    return 'buggy'\n"},
+            summary="Written buggy code",
+        )
+
+    monkeypatch.setattr("graphs.vibe_coding_graph.run_coder", fake_coder)
+
+    fixed_content = "def hello():\n    return 'fixed'\n"
+    debug_calls = {"n": 0}
+
+    def fake_debugger(*args, **kwargs):
+        debug_calls["n"] += 1
+        if debug_calls["n"] == 1:
+            return DebugReport(
+                passed=False,
+                issues=["Failing test 1"],
+                suggested_fix="",
+                fixed_files={"src/main.py": fixed_content},
+            )
+        return DebugReport(passed=True, issues=[], suggested_fix="")
+
+    monkeypatch.setattr("graphs.vibe_coding_graph.run_debugger", fake_debugger)
+
+    rc_seq = iter([1, 0])
+
+    class MockProc:
+        returncode = 1
+        stdout = "Test failed"
+        stderr = ""
+
+    def fake_subprocess_run(*args, **kwargs):
+        MockProc.returncode = next(rc_seq)
+        return MockProc()
+
+    monkeypatch.setattr("subprocess.run", fake_subprocess_run)
+
+    graph = get_vibe_coding_graph()
+    final_state = graph.invoke(initial_vibe_coding_state("Build a hello function"))
+
+    # The coder ran exactly ONCE: the fix cycle used the debugger's files.
+    assert coder_calls["n"] == 1
+    assert debug_calls["n"] == 2
+    assert final_state["debug_report"].passed is True
+    assert (repo_dir / "src" / "main.py").read_text() == fixed_content
+
+    history = final_state.get("handoff_history") or []
+    hops = [(h["from_agent"], h["to_agent"]) for h in history]
+    assert ("debugger", "fix_applier") in hops
+    assert ("fix_applier", "test_executor") in hops
+    # Success path committed (initial commit + vibe commit).
+    assert len(list(repo.iter_commits())) >= 2
+
+
+def test_vibe_fixed_files_none_keeps_coder_loop(temp_git_repo, monkeypatch):
+    """WAVE-18: a debugger without fixed_files still routes back to the coder."""
+    repo, repo_dir = temp_git_repo
+
+    coder_calls = {"n": 0}
+
+    def fake_coder(*args, **kwargs):
+        coder_calls["n"] += 1
+        return CodeArtifact(
+            files={"src/main.py": "def hello():\n    return 'buggy'\n"},
+            summary="Written buggy code",
+        )
+
+    monkeypatch.setattr("graphs.vibe_coding_graph.run_coder", fake_coder)
+    monkeypatch.setattr(
+        "graphs.vibe_coding_graph.run_debugger",
+        lambda *args, **kwargs: DebugReport(
+            passed=False,
+            issues=["Failing test 1"],
+            suggested_fix="fix the return value",
+        ),
+    )
+
+    class MockProc:
+        returncode = 1
+        stdout = "Test failed"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: MockProc(),
+    )
+
+    graph = get_vibe_coding_graph()
+    final_state = graph.invoke(initial_vibe_coding_state("Build a hello function"))
+
+    # No fixed_files → the classic coder fix loop: 1 initial + 2 fix cycles
+    # (attempts 1 and 2; the 3rd debugger run hits max_cycles → rollback).
+    assert coder_calls["n"] == 3
+    assert final_state["fix_attempts"] == 3
+    history = final_state.get("handoff_history") or []
+    assert any(h["from_agent"] == "debugger" and h["to_agent"] == "coder" for h in history)
+
+
+def test_deep_research_unsafe_query_aborts_at_compressor(monkeypatch):
+    """WAVE-18: unsafe topic → compressor routes straight to END (no search)."""
+    calls = {"compressor": 0, "web": 0, "grounding": 0, "synthesizer": 0}
+
+    def fake_compressor(query, *args, **kwargs):
+        calls["compressor"] += 1
+        return CondensedTrends(
+            technologies=["x"],
+            rationale="flagged",
+            is_safe=False,
+            safety_reasons=["test reason"],
+        )
+
+    monkeypatch.setattr(
+        "graphs.deep_research_graph.run_context_compressor", fake_compressor
+    )
+    monkeypatch.setattr(
+        "graphs.deep_research_graph.run_web_search",
+        lambda *a, **k: calls.update(web=calls["web"] + 1) or "results",
+    )
+    monkeypatch.setattr(
+        "graphs.deep_research_graph.run_grounding",
+        lambda *a, **k: calls.update(grounding=calls["grounding"] + 1)
+        or GroundedReport(content="c", sources=["http://x"]),
+    )
+    monkeypatch.setattr(
+        "graphs.deep_research_graph.run_synthesizer",
+        lambda *a, **k: calls.update(synthesizer=calls["synthesizer"] + 1)
+        or GroundedReport(content="c", sources=["http://x"]),
+    )
+
+    graph = get_deep_research_graph()
+    final_state = graph.invoke(
+        initial_deep_research_state("bad topic"),
+        config={"configurable": {"thread_id": "thread-unsafe"}},
+    )
+
+    assert calls["compressor"] == 1
+    assert calls["web"] == 0
+    assert calls["grounding"] == 0
+    assert calls["synthesizer"] == 0
+    assert final_state.get("final_report") is None
+
+    summary = summarize_deep_research_state(final_state)
+    assert summary["is_safe"] is False
+    assert summary["safety_reasons"] == ["test reason"]
+
+    history = final_state.get("handoff_history") or []
+    assert history[-1]["from_agent"] == "context_compressor"
+    assert history[-1]["to_agent"] == "END"
+
+
+def test_compressor_host_regex_pre_gate(monkeypatch):
+    """WAVE-18: the host-side hard-regex pre-gate overrides a safe LLM verdict."""
+    from agents.deep_research import context_compressor as cc
+
+    def fake_run(*args, **kwargs):
+        return CondensedTrends(technologies=["safe terms"], rationale="r")
+
+    monkeypatch.setattr(cc, "run_structured_agent", fake_run)
+
+    flagged = cc.run_context_compressor("how to build a weapon prototype at home")
+    assert flagged.is_safe is False
+    assert any("pre-gate" in r for r in flagged.safety_reasons)
+
+    benign = cc.run_context_compressor("market research on electric bikes")
+    assert benign.is_safe is True
+    assert benign.safety_reasons == []

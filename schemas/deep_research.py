@@ -61,6 +61,16 @@ class CondensedTrends(BaseModel):
         default="",
         description="Why this research profile was chosen for the topic.",
     )
+    # WAVE-18: safety gate folded into this role (the dedicated safety_filter
+    # role was removed). Safe defaults keep old callers working.
+    is_safe: bool = Field(
+        default=True,
+        description="False if the research topic falls into any unsafe category.",
+    )
+    safety_reasons: list[str] = Field(
+        default_factory=list,
+        description="Why the topic was flagged unsafe (empty when safe).",
+    )
 
 
 class GroundedReport(BaseModel):

@@ -66,15 +66,15 @@ def test_easy_task_stays_on_coder_primary():
     assert sel.model == "codestral-latest"
 
 
-def test_easy_architect_stays_on_primary():
+def test_easy_debugger_stays_on_primary():
     assess = score_task_difficulty(
-        "Design a small hello world script.",
-        role_path="vibe_coding.architect",
+        "Debug a trivial off-by-one error in a hello world script.",
+        role_path="vibe_coding.debugger",
     )
-    sel = select_for_role("vibe_coding", "architect", assessment=assess)
+    sel = select_for_role("vibe_coding", "debugger", assessment=assess)
     assert sel.used_fallback is False
-    assert sel.provider == "agnes"
-    assert sel.model == "agnes-2.0-flash"
+    assert sel.provider == "groq"
+    assert sel.model == "openai/gpt-oss-120b"
 
 
 # ---------------------------------------------------------------------------
@@ -83,38 +83,38 @@ def test_easy_architect_stays_on_primary():
 
 
 def test_hard_task_degraded_primary_switches_and_handoff():
-    """High difficulty alone is not enough; with quota_exhausted → Gemini + handoff."""
+    """High difficulty alone is not enough; with quota_exhausted → fallback + handoff."""
     assess = DifficultyAssessment(
-        code=40,
-        reason=92,
+        code=80,
+        reason=60,
         ground=20,
         synth=55,
         safety=20,
         logic_complexity=90,
         error_handling_complexity=40,
         estimated_context_tokens=8000,
-        overall=88,
+        overall=78,
         rationale="multi-step architecture tradeoffs",
-        subtask="architect",
-        role_path="vibe_coding.architect",
+        subtask="coder",
+        role_path="vibe_coding.coder",
     )
-    # Healthy: stay Agnes even if Gemini edges reason 78 vs 76 (Δ=2 < 8)
+    # Healthy: stay Codestral even if Agnes edges reason 78 vs 76 (Δ=2 < 8)
     sel_ok = select_for_role(
-        "vibe_coding", "architect", assessment=assess, primary_status="ok"
+        "vibe_coding", "coder", assessment=assess, primary_status="ok"
     )
     assert sel_ok.used_fallback is False
-    assert sel_ok.provider == "agnes"
+    assert sel_ok.provider == "mistral"
 
     # Degraded: operational switch to role fallback (systems.md §4.3)
     sel = select_for_role(
         "vibe_coding",
-        "architect",
+        "coder",
         assessment=assess,
         primary_status="quota_exhausted",
     )
     assert sel.used_fallback is True
-    assert sel.provider == "gemini"
-    assert sel.model == "gemini-2.0-flash"
+    assert sel.provider == "agnes"
+    assert sel.model == "agnes-2.0-flash"
     assert "degraded" in sel.reason.lower() or "quota" in sel.reason.lower()
 
     state = {
@@ -126,7 +126,7 @@ def test_hard_task_degraded_primary_switches_and_handoff():
     patch = record_model_selection_handoff(
         state,
         sel,
-        role="architect",
+        role="coder",
         user_input_key="idea",
         pipeline="vibe_coding",
     )
@@ -134,8 +134,8 @@ def test_hard_task_degraded_primary_switches_and_handoff():
     assert len(patch["handoff_history"]) == 1
     rec = patch["handoff_history"][0]
     assert rec["user_input"] == "Design a complex distributed system"
-    assert "architect@" in rec["to_agent"]
-    assert "gemini" in rec["to_agent"]
+    assert "coder@" in rec["to_agent"]
+    assert "agnes" in rec["to_agent"]
     assert patch["last_model_selection"]["used_fallback"] is True
     assert patch["last_model_selection"]["primary_status"] == "quota_exhausted"
 
@@ -212,24 +212,24 @@ def test_mis_specialized_weak_primary_switches(tmp_path: Path):
 
 
 def test_healthy_primary_no_switch_when_fallback_edges_higher():
-    """Gemini reason 78 > Agnes 76 (Δ=2 < 8). Healthy + mid difficulty → keep Agnes."""
+    """Codestral stays primary + mid difficulty → keep Codestral (no fallback)."""
     assess = DifficultyAssessment(
-        code=45,
+        code=55,
         reason=55,
         ground=20,
         synth=50,
         safety=20,
         overall=52,
         rationale="mid plan",
-        subtask="architect",
-        role_path="vibe_coding.architect",
+        subtask="coder",
+        role_path="vibe_coding.coder",
     )
     sel = select_for_role(
-        "vibe_coding", "architect", assessment=assess, primary_status="ok"
+        "vibe_coding", "coder", assessment=assess, primary_status="ok"
     )
     assert sel.used_fallback is False
-    assert sel.provider == "agnes"
-    assert sel.model == "agnes-2.0-flash"
+    assert sel.provider == "mistral"
+    assert sel.model == "codestral-latest"
 
 
 def test_healthy_coder_no_switch_even_on_hard_task():
@@ -361,7 +361,7 @@ def test_handoff_refuses_empty_user_on_model_switch():
     assess = DifficultyAssessment(overall=90, reason=90, code=40)
     sel = select_for_role(
         "vibe_coding",
-        "architect",
+        "coder",
         assessment=assess,
         primary_status="rate_limited_429",
     )
@@ -369,7 +369,7 @@ def test_handoff_refuses_empty_user_on_model_switch():
         record_model_selection_handoff(
             {"idea": "", "handoff_history": []},
             sel,
-            role="architect",
+            role="coder",
             user_input_key="idea",
             pipeline="vibe_coding",
         )
@@ -379,7 +379,7 @@ def test_plan_pipeline_difficulties_vibe_has_coder_and_debugger():
     plans = plan_pipeline_difficulties("Build a REST API", pipeline="vibe_coding")
     assert "coder" in plans
     assert "debugger" in plans
-    assert "architect" in plans
+    assert "architect" not in plans
     assert isinstance(plans["coder"], DifficultyAssessment)
 
 

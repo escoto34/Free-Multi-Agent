@@ -184,9 +184,9 @@ def run_structured_agent(
     Example::
 
         return run_structured_agent(
-            "vibe_coding", "architect",
+            "vibe_coding", "coder",
             messages=messages,
-            schema=TechnicalSpec,
+            schema=CodeArtifact,
             router_instance=router_instance,
         )
 

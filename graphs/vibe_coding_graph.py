@@ -20,10 +20,10 @@ from typing import Any, Optional, TypedDict
 import git
 from langgraph.graph import END, StateGraph
 
-from agents.vibe_coding.architect import run_architect
 from agents.vibe_coding.coder import run_coder
 from agents.vibe_coding.debugger import run_debugger
 from agents.vibe_coding.preserve import (
+    list_repo_tree,
     missing_preserved_symbols,
     read_existing_sources,
 )
@@ -179,60 +179,6 @@ def perform_git_rollback(repo: git.Repo, sha: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def architect_node(state: VibeCodingState) -> dict[str, Any]:
-    """Runs the Architect agent to design the TechnicalSpec."""
-    logger.info("--- ARCHITECT NODE ---")
-    try:
-        # Protect any pre-existing dirty work, then snapshot HEAD as the
-        # rollback target. Order matters: stash first so the checkpoint SHA
-        # is a clean tree; otherwise reset --hard would wipe user WIP.
-        repo = get_git_repo()
-        user_wip_stashed = False
-        sha = None
-        if repo:
-            user_wip_stashed = stash_preexisting_work(repo)
-            sha = repo.head.commit.hexsha
-
-        # Planner-side difficulty scores for downstream roles (coder/debugger)
-        # before control is handed off — structured 0–100, not free text.
-        diff_plan = plan_pipeline_difficulties(
-            state["idea"], pipeline="vibe_coding"
-        )
-        difficulty_by_role = assessments_to_state_dict(diff_plan)
-
-        spec = run_architect(state["idea"])
-        return transfer_control(
-            state,
-            from_agent="architect",
-            to_agent="coder",
-            reason="TechnicalSpec ready for implementation",
-            pipeline="vibe_coding",
-            user_input_key="idea",
-            updates={
-                "spec": spec,
-                "git_checkpoint_sha": sha,
-                "user_wip_stashed": user_wip_stashed,
-                "error": None,
-                "difficulty_by_role": difficulty_by_role,
-            },
-            require_keys=["spec"],
-        )
-    except HandoffError:
-        raise
-    except Exception as exc:
-        logger.error("Architect node failed: %s", exc)
-        return transfer_control(
-            state,
-            from_agent="architect",
-            to_agent="git_rollback",
-            reason="Architect failed; abort code loop",
-            pipeline="vibe_coding",
-            user_input_key="idea",
-            updates={"error": f"Architect error: {exc}"},
-            note=str(exc),
-        )
-
-
 class UnsafeFilePathError(Exception):
     """Raised when the Coder agent tries to write outside the repo root or
     to a path that isn't a plain relative file path."""
@@ -286,10 +232,18 @@ def _write_artifact_files(artifact: CodeArtifact, repo_root: Path) -> list[str]:
     """
     if not artifact.files:
         raise ValueError("Coder returned an empty file set — nothing to write.")
+    return _write_files(artifact.files, repo_root)
 
+
+def _write_files(files: dict[str, str], repo_root: Path) -> list[str]:
+    """Atomically write a validated {path: content} map under repo_root.
+
+    Shared by the coder (initial artifact) and the fix_applier (debugger's
+    corrected files). Paths are validated before any write.
+    """
     # Pass 1: validate every path up front (fail fast, no partial writes).
     resolved_targets: list[tuple[str, Path, str]] = []
-    for file_path, code in artifact.files.items():
+    for file_path, code in files.items():
         if not isinstance(code, str):
             raise UnsafeFilePathError(
                 f"File content for {file_path!r} is not a string (got {type(code).__name__})."
@@ -351,77 +305,85 @@ def _apply_preservation_warnings(
 
 
 def coder_node(state: VibeCodingState) -> dict[str, Any]:
-    """Runs the Coder agent, merging into existing sources when present."""
-    logger.info("--- CODER NODE ---")
+    """Runs the merged coordinator-implementer (plan + write in one call).
+
+    WAVE-18: the architect role is folded into the coder. Because the file
+    list is only known after the LLM call, existing-source files are read
+    *after* the call (for paths the model named) and fed to the preservation
+    warning check. Git stash + checkpoint move here from the old architect
+    node; difficulty scores for coder/debugger are planned here too.
+    """
+    logger.info("--- CODER NODE (coordinator-implementer) ---")
     try:
-        spec = state["spec"]
-        if not spec:
-            raise ValueError("No technical specification found in state.")
+        # Protect pre-existing dirty work, snapshot HEAD as rollback target.
+        # Only on the FIRST coder call — later fix cycles must not stash the
+        # agent's own generated files (the rollback would restore them as WIP).
+        repo = get_git_repo()
+        user_wip_stashed = state.get("user_wip_stashed") or False
+        sha = state.get("git_checkpoint_sha")
+        if repo and not state.get("git_checkpoint_sha"):
+            user_wip_stashed = stash_preexisting_work(repo)
+            sha = repo.head.commit.hexsha
+
+        # Planner-side difficulty scores for coder/debugger (structured 0-100).
+        diff_plan = plan_pipeline_difficulties(
+            state["idea"], pipeline="vibe_coding"
+        )
+        difficulty_by_role = assessments_to_state_dict(diff_plan)
+
+        # Re-apply a previously suggested_fix (from a debugger run that did not
+        # provide fixed_files) onto the idea so the merged prompt carries it.
+        idea = state.get("idea") or ""
+        dr = state["debug_report"]
+        if dr and dr.suggested_fix and not (dr.fixed_files or {}):
+            idea = (
+                f"{idea}\n\nDEBUGGER ALERT: A previous implementation failed. "
+                f"Please apply this fix while STILL preserving unrelated "
+                f"existing logic: {dr.suggested_fix}"
+            )
 
         repo_root = _resolve_repo_root()
-        # Load current disk contents for every path the Architect wants to touch
-        # so the Coder can merge instead of rewriting from a blank slate.
-        existing = read_existing_sources(repo_root, list(spec.files_to_create or []))
-        if existing:
-            logger.info(
-                "Preservation context: %d existing file(s) loaded for merge",
-                len(existing),
-            )
-
-        work_spec = spec
-        dr = state["debug_report"]
-        if dr and dr.suggested_fix:
-            work_spec = TechnicalSpec(
-                architecture=(
-                    f"{spec.architecture}\n\n"
-                    f"DEBUGGER ALERT: A previous implementation failed. "
-                    f"Please apply this fix while STILL preserving unrelated "
-                    f"existing logic: {dr.suggested_fix}"
-                ),
-                test_cases=spec.test_cases,
-                files_to_create=spec.files_to_create,
-            )
+        repo_tree = list_repo_tree(repo_root, max_paths=200)
 
         # Difficulty-based primary vs fallback (must handoff via transfer_control)
         assess = assessment_from_state(
-            state.get("difficulty_by_role"),
+            difficulty_by_role,
             role_short="coder",
             task_text=state.get("idea") or "",
             role_path="vibe_coding.coder",
         )
         selection = select_for_role("vibe_coding", "coder", assessment=assess)
         state_for_call: dict[str, Any] = dict(state)
-        if selection.used_fallback or selection.forced_expiry:
-            state_for_call = {
-                **state_for_call,
-                **record_model_selection_handoff(
-                    state_for_call,
-                    selection,
-                    role="coder",
-                    user_input_key="idea",
-                    pipeline="vibe_coding",
-                ),
-            }
-        else:
-            # Still audit which model the selector chose
-            state_for_call = {
-                **state_for_call,
-                **record_model_selection_handoff(
-                    state_for_call,
-                    selection,
-                    role="coder",
-                    user_input_key="idea",
-                    pipeline="vibe_coding",
-                ),
-            }
+        state_for_call = {
+            **state_for_call,
+            **record_model_selection_handoff(
+                state_for_call,
+                selection,
+                role="coder",
+                user_input_key="idea",
+                pipeline="vibe_coding",
+            ),
+        }
 
         sel_out: dict[str, Any] = {}
         artifact = run_coder(
-            work_spec,
-            existing_files=existing,
+            idea,
+            repo_tree=repo_tree,
             assessment=assess,
             selection_out=sel_out,
         )
+
+        # Post-call preservation check: read existing content for the paths the
+        # model decided to touch, BEFORE writing, so dropped-symbol warnings are
+        # relative to the real pre-write file.
+        existing = read_existing_sources(
+            repo_root, list(artifact.files_to_create or []) or list(artifact.files)
+        )
+        if existing:
+            logger.info(
+                "Preservation context: %d existing file(s) will merge",
+                len(existing),
+            )
         artifact = _apply_preservation_warnings(existing, artifact)
 
         written = _write_artifact_files(artifact, repo_root)
@@ -436,10 +398,13 @@ def coder_node(state: VibeCodingState) -> dict[str, Any]:
             user_input_key="idea",
             updates={
                 "artifact": artifact,
+                "git_checkpoint_sha": sha,
+                "user_wip_stashed": user_wip_stashed,
                 "error": None,
+                "difficulty_by_role": difficulty_by_role,
                 "last_model_selection": selection.as_dict(),
             },
-            require_keys=["spec", "artifact"],
+            require_keys=["artifact"],
             note=f"wrote {len(written)} file(s); model={selection.provider}/{selection.model}",
         )
     except HandoffError:
@@ -467,27 +432,31 @@ def test_executor_node(state: VibeCodingState) -> dict[str, Any]:
     - fail fast on Next/Jest stacks (runtime has no npm test integration)
     """
     logger.info("--- TEST EXECUTOR NODE ---")
-    spec = state["spec"]
-    if not spec:
+    artifact = state.get("artifact")
+    if not artifact:
         return transfer_control(
             state,
             from_agent="test_executor",
             to_agent="debugger",
-            reason="No TechnicalSpec available; debugger will see empty context",
+            reason="No artifact available; debugger will see empty context",
             pipeline="vibe_coding",
             user_input_key="idea",
             updates={
-                "test_logs": "No spec to run tests against.",
-                "error": "No spec",
+                "test_logs": "No artifact to run tests against.",
+                "error": "No artifact",
             },
         )
 
     repo_root = _resolve_repo_root()
-    artifact = state.get("artifact")
     idea = state.get("idea") or ""
     try:
         logs = execute_vibe_tests(
-            spec=spec,
+            # WAVE-18: legacy TechnicalSpec derived from the artifact fields.
+            spec=TechnicalSpec(
+                architecture=(artifact.architecture or ""),
+                test_cases=list(artifact.test_cases or []),
+                files_to_create=list(artifact.files_to_create or []),
+            ),
             artifact=artifact,
             idea=idea,
             repo_root=repo_root,
@@ -502,7 +471,6 @@ def test_executor_node(state: VibeCodingState) -> dict[str, Any]:
             pipeline="vibe_coding",
             user_input_key="idea",
             updates={"test_logs": logs, "error": None},
-            require_keys=["spec"],
         )
     except Exception as exc:
         logger.warning("Test executor error: %s", exc)
@@ -533,6 +501,9 @@ def _debugger_next_agent(
         return "git_rollback"
     if not has_artifact:
         return "git_rollback"
+    # WAVE-18: the debugger may ship the corrected files itself — no coder call.
+    if (dr.fixed_files or {}):
+        return "fix_applier"
     return "coder"
 
 
@@ -604,6 +575,8 @@ def debugger_node(state: VibeCodingState) -> dict[str, Any]:
         )
         if dr.passed:
             reason = "Tests passed; transfer to git_commit"
+        elif next_agent == "fix_applier":
+            reason = f"Tests failed; debugger corrected files directly ({attempts}/{max_cycles})"
         elif next_agent == "coder":
             reason = f"Tests failed; fix cycle {attempts}/{max_cycles} → coder"
         else:
@@ -649,6 +622,64 @@ def debugger_node(state: VibeCodingState) -> dict[str, Any]:
                 "fix_attempts": attempts,
                 "error": f"Debugger error: {exc}",
             },
+            note=str(exc),
+        )
+
+
+def fix_applier_node(state: VibeCodingState) -> dict[str, Any]:
+    """Apply the Debugger's corrected files when ``fixed_files`` was provided.
+
+    WAVE-18: saves the coder re-call in the fix loop — the debugger may ship
+    the full corrected source for the files it is confident about. Paths are
+    validated exactly like coder output; the artifact is updated so the next
+    debugger/test iteration sees the fixes.
+    """
+    logger.info("--- FIX APPLIER NODE ---")
+    dr = state.get("debug_report")
+    artifact = state.get("artifact")
+    if not dr or not (dr.fixed_files or {}):
+        return transfer_control(
+            state,
+            from_agent="fix_applier",
+            to_agent="git_rollback",
+            reason="No fixable files in debug report; end safely",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={"error": "Debugger provided no fixed_files to apply."},
+        )
+
+    try:
+        repo_root = _resolve_repo_root()
+        written = _write_files(dr.fixed_files, repo_root)
+        merged_files: dict[str, str] = dict(artifact.files or {})
+        merged_files.update(dr.fixed_files)
+        updated_artifact = artifact.model_copy(update={"files": merged_files})
+        return transfer_control(
+            state,
+            from_agent="fix_applier",
+            to_agent="test_executor",
+            reason=f"Applied debugger fix to {len(written)} file(s); re-run tests",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={
+                "artifact": updated_artifact,
+                "error": None,
+            },
+            require_keys=["artifact"],
+            note=f"fixed {len(written)} file(s) from debugger",
+        )
+    except HandoffError:
+        raise
+    except Exception as exc:
+        logger.error("Fix applier failed: %s", exc)
+        return transfer_control(
+            state,
+            from_agent="fix_applier",
+            to_agent="git_rollback",
+            reason="Fix application failed; abort code loop",
+            pipeline="vibe_coding",
+            user_input_key="idea",
+            updates={"error": f"Fix applier error: {exc}"},
             note=str(exc),
         )
 
@@ -722,7 +753,7 @@ def git_rollback_node(state: VibeCodingState) -> dict[str, Any]:
     """Exhausted retries: revert files to the original clean Git state.
 
     After ``reset --hard`` + ``clean -fd``, re-apply any pre-run user WIP that
-    was stashed in ``architect_node`` so uncommitted local work is not lost.
+    was stashed in ``coder_node`` so uncommitted local work is not lost.
     A copy of the failed artifact is kept under ``data/vibe_last_failed/``.
     """
     logger.info("--- GIT ROLLBACK NODE (EXHAUSTED RETRIES) ---")
@@ -784,13 +815,23 @@ def debugger_routing(state: VibeCodingState) -> str:
         )
         return "git_rollback"
 
-    # No artifact / fatal state → do not re-enter coder forever.
+    # No artifact / fatal state → do not re-enter the code loop forever.
     if not state.get("artifact"):
         logger.warning("❌ No artifact after debugger — rolling back.")
         return "git_rollback"
 
+    # WAVE-18: debugger can fix directly via fixed_files (cheaper loop).
+    if dr and (dr.fixed_files or {}):
+        logger.info(
+            "⤷ Debugger provided corrected files — applying without a coder call. "
+            "attempt %d/%d",
+            attempts,
+            max_cycles,
+        )
+        return "fix_applier"
+
     logger.info(
-        "⤷ Refactor cycle required: returning to Coder node. attempt %d/%d",
+        "⤷ Fix cycle required: returning to Coder node. attempt %d/%d",
         attempts,
         max_cycles,
     )
@@ -855,7 +896,7 @@ def invoke_vibe_coding_pipeline(
 
     compiled = graph if graph is not None else get_vibe_coding_graph()
     try:
-        # Bound graph steps: architect + N×(coder+test+debugger) + git ≈ 2+3N+1.
+        # Bound graph steps (WAVE-18): coder + N×(test+debugger[+fix_applier]) + git.
         # Keep a small buffer; never leave the default open-ended if routing breaks.
         max_c = max(1, int(get_max_fix_cycles()))
         recursion_limit = max(25, 8 + max_c * 6)
@@ -894,13 +935,6 @@ def invoke_vibe_coding_pipeline(
 # ---------------------------------------------------------------------------
 
 
-def _after_architect(state: VibeCodingState) -> str:
-    """Skip the code loop if Architect failed (no infinite empty retries)."""
-    if state.get("error") or not state.get("spec"):
-        return "git_rollback"
-    return "coder"
-
-
 def _after_coder(state: VibeCodingState) -> str:
     """Skip tests/debug if Coder produced nothing."""
     if state.get("error") or not state.get("artifact"):
@@ -913,21 +947,16 @@ def get_vibe_coding_graph() -> StateGraph:
     workflow = StateGraph(VibeCodingState)
 
     # Add Nodes
-    workflow.add_node("architect", architect_node)
     workflow.add_node("coder", coder_node)
     workflow.add_node("test_executor", test_executor_node)
     workflow.add_node("debugger", debugger_node)
+    workflow.add_node("fix_applier", fix_applier_node)
     workflow.add_node("git_commit", git_commit_node)
     workflow.add_node("git_rollback", git_rollback_node)
 
-    # Define Flow
-    workflow.set_entry_point("architect")
+    # Define Flow — WAVE-18: the merged coordinator-implementer is the entry.
+    workflow.set_entry_point("coder")
 
-    workflow.add_conditional_edges(
-        "architect",
-        _after_architect,
-        {"coder": "coder", "git_rollback": "git_rollback"},
-    )
     workflow.add_conditional_edges(
         "coder",
         _after_coder,
@@ -942,9 +971,13 @@ def get_vibe_coding_graph() -> StateGraph:
         {
             "git_commit": "git_commit",
             "git_rollback": "git_rollback",
+            "fix_applier": "fix_applier",
             "coder": "coder",
         },
     )
+
+    # Debugger-shipped fixes re-enter the test loop without a coder call.
+    workflow.add_edge("fix_applier", "test_executor")
 
     workflow.add_edge("git_commit", END)
     workflow.add_edge("git_rollback", END)

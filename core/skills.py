@@ -469,7 +469,7 @@ def build_vibe_skills_block(
     per_skill_max: int = DEFAULT_VIBE_PER_SKILL_MAX,
     total_max: int = DEFAULT_VIBE_TOTAL_MAX,
 ) -> str:
-    """Skills inject for System A architect/coder/debugger (task-matched)."""
+    """Skills inject for System A coder/debugger (task-matched)."""
     return build_skills_system_block(
         registry_path=registry_path,
         per_skill_max=per_skill_max,

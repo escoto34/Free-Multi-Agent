@@ -180,7 +180,7 @@ def format_grounded_constraints_block(
     *,
     max_chars: int = 6000,
 ) -> str:
-    """Build a MUST-FOLLOW block for vibe architect/coder after research."""
+    """Build a MUST-FOLLOW block for the vibe coder after research."""
     facts = extract_research_facts(report_text, sources)
     lines: list[str] = [
         "=== GROUNDED FACTS FROM PRIOR RESEARCH (MUST FOLLOW IN CODE) ===",

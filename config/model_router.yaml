@@ -131,14 +131,8 @@ deprecated:
 - qwen/qwen3-32b
 - llama-4-scout-17b-16e-instruct
 vibe_coding:
-  # Architect: agent/planning + large context on free Agnes
-  architect:
-    provider: agnes
-    model: agnes-2.0-flash
-    fallback:
-      provider: gemini
-      model: gemini-2.0-flash
-  # Coder: Codestral specialist; Agnes free coding fallback
+  # Coder (WAVE-18: the former architect planning role is folded into this
+  # agent — planning rules are part of the coder's system prompt).
   coder:
     provider: mistral
     model: codestral-latest
@@ -154,13 +148,8 @@ vibe_coding:
       model: agnes-2.0-flash
   max_fix_cycles: 3
 deep_research:
-  safety_filter:
-    provider: groq
-    model: openai/gpt-oss-safeguard-20b
-    fallback:
-      provider: gemini
-      model: gemini-2.0-flash
-  # Compressor: free Agnes volume (replaces OpenRouter hy3)
+  # Compressor (WAVE-18: safety gate + planning folded in from the removed
+  # safety_filter role). Free Agnes volume (replaces OpenRouter hy3).
   context_compressor:
     provider: agnes
     model: agnes-2.0-flash

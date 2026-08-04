@@ -1,4 +1,9 @@
-"""Tests for existing-source preservation helpers and coder merge wiring."""
+"""Tests for existing-source preservation helpers and coder merge wiring.
+
+WAVE-18: the architect role was folded into the coder — the coder receives the
+repo file *tree* (paths only) instead of pre-read contents, and the host reads
+the touched files *after* the call to fire preservation warnings.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +14,8 @@ from agents.vibe_coding.preserve import (
     missing_preserved_symbols,
     read_existing_sources,
 )
-from agents.vibe_coding.coder import _format_existing_block, run_coder
-from schemas.vibe_coding import CodeArtifact, TechnicalSpec
+from agents.vibe_coding.coder import _format_tree_block, run_coder
+from schemas.vibe_coding import CodeArtifact
 
 
 def test_read_existing_sources_loads_and_skips_missing(tmp_path: Path):
@@ -37,15 +42,16 @@ def test_extract_and_missing_symbols():
     assert missing_preserved_symbols(old, old) == []
 
 
-def test_format_existing_block_includes_files():
-    block = _format_existing_block({"a.py": "def x():\n    pass\n"})
-    assert "### FILE: a.py" in block
-    assert "def x()" in block
-    empty = _format_existing_block({})
-    assert "none" in empty.lower()
+def test_format_tree_block_includes_paths():
+    block = _format_tree_block("README.md\nsrc/app.py\n")
+    assert "### REPO FILE TREE" not in block
+    assert "src/app.py" in block
+    assert "preserve its logic" in block
+    empty = _format_tree_block("")
+    assert "unavailable" in empty
 
 
-def test_run_coder_passes_existing_into_prompt(monkeypatch):
+def test_run_coder_passes_repo_tree_into_prompt(monkeypatch):
     captured: dict = {}
 
     def fake_run(*args, **kwargs):
@@ -57,28 +63,22 @@ def test_run_coder_passes_existing_into_prompt(monkeypatch):
 
     monkeypatch.setattr("agents.vibe_coding.coder.run_structured_agent", fake_run)
 
-    spec = TechnicalSpec(
-        architecture="add y next to x",
-        test_cases=["y works"],
-        files_to_create=["a.py"],
-    )
     out = run_coder(
-        spec,
-        existing_files={"a.py": "def x():\n    return 0\n"},
+        "add y next to x",
+        repo_tree="a.py\n",
     )
     assert out.summary == "merged"
     user = captured["messages"][1]["content"]
-    assert "EXISTING FILE CONTENTS" in user
-    assert "def x()" in user
-    assert "PRESERVE" in captured["messages"][0]["content"] or "preserve" in captured[
-        "messages"
-    ][0]["content"].lower()
+    assert "REPO FILE TREE" in user
+    assert "a.py" in user
+    system = captured["messages"][0]["content"]
+    assert "preserve" in system.lower()
 
 
-def test_coder_node_loads_disk_and_calls_run_coder(tmp_path: Path, monkeypatch):
-    """Integration-ish: coder_node reads disk before run_coder."""
+def test_coder_node_loads_disk_after_call_and_warns(tmp_path: Path, monkeypatch):
+    """Integration-ish: coder_node passes the tree, then reads disk AFTER the
+    call and fires the preservation warning when a symbol would be dropped."""
     from graphs.vibe_coding_graph import coder_node
-    from schemas.vibe_coding import TechnicalSpec, CodeArtifact
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
@@ -90,16 +90,15 @@ def test_coder_node_loads_disk_and_calls_run_coder(tmp_path: Path, monkeypatch):
 
     seen: dict = {}
 
-    def fake_coder(spec, router_instance=None, existing_files=None, **kwargs):
-        seen["existing"] = existing_files
+    def fake_coder(task_text, repo_tree="", **kwargs):
+        seen["tree"] = repo_tree
         return CodeArtifact(
             files={
                 "util.py": (
-                    "def useful_helper():\n    return 'keep'\n\n"
                     "def main():\n    return 2\n"
                 )
             },
-            summary="bumped main, kept helper",
+            summary="bumped main",
         )
 
     monkeypatch.setattr("graphs.vibe_coding_graph.run_coder", fake_coder)
@@ -107,14 +106,11 @@ def test_coder_node_loads_disk_and_calls_run_coder(tmp_path: Path, monkeypatch):
         "graphs.vibe_coding_graph._resolve_repo_root",
         lambda: repo_dir,
     )
+    monkeypatch.setattr("graphs.vibe_coding_graph.get_git_repo", lambda: None)
 
     state = {
         "idea": "make main return 2",
-        "spec": TechnicalSpec(
-            architecture="change main only",
-            test_cases=["main is 2"],
-            files_to_create=["util.py"],
-        ),
+        "spec": None,
         "artifact": None,
         "test_logs": None,
         "debug_report": None,
@@ -128,6 +124,11 @@ def test_coder_node_loads_disk_and_calls_run_coder(tmp_path: Path, monkeypatch):
     }
     out = coder_node(state)
     assert out.get("error") is None
-    assert seen["existing"] and "util.py" in seen["existing"]
-    assert "useful_helper" in seen["existing"]["util.py"]
-    assert (repo_dir / "util.py").read_text(encoding="utf-8").count("useful_helper") == 1
+    assert "util.py" in seen["tree"], "repo tree must reach run_coder"
+    # WAVE-18 preservation warning fires on the post-call read: useful_helper
+    # was dropped and must be called out in the summary.
+    summary = out["artifact"].summary
+    assert "useful_helper" in summary
+    # The artifact content dropped the helper (the warning only annotates the
+    # summary) — the file on disk reflects the model's content.
+    assert "main" in (repo_dir / "util.py").read_text(encoding="utf-8")

@@ -34,9 +34,9 @@ Keys live only in this install’s `.env` (never print full values).
 
 | Env | Used for (free-durable defaults) |
 |-----|----------------------------------|
-| `AGNES_API_KEY` | Chat, planner, architect, compressor (+ many fallbacks) |
-| `MISTRAL_API_KEY` | Coder (`codestral-latest`); grounding fallback |
-| `GROQ_API_KEY` | Debugger, safety, web search, synthesizer |
+| `AGNES_API_KEY` | Chat, planner, coder (fallback), compressor (+ many fallbacks) |
+| `MISTRAL_API_KEY` | Coder primary; grounding fallback |
+| `GROQ_API_KEY` | Debugger, web search, synthesizer |
 | `COHERE_API_KEY` | Research **grounding only** (scarce trial bucket) |
 | `GEMINI_API_KEY` | Role / cascade fallbacks |
 | `CEREBRAS_API_KEY` | Cascade leaf (~5 RPM) — optional |
@@ -148,13 +148,13 @@ multiagent pipeline run [--planner-only] [--provider P] [--model M] [--gpt-resea
 
 ### Vibe coding
 
-Implements code in the **current Git repo**: Architect → Coder → scoped tests → Debugger (retry cycles from config). On success it can commit; on exhaustion it rolls back (after stashing any pre-existing dirty work).
+Implements code in the **current Git repo** (WAVE-18: the former architect stage is merged into the coder — one plan+implement call): Coder → scoped tests → Debugger (retry cycles from config). The debugger can fix files directly (`fixed_files`, applied locally — no extra coder call) or fall back to a coder fix cycle. On success it can commit; on exhaustion it rolls back (after stashing any pre-existing dirty work).
 
 For marketing / brand landings after research, the host prefers **static HTML/CSS/JS** + pytest content checks (not Next/Jest unless you ask). Research is chained as **grounded facts** so contact/brand details are not invented. Details: [`docs/vibe_web_failures.md`](docs/vibe_web_failures.md).
 
 ### Deep research
 
-Safety gate → context compress (with research typology) → live web search → grounding → synthesis. Checkpoints live under `data/` (gitignored). User-named official domains are fetched as primary sources when present in the task.
+Safety gate (WAVE-18: folded into the compressor) → context compression (with research typology) → live web search → grounding → synthesis. Checkpoints live under `data/` (gitignored). User-named official domains are fetched as primary sources when present in the task.
 
 ### Planner
 
@@ -170,11 +170,9 @@ Live config: `config/model_router.yaml` · factory reset: `multiagent config res
 
 | Role | Primary | Fallback |
 |------|---------|----------|
-| vibe architect | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
-| vibe coder | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` |
+| vibe coder *(merged plan+implement)* | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` |
 | vibe debugger | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
-| research safety | `groq` / `openai/gpt-oss-safeguard-20b` | `gemini` / `gemini-2.0-flash` |
-| research compressor | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
+| research compressor *(incl. safety gate)* | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
 | research web_search | `groq` / `groq/compound-mini` | — (hard fail if no live search) |
 | research grounding | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` |
 | research synthesizer | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
@@ -320,7 +318,7 @@ Design goals (free-durable profile):
 3. **Spread Groq load across model IDs** (independent ~1 000 RPD counters).
 4. **Reserve live web search** (`groq/compound-mini` ~250 RPD) for research only.
 5. Prefer **durable free** models over expiring promos; OpenRouter `:free` stays catalog-only.
-6. **Specialize**: Codestral → code; Safeguard → safety; Command A+ → RAG; 120b → debug/synth.
+6. **Specialize**: Codestral → code; Command A+ → RAG; 120b → debug/synth. (WAVE-18: the code planner and the research safety gate are folded into the coder and compressor prompts respectively — fewer calls, same checks.)
 
 **Runtime primary vs fallback** (`model_selector` + `model_benchmarks.yaml`):
 
@@ -344,8 +342,8 @@ Public free/trial **reference** values (~mid-2026). Providers change tiers witho
 
 | Provider / env key | Free-tier reference | Soft-cap (YAML) | Stack use |
 |--------------------|---------------------|-----------------|-----------|
-| **Groq** `GROQ_API_KEY` | ~**30 RPM**; most models ~**1 000 RPD each**; `compound-mini` ~**250 RPD** + live search | **800** RPD/model | Debugger, safety, web_search, synthesizer |
-| **Agnes** `AGNES_API_KEY` | ~**20 RPM** fair-use; large context; $0/M promo text | **2 000** calls/day (local) | Chat, planner, architect, compressor, fallbacks |
+| **Groq** `GROQ_API_KEY` | ~**30 RPM**; most models ~**1 000 RPD each**; `compound-mini` ~**250 RPD** + live search | **800** RPD/model | Debugger, web_search, synthesizer |
+| **Agnes** `AGNES_API_KEY` | ~**20 RPM** fair-use; large context; $0/M promo text | **2 000** calls/day (local) | Chat, planner, coder fallback, compressor, fallbacks |
 | **Mistral** `MISTRAL_API_KEY` | Experiment free (rate-limited; ~1 RPS class community) | **200**/day | Coder (Codestral); grounding fallback |
 | **Cohere** `COHERE_API_KEY` | Trial ~**1 000/month** (~25–30/day), ~20 RPM; **non-commercial** trial ToS | **28**/day | **Grounding only** |
 | **Gemini** `GEMINI_API_KEY` | Flash ~**10–15 RPM**; RPD varies (~250–1 500 class) | **400**/day shared soft | Role / cascade fallbacks |
@@ -373,22 +371,23 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026 in `co
 |-------|-----:|-------:|-------:|------:|-------:|---------|
 | `mistral` / `codestral-latest` | **88** | 62 | 40 | 55 | 35 | **Coder primary** — best free coding specialist |
 | `groq` / `openai/gpt-oss-120b` | **82** | **90** | 48 | **85** | 45 | **Debugger / synthesizer primary** — hard reason + long reports |
-| `agnes` / `agnes-2.0-flash` | **78** | **76** | 42 | **80** | 40 | **Chat, planner, architect, compressor** — high-volume free agents |
+| `agnes` / `agnes-2.0-flash` | **78** | **76** | 42 | **80** | 40 | **Chat, planner, coder fallback, compressor** — high-volume free agents |
 | `gemini` / `gemini-2.0-flash` | 70 | **78** | 55 | 75 | 50 | Structured JSON / plan **fallback** |
 | `cohere` / `command-a-plus-05-2026` | 58 | 72 | **93** | 78 | 48 | **Grounding only** — RAG / citations (scarce trial) |
 | `mistral` / `mistral-small-latest` | 58 | 62 | 55 | 65 | 40 | Grounding **fallback** |
 | `groq` / `groq/compound-mini` | 50 | 58 | **88** | 52 | 30 | **Web search only** — only free live-search path |
-| `groq` / `openai/gpt-oss-safeguard-20b` | 35 | 55 | 30 | 40 | **92** | **Safety filter only** — not a general coder |
 | `openrouter` / `tencent/hy3:free` ⚠ | 55 | 60 | 38 | 58 | 35 | Catalog / **expired promo (ended 2026-07-21)**; not durable free — auto-skip when expired |
+
+(WAVE-18: the former `architect` (Agnes primary) and `safety_filter` (Safeguard-20b) rows are gone — planning is part of the coder call and the safety gate part of the compressor call. Safeguard-20b remains catalog-only.)
 
 | Capability | Prefer | Avoid as primary |
 |------------|--------|------------------|
-| Coding | Codestral; Agnes; GPT-OSS-120b | Safeguard; compound-mini alone |
+| Coding | Codestral; Agnes; GPT-OSS-120b | compound-mini alone |
 | Plan / reason | GPT-OSS-120b; Gemini; Agnes | Expired promos |
 | Live search | **compound-mini only** | Models that invent “search” |
 | Citations / RAG | Command A+ | General chat without corpus |
 | Long report write-up | GPT-OSS-120b; Agnes | Mini search system as sole writer |
-| Safety gate | Safeguard-20b | Random general chat |
+| Safety gate | Compressor LLM gate + host regex (WAVE-18) | Random general chat |
 
 When free-tier catalogs or limits change, update **`systems.md`**, `config/model_benchmarks.yaml`, and soft caps in the router YAML together.
 

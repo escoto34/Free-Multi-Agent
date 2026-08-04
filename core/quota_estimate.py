@@ -29,16 +29,15 @@ _BENCHMARKS_PATH = Path(__file__).resolve().parent.parent / "config" / "model_be
 
 # Roles that invoke an LLM (exclude pure local nodes: test_executor, git_*).
 # Multiplicity is "calls per complete successful-ish run" for *typical* path.
-# System A: architect → coder → debugger once (tests pass on first try).
-# System B: each research node once.
+# System A (WAVE-18): coder (merged with the former architect) → debugger once
+# (tests pass on first try); fix_applier is a local node (no LLM call).
+# System B (WAVE-18): context_compressor includes the safety gate; 4 roles.
 _DEFAULT_SYSTEM_SPECS: dict[str, list[tuple[tuple[str, ...], int]]] = {
     "vibe_coding": [
-        (("vibe_coding", "architect"), 1),
         (("vibe_coding", "coder"), 1),
         (("vibe_coding", "debugger"), 1),
     ],
     "deep_research": [
-        (("deep_research", "safety_filter"), 1),
         (("deep_research", "context_compressor"), 1),
         (("deep_research", "web_search"), 1),
         (("deep_research", "grounding"), 1),

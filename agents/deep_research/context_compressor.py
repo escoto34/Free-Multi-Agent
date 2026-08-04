@@ -19,12 +19,27 @@ from agents.deep_research.research_types import (
     profile_from_mapping,
 )
 from core.agent_runtime import run_structured_agent
+from core.difficulty_scorer import SAFETY_HARD_RE
 from schemas.deep_research import CondensedTrends
 
 SYSTEM_PROMPT = """You are an expert research-design and context compression agent.
 From the user's topic you must:
+0) Run the SAFETY GATE (see below).
 1) Produce focused search-engine phrases.
 2) Classify the research using a standard typology (not industry-specific).
+
+## SAFETY GATE (do this FIRST)
+Assess the user research query. Flag it as unsafe if it clearly falls into one
+of these categories:
+- Hate speech, harassment, or discrimination against protected groups
+- Personal information extraction (PII, doxxing)
+- Instructions for weapons, drugs, or illegal activities
+- Sexual content involving minors or non-consensual themes
+- Malicious code generation or hacking instructions
+- Propaganda or disinformation campaigns
+Normal factual/business research is safe. Only flag the categories above.
+If unsafe, set "is_safe": false and list your reasons in "safety_reasons".
+Otherwise set "is_safe": true and leave "safety_reasons" empty.
 
 ## Research typology (choose the best fit)
 
@@ -64,7 +79,9 @@ You MUST output your response strictly as a JSON object matching this schema:
   "depth": "exploratory|descriptive|explanatory",
   "data_approach": "quantitative|qualitative|mixed",
   "design": "experimental|non_experimental",
-  "profile_rationale": "Why this research profile fits the user topic."
+  "profile_rationale": "Why this research profile fits the user topic.",
+  "is_safe": true,
+  "safety_reasons": []
 }
 Only return raw JSON. Do not wrap in markdown code blocks.
 """
@@ -138,4 +155,14 @@ def run_context_compressor(
     trends.profile_rationale = (
         (final.rationale or heuristic.rationale or trends.profile_rationale or "").strip()
     )
+
+    # WAVE-18 safety gate (the dedicated safety_filter role was removed):
+    # the LLM classification is the primary gate; the host-side regex is a
+    # conservative hard pre-gate — on a hard signal the topic is unsafe even
+    # if the model said safe.
+    if trends.is_safe and SAFETY_HARD_RE.search(query):
+        reasons = list(trends.safety_reasons or [])
+        reasons.append("Host safety pre-gate flagged the topic (hard keyword).")
+        trends.is_safe = False
+        trends.safety_reasons = reasons
     return trends

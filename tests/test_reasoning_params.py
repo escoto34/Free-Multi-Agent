@@ -32,15 +32,15 @@ def test_easy_task_low_effort_on_gpt_oss():
     effort = difficulty_to_effort(assess, role_path="vibe_coding.debugger")
     assert effort == "medium"
 
-    # architect has min low → stays low for easy
-    effort_a = difficulty_to_effort(assess, role_path="vibe_coding.architect")
+    # coder has min low → stays low for easy
+    effort_a = difficulty_to_effort(assess, role_path="vibe_coding.coder")
     assert effort_a == "low"
 
     kw = resolve_reasoning_kwargs(
         "groq",
         "openai/gpt-oss-120b",
         assessment=assess,
-        role_path="vibe_coding.architect",
+        role_path="vibe_coding.coder",
     )
     assert kw["reasoning_effort"] == "low"
     assert kw["include_reasoning"] is False
@@ -65,17 +65,26 @@ def test_hard_task_high_effort_debugger():
     assert kw.get("include_reasoning") is False
 
 
-def test_safety_filter_caps_at_low():
+def test_web_search_caps_at_low():
     assess = DifficultyAssessment(
-        safety=95, overall=95, role_path="deep_research.safety_filter"
+        ground=95, overall=95, role_path="deep_research.web_search"
     )
-    effort = difficulty_to_effort(assess, role_path="deep_research.safety_filter")
+    effort = difficulty_to_effort(assess, role_path="deep_research.web_search")
     assert effort == "low"
+    # compound-mini has no reasoning capability → no kwargs (clamp still applies
+    # when the call *would* support effort; simulate with a capable model).
+    kw_none = resolve_reasoning_kwargs(
+        "groq",
+        "groq/compound-mini",
+        assessment=assess,
+        role_path="deep_research.web_search",
+    )
+    assert kw_none == {}
     kw = resolve_reasoning_kwargs(
         "groq",
-        "openai/gpt-oss-safeguard-20b",
+        "openai/gpt-oss-120b",
         assessment=assess,
-        role_path="deep_research.safety_filter",
+        role_path="deep_research.web_search",
     )
     assert kw["reasoning_effort"] == "low"
 
@@ -93,7 +102,7 @@ def test_unsupported_model_gets_no_reasoning_kwargs():
         "agnes",
         "agnes-2.0-flash",
         assessment=assess,
-        role_path="vibe_coding.architect",
+        role_path="vibe_coding.coder",
     )
     assert kw2 == {}
 

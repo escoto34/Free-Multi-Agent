@@ -1,6 +1,6 @@
 # Systems orchestration — free-durable profile
 
-**Document status:** mid-2026 research snapshot (last updated 2026-08-04, WAVE-17 CLI-output + cross-AI context)  
+**Document status:** mid-2026 research snapshot (last updated 2026-08-04, WAVE-18 role consolidation: architect→coder, safety_filter→compressor)  
 **Live config:** `config/model_router.yaml` (loaded by `core/agent_config.py`)  
 **Factory defaults:** `config/defaults_model_router.yaml`  
 **Quota soft-caps:** `core/quotas.py` (must stay ≤ real provider limits)  
@@ -17,15 +17,13 @@ This document explains **why** each free-tier model sits in each System A / Syst
 ## 0. Live role inventory (primary + fallback)
 
 Source of truth: `config/model_router.yaml` via `get_agent_config(...)` in `core/agent_config.py`.  
-Roles requested for scoring: System A (`architect`, `coder`, `debugger`) and System B (`safety_filter`, `context_compressor`, `web_search`, `grounding`, `synthesizer`).
+Roles requested for scoring (WAVE-18: `architect` folded into `coder`; `safety_filter` folded into `context_compressor`): System A (`coder`, `debugger`) and System B (`context_compressor`, `web_search`, `grounding`, `synthesizer`).
 
 | Pipeline | Role | Primary `provider` / `model` | Fallback `provider` / `model` |
 |----------|------|------------------------------|-------------------------------|
-| **A — Vibe** | `architect` | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
-| **A — Vibe** | `coder` | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` |
+| **A — Vibe** | `coder` *(merged plan+implement)* | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` |
 | **A — Vibe** | `debugger` | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
-| **B — Research** | `safety_filter` | `groq` / `openai/gpt-oss-safeguard-20b` | `gemini` / `gemini-2.0-flash` |
-| **B — Research** | `context_compressor` | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
+| **B — Research** | `context_compressor` *(incl. safety gate)* | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
 | **B — Research** | `web_search` | `groq` / `groq/compound-mini` | **none** (hard-fail if no live search) |
 
 The `web_search` role is **wired, not reserved**: one bounded LLM call per run expands a vague topic into concrete DuckDuckGo facets (`expand_query_facets`), then the live DDG scrape + page fetches run. The expansion call is optional — if quota/network fails, the heuristic facet builder is used unchanged; the live-search requirement is unchanged (pipeline still hard-aborts if the search admits it did not run live).
@@ -33,7 +31,7 @@ The `web_search` role is **wired, not reserved**: one bounded LLM call per run e
 | **B — Research** | `synthesizer` | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
 
 **Unique models in the live hot path (primary or role-level fallback):**  
-`agnes-2.0-flash`, `gemini-2.0-flash`, `codestral-latest`, `openai/gpt-oss-120b`, `openai/gpt-oss-safeguard-20b`, `groq/compound-mini`, `command-a-plus-05-2026`, `mistral-small-latest`.
+`agnes-2.0-flash`, `gemini-2.0-flash`, `codestral-latest`, `openai/gpt-oss-120b`, `groq/compound-mini`, `command-a-plus-05-2026`, `mistral-small-latest`.
 
 **Catalog-only (not currently assigned as primary/fallback to those roles):**  
 `tencent/hy3:free` remains in the OpenRouter free catalog and is scored below for historical/optional use.  
@@ -58,21 +56,35 @@ CLI (`chat`, `planner`) uses Agnes → Groq 120b; see §7. Provider-level `fallb
 
 | Pipeline | LLM steps (typical) | Notes |
 |----------|---------------------|--------|
-| **System A — Vibe** | 2–5 | Architect (1) + Coder (1) + Debugger (0–3 fix cycles) |
-| **System B — Research** | 5–6 | Safety + compressor + web_search + grounding + synthesizer; web_search includes **+1 optional** bounded query-expansion LLM call (WAVE-11) that falls back to heuristic facets on any failure |
+| **System A — Vibe** | 1–4 | Coder (1; merged planner, WAVE-18) + Debugger (0–3 fix cycles; can fix directly via `fixed_files` → local `fix_applier`, no coder extra call) |
+| **System B — Research** | 4–5 | Compressor (incl. safety gate, WAVE-18) + web_search + grounding + synthesizer; web_search includes **+1 optional** bounded query-expansion LLM call (WAVE-11) that falls back to heuristic facets on any failure |
 | **CLI `/do`** | +1 planner | Then N× vibe and/or research (independent steps may run in parallel, WAVE-15) |
 | **chat `run_pipeline` tool (WAVE-17)** | same as `/do` | No new call shape — same planner + per-step calls; `cli.llm_compact=True` adds **1 chat call per compaction** (off by default) |
 
-**RPD picture after WAVE-09B/10/11/15 (recomputed):** LLM *call counts* are
+**RPD picture after WAVE-09B/10/11/15/18 (recomputed):** LLM *call counts* are
 unchanged by WAVE-09B (HTTP cache cuts network fetches, not LLM calls), WAVE-10
 (parallelism cuts wall-clock, not calls), and WAVE-15 (parallel plan steps make
-the same per-step calls concurrently). The only count change is the **+1
+the same per-step calls concurrently). WAVE-18 **reduces** counts (role consolidation, §2.1); the only *added* count is the **+1
 optional web_search expansion call** above. So the budget ceiling stands: if
 Cohere (~28/day) sat only on grounding, the bound is ~28 full reports/day (or
 ~250/day when `compound-mini`'s RPD is the tighter limit); three Cohere roles
 would still collapse to ~9/day — see §10.
 
-### 2.1 Latency (WAVE-10 — concurrent fetching)
+### 2.1 WAVE-18 role consolidation (call-count reduction)
+
+WAVE-18 cuts LLM calls by folding two roles into a neighbor's system prompt instead of deleting their work:
+
+| Consolidation | Before | After | Improvement |
+|---------------|--------|-------|-------------|
+| `architect` → `coder` (merged plan+implement; debugger stays separate) | A happy path = **3 calls** | **2 calls** (implementer + debugger) | **-33% happy path** |
+| `architect` → `coder` (guaranteed, no debugger editor) | A avg (real `runs.db` mix 12 runs: 1×1, 4×2, 7×3) ≈ **6.0 calls/run** | ~5.0 calls/run | **-17%** |
+| …plus `debugger` hybrid editor (`fixed_files` → local `fix_applier`) | 5.0 calls/run | ~4.4 calls/run | **-27%** |
+| `safety_filter` → `context_compressor` | B = **5 calls** | **4 calls** (compressor incl. gate) | **-20%** |
+| **Combined System A+B** | — | — | **~-22%** |
+
+The `fix_applier` node writes the debugger's corrected files and re-runs tests (a local node, **counts 0 LLM calls**) — the cheaper edge of the fix loop. Only when the debugger is unsure (file not fully visible) does it emit `suggested_fix` and the coder loop still runs. The **rejected** candidate was merging `grounding`+`synthesizer`: the two-pass scrub/verify (grounding RAG `documents=` + synthesizer re-scrub) is the anti-hallucination core, so merging would save 1 call but add fabrication risk — not worth it.
+
+### 2.2 Latency (WAVE-10 — concurrent fetching)
 
 The three HTTP loops that were serial are now parallel (ThreadPoolExecutor, `min(3, n)` workers), so their wall-clock is ~`ceil(n/3)×` per-request timeout instead of `n×`:
 
@@ -241,7 +253,7 @@ Five areas map to this repo’s pipelines:
 | Code | Area | What we measure |
 |------|------|-----------------|
 | **(a) code** | Generación / depuración de código | HumanEval / LiveCodeBench / SWE-bench-class edit quality, multi-file edits, fix-from-tracebacks |
-| **(b) reason** | Razonamiento y planificación | MMLU-Pro / GPQA / AIME-class hard reasoning, multi-step plans, structured specs (architect / compressor / planner) |
+| **(b) reason** | Razonamiento y planificación | MMLU-Pro / GPQA / AIME-class hard reasoning, multi-step plans, structured specs (coder / compressor / planner) |
 | **(c) ground** | Búsqueda / grounding con citas | Live web retrieval, citation faithfulness, RAG anti-hallucination (documents= style) |
 | **(d) synth** | Síntesis / redacción | Long coherent reports, section structure, bilingual clarity, long-context assembly |
 | **(e) safety** | Seguridad / filtrado | Policy classification, refusal/allow decisions, low false-negative risk for unsafe research topics |
@@ -319,7 +331,7 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **(b) Reasoning / plan** | GPT-OSS-120B; Gemini Flash; Agnes | Safeguard-only; expired hy3 |
 | **(c) Search / ground** | compound-mini (live search); Command A+ (RAG/citas) | Models that invent citations without corpus |
 | **(d) Synthesis** | GPT-OSS-120B; Agnes (context); Command A+; Gemini | Mini search system as sole writer |
-| **(e) Safety** | GPT-OSS Safeguard 20B | Random general chat for policy gates |
+| **(e) Safety** | Compressor LLM gate + host hard-regex pre-gate (WAVE-18) | Random general chat for policy gates |
 | **Live web search** | **Only** `groq/compound-mini` in this free stack | Models that “pretend” to search |
 
 ### 4.3 Recomendación primario vs fallback por rol
@@ -330,11 +342,9 @@ Política **implementada** en `core/model_selector.py` + umbrales en `config/mod
 
 | Role | Primary (scores that matter) | Fallback | Prefer **fallback** when… | Prefer **keep primary** when… |
 |------|------------------------------|----------|---------------------------|-------------------------------|
-| **architect** | Agnes (reason **76**, synth **80**, code **78**) | Gemini 2.0 Flash (reason **78**, structured JSON strong) | Agnes 429 / soft quota / empty (`primary_status=degraded…`); mis-specialized primary (weak ≤49 + Δ≥8) | Healthy primary; high volume of `/do` + vibe (Agnes fair-use); Gemini only edges reason by Δ=2 |
-| **coder** | Codestral (code **88**) | Agnes (code **78**) | Mistral 429 / empty artifact / quota; never switch only because Agnes is “good enough” | Healthy Codestral on clean `TechnicalSpec` — best free coding specialist |
+| **coder** *(merged plan+implement, WAVE-18)* | Codestral (code **88**, reason **62**) | Agnes (code **78**, reason **76**, synth **80**) | Mistral 429 / empty artifact / quota; never switch only because Agnes is “good enough” | Healthy Codestral on a clean plan+implement call — best free coding specialist; agent planning rules live in the coder prompt (no separate architect call) |
 | **debugger** | GPT-OSS-120B (code **82**, reason **90**) | Agnes (code **78**, reason **76**) | Groq 120b RPD exhausted / 429 / empty | Healthy 120b + hard traceback — raise **reasoning_effort**, do not hop early |
-| **safety_filter** | Safeguard-20B (safety **92**) | Gemini Flash (safety **50**) | Safeguard 429 / unavailable | Default every research run — specialty gate |
-| **context_compressor** | Agnes (reason **76**, synth **80**) | Gemini Flash (reason **78**) | Agnes quota / empty JSON | High research volume on Agnes |
+| **context_compressor** *(incl. safety gate, WAVE-18)* | Agnes (reason **76**, synth **80**); LLM gate + host regex for safety | Gemini Flash (reason **78**) | Agnes quota / empty JSON | High research volume on Agnes; compressor is now a single call that also classifies safety |
 | **web_search** | compound-mini (ground **88**) | *none* | **Never model-fallback** — no live search → **abort run** | Always when research needs live web |
 | **grounding** | Command A+ (ground **93**, synth **78**) | Mistral Small (ground **55**, synth **65**) | Cohere trial empty / 429 / ToS | Default cited claims; scarce bucket |
 | **synthesizer** | GPT-OSS-120B (synth **85**, reason **90**) | Agnes (synth **80**, large context) | Groq 120b exhausted / 429 / empty | Healthy 120b + long report — raise **reasoning_effort** |
@@ -351,7 +361,7 @@ Política **implementada** en `core/model_selector.py` + umbrales en `config/mod
 
 - Promote `tencent/hy3:free` as free-durable default primary/fallback.  
 - Replace `compound-mini` for web_search.  
-- Put Command A+ on architect/coder/debugger/synth primary.
+- Put Command A+ on coder/debugger/synth primary.
 
 ### 4.4 Cómo se elige y se usa el modelo en un run (end-to-end)
 
@@ -381,7 +391,7 @@ router.call_agent  (1 quota call on success)
    │  402/429/512 retried with per-class budget; body-confirmed quota wall or
    │  Cohere 422 → skip remaining retries; validated JSON repair-once (1)
    ▼
-Worker agent (architect / coder / …) returns domain schema
+Worker agent (coder / debugger / …) returns domain schema
 ```
 
 **Who calls what:**
@@ -425,8 +435,9 @@ Then **role clamps** (YAML `role_effort`):
 | `vibe_coding.debugger` | min `medium` | Fix loops need deeper CoT |
 | `deep_research.synthesizer` | min `medium` | Long structured reports |
 | `cli.planner` | min `medium` | Multi-step plan quality |
-| `deep_research.safety_filter` | max `low` | Fast allow/deny |
 | `deep_research.web_search` | max `low` | Tool/search system, not long CoT |
+
+(WAVE-18: the former `safety_filter` max-`low` clamp disappeared with the role — the safety gate inside the compressor is a classification field, not a reasoning-effort concern.)
 
 #### Provider-native kwargs (only capable models)
 
@@ -455,14 +466,15 @@ If hop 1 is GPT-OSS with `reasoning_effort=high` and hop 2 is Agnes, `sanitize_c
 ## 5. System A — Vibe Coding (role assignments)
 
 ```text
-Architect → Coder → Test Executor (local) → Debugger (≤ max_fix_cycles)
+Coder (plan + implement) → Test Executor (local) → Debugger (≤ 3) ─→ fix_applier (local, WAVE-18)
+              ▲                                                └──────── repairs via coder
+              └──────────── fix cycle with debugger alert (suggested_fix) ──────
 ```
 
 | Role | Primary | Fallback | Why this placement |
 |------|---------|----------|--------------------|
-| **architect** | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` | Needs surgical JSON specs + multi-file planning. Agnes is free, agent-strong, large context, high daily soft budget — **does not burn Cohere**. Gemini is a solid structured-JSON backup with separate free quota. |
-| **coder** | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` | Highest coding specialization among free APIs we integrate. Agnes fallback keeps code generation alive if Mistral Experiment is rate-limited, without OpenRouter’s 50 RPD pool. |
-| **debugger** | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Fix loops (up to 3) need strong reasoning + roomy per-model RPD. GPT-OSS-120B on Groq is fast and independent of Agnes volume. Agnes is the durable free alternate when Groq 120b is exhausted or 429s. |
+| **coder** *(merged plan+implement, WAVE-18)* | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` | Highest coding specialization among free APIs we integrate; agent/planning rules (surgical edits, repo tree, grounded facts, preservation) are part of the coder system prompt, so the old `architect` LLM call is gone. Agnes fallback keeps code generation alive if Mistral Experiment is rate-limited, without OpenRouter’s 50 RPD pool. |
+| **debugger** | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Fix loops (up to 3) need strong reasoning + roomy per-model RPD. GPT-OSS-120B on Groq is fast and independent of Agnes volume. Agnes is the durable free alternate when Groq 120b is exhausted or 429s. WAVE-18: when the debugger edits a fully-visible file, it ships `fixed_files` → local `fix_applier` re-writes and re-runs tests (no coder call back); else it emits `suggested_fix` → coder fix cycle. |
 
 **Not used as Vibe primaries:** Cohere (save for research grounding), OpenRouter `:free` (shared 50 RPD), compound-mini (search budget only), Cerebras (5 RPM too slow for fix loops).
 
@@ -471,13 +483,12 @@ Architect → Coder → Test Executor (local) → Debugger (≤ max_fix_cycles)
 ## 6. System B — Deep Research (role assignments)
 
 ```text
-Safety → Context compressor → Web search (+ primary URL fetch) → Grounding → Synthesizer
+Context compressor (incl. safety gate, WAVE-18) → Web search (+ primary URL fetch) → Grounding → Synthesizer
 ```
 
 | Role | Primary | Fallback | Why this placement |
 |------|---------|----------|--------------------|
-| **safety_filter** | `groq` / `openai/gpt-oss-safeguard-20b` | `gemini` / `gemini-2.0-flash` | Purpose-aligned safeguard model with **its own** ~1k RPD counter — one cheap classify call per run. Gemini is a binary-classify backup. |
-| **context_compressor** | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` | Keyword/trend extraction is medium difficulty, high frequency. Agnes free volume replaces OpenRouter/hy3. Gemini Flash is a reliable structured alternative. |
+| **context_compressor** *(incl. safety gate, WAVE-18)* | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` | Keyword/trend extraction is medium difficulty, high frequency. Agnes free volume replaces OpenRouter/hy3. Gemini Flash is a reliable structured alternative. WAVE-18: the safety gate from the removed `safety_filter` role moved here — the prompt classifies the query (`is_safe` + `safety_reasons`) and a host-side hard-regex pre-gate (`SAFETY_HARD_RE`) overrides an unsafe LLM verdict; the graph routes to END on `is_safe=False`. |
 | **web_search** | `groq` / `groq/compound-mini` | *(none — hard fail if no live search)* | **Only free stack role with integrated search.** ~250 RPD — **used** for one optional bounded query-expansion LLM call per run (vague topic → concrete DDG facets; on failure the heuristic builder stands in). Also HTTP-fetches user-named domains into a PRIMARY SOURCES block before the live dump. Live-search emptiness still aborts the run (anti-fabrication). |
 | **grounding** | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` | **Single Cohere primary** in the whole product. Best trial-tier anti-hallucination / documents grounding for claims+citations. Mistral Small preserves pipeline if Cohere trial is empty (lower grounding quality). Post-step **scrub** strips emails/phones/archive URLs/hex colors not present in the corpus. |
 | **synthesizer** | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Long report assembly needs strong reasoning + large output; Groq 120b has headroom separate from safeguard and compound-mini. Agnes large-context fallback if Groq synth is exhausted. **Not Cohere** — that would double-tax the 28/day pool with grounding. Scrub again + drop sources absent from the search dump. |
@@ -510,17 +521,17 @@ Heuristics + compressor JSON fields feed a `ResearchProfile` used by search face
 8. Synthesizer recovers when free models return JSON with only `content` (missing `sources`) or bare prose, using content URLs / grounded fallback instead of failing polish.
 9. `source_url_is_verified` + `scrub_ungrounded_claims` drop invented sources and strip ungrounded contacts.
 9b. **`merge_host_verified_primary`:** if the host already HTTP-fetched a PRIMARY OK page but the model denies the site or omits brand tokens, re-inject structured extracts (colors, logo, wa.me, social) and force primary URLs into `sources[]`.
-10. **Research → vibe chaining:** prior research is not loose prose only. `/do` injects a **GROUNDED FACTS** block (hex colors, wa.me phones, social URLs, logo assets, address lines, explicit gaps) plus hard rules so vibe cannot invent medical-green palettes, NYC map embeds, fake emails, or doctor bios. Architect/coder prompts require copying those facts and prefer file-based tests over Selenium for static sites.
+10. **Research → vibe chaining:** prior research is not loose prose only. `/do` injects a **GROUNDED FACTS** block (hex colors, wa.me phones, social URLs, logo assets, address lines, explicit gaps) plus hard rules so vibe cannot invent medical-green palettes, NYC map embeds, fake emails, or doctor bios. Coder prompts require copying those facts and prefer file-based tests over Selenium for static sites.
 10b. **Planner URL guard:** `/do` passes the original user task as `origin_prompt`. Before each research step, `ensure_origin_urls_in_research_prompt` re-injects any official domains the planner dropped (PRIMARY fetch only sees the step text). Planner rules forbid inventing USP/competitors/colors and require copying user-named domains into research prompts.
-11. **Vibe test executor (pytest-only):** never runs the MultiAgent monorepo `tests/` catch-all. Only `test_*.py` from the current artifact. Marketing sites default to **static HTML/CSS/JS** (planner/architect forbid inventing Next.js/Jest unless the user asks). Static content checks enforce grounded hex/wa.me/logo strings. Next/Jest stacks fail fast with a rewrite suggestion. Failed artifacts are snapshotted to `data/vibe_last_failed/` before git rollback. Pytest is launched via repo `venv` / running `sys.executable` (`python -m pytest`), not a bare PATH binary alone.
+11. **Vibe test executor (pytest-only):** never runs the MultiAgent monorepo `tests/` catch-all. Only `test_*.py` from the current artifact. Marketing sites default to **static HTML/CSS/JS** (planner/coder forbid inventing Next.js/Jest unless the user asks). Static content checks enforce grounded hex/wa.me/logo strings. Next/Jest stacks fail fast with a rewrite suggestion. Failed artifacts are snapshotted to `data/vibe_last_failed/` before git rollback. Pytest is launched via repo `venv` / running `sys.executable` (`python -m pytest`), not a bare PATH binary alone.
 12. **Brand landing quality + known failure modes** (`agents/vibe_coding/web_quality.py`):
     - **Fragile no-email tests** — `assert "@" not in html` fails on CSS `@media` / `@keyframes`. Host **web-quality lint** fails the run and tells the debugger to fix the *test* (use `mailto:` / email-regex), not strip CSS.
     - **Invented email UI** — when GROUNDED FACTS list email as gap/none, lint fails on `type="email"`, `mailto:`, or invented `user@domain` strings. Prefer **wa.me** CTAs.
     - **Wrong stack wording** — planner must say *static landing*, not *SPA* (models expand SPA → React/Next). Host still rejects Node/Jest projects for marketing sites.
     - **Mis-diagnosis on fix loops** — debugger prompt forbids claiming “email present” when the only `@` is CSS; preservation warnings about dropped `soup`/BeautifulSoup are acceptable.
-    - **Quality bar** — architect/coder require hero + services + contact + responsive layout, not a 40-line stub; copy grounded hex/logo/wa.me/address exactly.
-    - Shared rules live in `WEB_LANDING_QUALITY_RULES` and are injected into architect, coder, and debugger system prompts; research→vibe prior context and `format_grounded_constraints_block` restate rules 11–15.
-13. **External skills → vibe:** skills register **disabled by default** (`multiagent skills add`; opt-in with `enable` or `add --enable`). Only **enabled** skills with frontmatter `pipelines: [vibe_coding]` and optional `match` regex inject into architect/coder/debugger when the task matches (`core.skills.build_vibe_skills_block`). Bundled packs: `skills/vibe-landing`, `skills/vibe-content-tests`. Chat-only skills default to `pipelines: [chat]`.
+    - **Quality bar** — coder requires hero + services + contact + responsive layout, not a 40-line stub; copy grounded hex/logo/wa.me/address exactly.
+    - Shared rules live in `WEB_LANDING_QUALITY_RULES` and are injected into coder (merged architect, WAVE-18) and debugger system prompts; research→vibe prior context and `format_grounded_constraints_block` restate rules 11–15.
+13. **External skills → vibe:** skills register **disabled by default** (`multiagent skills add`; opt-in with `enable` or `add --enable`). Only **enabled** skills with frontmatter `pipelines: [vibe_coding]` and optional `match` regex inject into coder/debugger when the task matches (`core.skills.build_vibe_skills_block`). Bundled packs: `skills/vibe-landing`, `skills/vibe-content-tests`. Chat-only skills default to `pipelines: [chat]`.
 
 
 ---
@@ -534,7 +545,7 @@ Heuristics + compressor JSON fields feed a `ResearchProfile` used by search face
 
 The `/do` TUI flow (*planner → execute_plan*) is exposed headlessly as `pipeline run [--planner-only] [--provider P] [--model M] [--gpt-researcher] TASK…` (`cli_app/pipeline_cli.py`). It resolves the planner from the same `cli.planner` config, translates non-English tasks with the same chat router, and returns a machine-readable dict — the loop lives only there, so CI/cron/other programs can drive a pipeline with no TUI or session. Chat (agent-loop) hygiene: read-only tools are batched into a single `run_tools` call per turn (approval stays strictly per mutating call via `one_mutating_at_a_time`), and the chat agent's `webfetch` returns readable page text through the cache-aware `agents.deep_research.source_fetch.fetch_url` instead of raw truncated HTML.
 
-**Plan-step execution (WAVE-15):** `execute_plan` runs independent (`uses_prior=False`) plan steps in a `ThreadPoolExecutor` wave (results collected in plan order, so a later dependent step sees identical prior context), while dependent (`uses_prior=True`) steps stay strictly sequential. The ADR recommendation was thread-pool-in-`orchestrate.py` over LangGraph-native parallel branches: the outer plan loop is a coarse fan-out with a single dependency signal, LangGraph's Send/branch state-management adds no value at this granularity, and the codebase already uses `ThreadPoolExecutor` for concurrent fetches in `source_fetch.py`. Every concurrent LLM call still goes through WAVE-07's reserve-before-call, thread-safe ledger (`try_reserve` under one lock+connection), so parallel steps near a shared daily limit can never over-commit. System A's architect→coder→debugger and System B's safety→…→synthesis chains are untouched and remain sequential.
+**Plan-step execution (WAVE-15):** `execute_plan` runs independent (`uses_prior=False`) plan steps in a `ThreadPoolExecutor` wave (results collected in plan order, so a later dependent step sees identical prior context), while dependent (`uses_prior=True`) steps stay strictly sequential. The ADR recommendation was thread-pool-in-`orchestrate.py` over LangGraph-native parallel branches: the outer plan loop is a coarse fan-out with a single dependency signal, LangGraph's Send/branch state-management adds no value at this granularity, and the codebase already uses `ThreadPoolExecutor` for concurrent fetches in `source_fetch.py`. Every concurrent LLM call still goes through WAVE-07's reserve-before-call, thread-safe ledger (`try_reserve` under one lock+connection), so parallel steps near a shared daily limit can never over-commit. System A's merged coder→test→debugger chain (WAVE-18: `fix_applier` shortcut when the debugger ships `fixed_files`) and System B's compressor→…→synthesis chains are untouched and remain sequential.
 
 **Agent tools (WAVE-14):** the chat READ set gained `git_log`/`git_diff` (structured repo history without a `run_terminal` approval), `run_tests` (project suite via the project venv, structured pass/fail), and `search_web` (WAVE-11's keyless DuckDuckGo chain surfaced to free-form chat). All are READ-classified; every shell-based one runs through the same WAVE-04 hardened `_guarded_shell` gate as `run_terminal` (`_BLOCKED_CMD` denylist + modern-catalog soft-upgrade), never raw `subprocess`.
 
@@ -647,7 +658,7 @@ The legacy `quota_usage.call_count` table remains for backward compatibility
 | **free-durable** | Default (this doc) | As above |
 | **openrouter-boosted** | Lifetime ≥ $10 OR credits → 1 000 free RPD | Can put coder/debugger on strong `:free` models |
 | **free-max-quality** | Prefer quality over latency | Synthesizer/coder → Cerebras gpt-oss / gemma-4 (watch 5 RPM) |
-| **local-first** | Offline / privacy | Ollama for architect/coder/synth; keep compound-mini + keys for search/safety |
+| **local-first** | Offline / privacy | Ollama for coder/synth; keep compound-mini + keys for search/safety |
 
 Change live roles with:
 
@@ -663,9 +674,9 @@ multiagent config reset   # restore defaults_model_router.yaml → model_router.
 
 | Env | Used by default as |
 |-----|--------------------|
-| `AGNES_API_KEY` | chat, planner, architect, compressor (+ several fallbacks) |
+| `AGNES_API_KEY` | chat, planner, coder (fallback), compressor (+ several fallbacks) |
 | `MISTRAL_API_KEY` | coder primary; grounding fallback |
-| `GROQ_API_KEY` | debugger, safety, web_search, synthesizer |
+| `GROQ_API_KEY` | debugger, web_search, synthesizer |
 | `COHERE_API_KEY` | grounding primary only |
 | `GEMINI_API_KEY` | role/cascade fallbacks |
 | `CEREBRAS_API_KEY` | cascade quality leaf |

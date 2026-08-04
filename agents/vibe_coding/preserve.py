@@ -6,6 +6,7 @@ useful logic that is outside the user's idea.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -111,3 +112,73 @@ def missing_preserved_symbols(old: str, new: str) -> list[str]:
         return []
     missing = sorted(s for s in old_syms if s not in (new or ""))
     return missing
+
+
+# Rough "never list in a repo tree" noise dirs so the merged implementer's
+# context is not flooded by dependencies / caches.
+_TREE_SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    "venvs",
+    "node_modules",
+    "__pycache__",
+    ".tox",
+    ".nox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".vscode",
+    ".idea",
+    "dist",
+    "build",
+    "data",
+}
+
+
+def list_repo_tree(repo_root: Path, *, max_paths: int = 200) -> str:
+    """Return a bounded newline list of relative file paths in *repo_root*.
+
+    Prefer ``git ls-files`` when the folder is a Git working tree (fast,
+    respects ignored files); otherwise walk the tree with noise dirs skipped.
+    Used by the merged coordinator-implementer so it can name existing files
+    to modify even though existing *contents* are not pre-read in the same
+    call (WAVE-18). Output is capped; a truncated marker is appended.
+    """
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=repo_root.resolve(),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if proc.returncode == 0:
+            paths = [p for p in (proc.stdout or "").split("\0") if p.strip()]
+            if paths:
+                return _format_tree(paths, max_paths=max_paths)
+    except Exception:
+        pass
+
+    rels: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(repo_root):
+        dirnames[:] = [d for d in dirnames if d not in _TREE_SKIP_DIRS]
+        for name in filenames:
+            full = Path(dirpath) / name
+            try:
+                rels.append(str(full.relative_to(repo_root.resolve())))
+            except ValueError:
+                continue
+    return _format_tree(rels, max_paths=max_paths)
+
+
+def _format_tree(paths: list[str], *, max_paths: int) -> str:
+    """Render the bounded path list; append a truncation marker when capped."""
+    paths = sorted({p.replace("\\", "/") for p in paths if p.strip()})
+    capped = paths[:max_paths]
+    out = "\n".join(capped)
+    if len(paths) > max_paths:
+        out += f"\n… ({len(paths) - max_paths} more paths omitted)"
+    return out

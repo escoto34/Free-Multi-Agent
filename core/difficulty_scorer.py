@@ -141,6 +141,10 @@ _SAFETY_HARD = re.compile(
     r")\b",
     re.I,
 )
+
+# Public alias so the deep_research context compressor can reuse the same
+# hard-signal pre-gate (WAVE-18) without importing a private name.
+SAFETY_HARD_RE = _SAFETY_HARD
 _ERROR_HARD = re.compile(
     r"\b("
     r"retry|backoff|circuit\s*breaker|idempoten|transaction|"
@@ -215,7 +219,7 @@ def score_task_difficulty(
     if "coder" in rp or "debugger" in rp:
         code = _clip(max(code, logic, errors))
         reason = _clip(max(reason, logic - 5))
-    elif "architect" in rp or "planner" in rp:
+    elif "coder" in rp or "debugger" in rp or "planner" in rp:
         reason = _clip(max(reason, base + 5))
         synth = _clip(max(synth, base - 5))
     elif "grounding" in rp:
@@ -278,12 +282,10 @@ def score_task_difficulty(
 
 
 _VIBE_ROLES = (
-    "vibe_coding.architect",
     "vibe_coding.coder",
     "vibe_coding.debugger",
 )
 _RESEARCH_ROLES = (
-    "deep_research.safety_filter",
     "deep_research.context_compressor",
     "deep_research.web_search",
     "deep_research.grounding",

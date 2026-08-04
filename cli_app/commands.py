@@ -171,7 +171,6 @@ def _config(args: list[str], _session: ConversationSession) -> CommandResult:
                 or any(
                     rid.endswith(s)
                     for s in (
-                        ".architect",
                         ".coder",
                         ".debugger",
                         ".planner",

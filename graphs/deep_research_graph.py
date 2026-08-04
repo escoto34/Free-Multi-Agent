@@ -22,7 +22,6 @@ from langgraph.graph import END, StateGraph
 from agents.deep_research.context_compressor import run_context_compressor
 from agents.deep_research.grounding import run_grounding
 from agents.deep_research.research_types import profile_from_mapping
-from agents.deep_research.safety_filter import run_safety_filter
 from agents.deep_research.synthesizer import run_synthesizer
 from agents.deep_research.web_search import run_web_search
 from core.difficulty_scorer import (
@@ -33,7 +32,7 @@ from core.difficulty_scorer import (
 from core.handoff import HandoffError, transfer_control
 from core.model_selector import record_model_selection_handoff, select_for_role
 from core.runs import get_run_history
-from schemas.deep_research import CondensedTrends, GroundedReport, SafetyClassification
+from schemas.deep_research import CondensedTrends, GroundedReport
 from schemas.requests import DeepResearchRequest
 
 logger = logging.getLogger(__name__)
@@ -57,7 +56,6 @@ class DeepResearchState(TypedDict):
     """
 
     query: str
-    safety: Optional[SafetyClassification]
     trends: Optional[CondensedTrends]
     search_results: Optional[str]
     grounded_report: Optional[GroundedReport]
@@ -75,83 +73,22 @@ class DeepResearchState(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-def safety_filter_node(state: DeepResearchState) -> dict[str, Any]:
-    """Assess whether the input research query is safe."""
-    logger.info("--- SAFETY FILTER NODE ---")
+def context_compressor_node(state: DeepResearchState) -> dict[str, Any]:
+    """Analyze the query: safety gate + keywords + research profile.
+
+    WAVE-18: the safety_filter role was folded into this node. The LLM gate
+    (``trends.is_safe``) plus the host-side hard pre-gate decide whether the
+    pipeline proceeds; difficulty scores for all research roles are planned
+    here (they used to be planned in the removed safety_filter node).
+    """
+    logger.info("--- CONTEXT COMPRESSOR NODE (incl. safety gate) ---")
     try:
-        # Plan difficulties for all research roles up front (planner scores).
         diff_plan = plan_pipeline_difficulties(
             state["query"], pipeline="deep_research"
         )
         difficulty_by_role = assessments_to_state_dict(diff_plan)
         assess = assessment_from_state(
             difficulty_by_role,
-            role_short="safety_filter",
-            task_text=state["query"],
-            role_path="deep_research.safety_filter",
-        )
-        selection = select_for_role(
-            "deep_research", "safety_filter", assessment=assess
-        )
-        state_for_call = {
-            **dict(state),
-            "difficulty_by_role": difficulty_by_role,
-            **record_model_selection_handoff(
-                {**dict(state), "difficulty_by_role": difficulty_by_role},
-                selection,
-                role="safety_filter",
-                user_input_key="query",
-                pipeline="deep_research",
-                updates={"difficulty_by_role": difficulty_by_role},
-            ),
-        }
-
-        safety = run_safety_filter(state["query"])
-        if safety.is_safe:
-            return transfer_control(
-                state_for_call,
-                from_agent="safety_filter",
-                to_agent="context_compressor",
-                reason="Query classified safe; proceed to compression",
-                pipeline="deep_research",
-                user_input_key="query",
-                updates={
-                    "safety": safety,
-                    "error": None,
-                    "difficulty_by_role": difficulty_by_role,
-                    "last_model_selection": selection.as_dict(),
-                },
-                require_keys=["safety"],
-            )
-        return transfer_control(
-            state_for_call,
-            from_agent="safety_filter",
-            to_agent="END",
-            reason="Query classified unsafe; terminate pipeline",
-            pipeline="deep_research",
-            user_input_key="query",
-            updates={
-                "safety": safety,
-                "error": None,
-                "difficulty_by_role": difficulty_by_role,
-                "last_model_selection": selection.as_dict(),
-            },
-            require_keys=["safety"],
-            note="; ".join(safety.reasons or []) or None,
-        )
-    except HandoffError:
-        raise
-    except Exception as exc:
-        logger.error("Safety node failed: %s", exc)
-        raise exc
-
-
-def context_compressor_node(state: DeepResearchState) -> dict[str, Any]:
-    """Analyze the query to produce keywords/trends."""
-    logger.info("--- CONTEXT COMPRESSOR NODE ---")
-    try:
-        assess = assessment_from_state(
-            state.get("difficulty_by_role"),
             role_short="context_compressor",
             task_text=state["query"],
             role_path="deep_research.context_compressor",
@@ -161,6 +98,7 @@ def context_compressor_node(state: DeepResearchState) -> dict[str, Any]:
         )
         state_for_call = {
             **dict(state),
+            "difficulty_by_role": difficulty_by_role,
             **record_model_selection_handoff(
                 state,
                 selection,
@@ -170,16 +108,37 @@ def context_compressor_node(state: DeepResearchState) -> dict[str, Any]:
             ),
         }
         trends = run_context_compressor(state["query"], assessment=assess)
+
+        if trends.is_safe is False:
+            logger.warning("⚠️ Unsafe query detected! Terminating pipeline.")
+            return transfer_control(
+                state_for_call,
+                from_agent="context_compressor",
+                to_agent="END",
+                reason="Query classified unsafe; terminate pipeline",
+                pipeline="deep_research",
+                user_input_key="query",
+                updates={
+                    "trends": trends,
+                    "error": None,
+                    "difficulty_by_role": difficulty_by_role,
+                    "last_model_selection": selection.as_dict(),
+                },
+                require_keys=["trends"],
+                note="; ".join(trends.safety_reasons or []) or None,
+            )
+
         return transfer_control(
             state_for_call,
             from_agent="context_compressor",
             to_agent="web_search",
-            reason="CondensedTrends ready for live web search",
+            reason="CondensedTrends (safe) ready for live web search",
             pipeline="deep_research",
             user_input_key="query",
             updates={
                 "trends": trends,
                 "error": None,
+                "difficulty_by_role": difficulty_by_role,
                 "last_model_selection": selection.as_dict(),
             },
             require_keys=["trends"],
@@ -459,18 +418,19 @@ def gpt_researcher_node(state: DeepResearchState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def safety_routing(state: DeepResearchState) -> str:
-    """Conditional edge evaluating safety filter."""
-    safety = state["safety"]
-    if not safety:
+def compressor_routing(state: DeepResearchState) -> str:
+    """Conditional edge after the context compressor (WAVE-18: the safety
+    gate was folded into the compressor; it routes straight to END when the
+    query is classified unsafe)."""
+    trends = state.get("trends")
+    if trends is None:
+        logger.warning("⚠️ No CondensedTrends produced. Terminating pipeline.")
         return "unsafe"
-
-    if safety.is_safe:
-        logger.info("✔ Query is safe. Proceeding to compressor.")
-        return "safe"
-
-    logger.warning("⚠️ Unsafe query detected! Terminating pipeline.")
-    return "unsafe"
+    if trends.is_safe is False:
+        logger.warning("⚠️ Unsafe query detected! Terminating pipeline.")
+        return "unsafe"
+    logger.info("✔ Query is safe. Proceeding to web search.")
+    return "safe"
 
 
 def search_routing(state: DeepResearchState) -> str:
@@ -497,7 +457,7 @@ def get_deep_research_graph(
 
     When ``use_gpt_researcher=True`` the graph is a single ``gpt_researcher``
     node that delegates to GPT-Researcher (via Celery or direct), bypassing
-    the full native pipeline (safety_filter → … → synthesizer).
+    the full native pipeline (context_compressor → … → synthesizer).
 
     Equipped with a persistent SqliteSaver checkpointer.
     """
@@ -517,24 +477,22 @@ def get_deep_research_graph(
         workflow.add_edge("gpt_researcher", END)
         return workflow.compile(checkpointer=checkpointer)
 
-    workflow.add_node("safety_filter", safety_filter_node)
     workflow.add_node("context_compressor", context_compressor_node)
     workflow.add_node("web_search", web_search_node)
     workflow.add_node("grounding", grounding_node)
     workflow.add_node("synthesizer", synthesizer_node)
 
-    workflow.set_entry_point("safety_filter")
-
+    # WAVE-18: the safety gate lives inside context_compressor, which routes
+    # straight to END when the query is classified unsafe.
+    workflow.set_entry_point("context_compressor")
     workflow.add_conditional_edges(
-        "safety_filter",
-        safety_routing,
+        "context_compressor",
+        compressor_routing,
         {
-            "safe": "context_compressor",
+            "safe": "web_search",
             "unsafe": END,
         },
     )
-
-    workflow.add_edge("context_compressor", "web_search")
 
     # If web_search produced no results, stop instead of grounding empty data.
     workflow.add_conditional_edges(
@@ -559,7 +517,6 @@ def initial_deep_research_state(
     """Build a fresh graph state for System B."""
     return {
         "query": topic,
-        "safety": None,
         "trends": None,
         "search_results": None,
         "grounded_report": None,
@@ -575,12 +532,12 @@ def initial_deep_research_state(
 
 def summarize_deep_research_state(final_state: dict[str, Any]) -> dict[str, Any]:
     """JSON-serializable summary (full report content included for CLI display)."""
-    safety = final_state.get("safety")
+    trends = final_state.get("trends")
     report = final_state.get("final_report")
     return {
         "error": final_state.get("error"),
-        "is_safe": safety.is_safe if safety else None,
-        "safety_reasons": safety.reasons if safety else [],
+        "is_safe": trends.is_safe if trends else None,
+        "safety_reasons": (trends.safety_reasons if trends else []),
         "content": report.content if report else None,
         "sources": report.sources if report else [],
         "has_report": report is not None,

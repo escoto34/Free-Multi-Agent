@@ -143,11 +143,7 @@ selection_defaults:
 
 # Per-role: which systems.md areas matter + threshold overrides (§4.3 role table)
 roles:
-  vibe_coding.architect:
-    relevant_areas: [reason, code, synth]
-    hard_threshold: 72
-    # Prefer fallback: Agnes 429/quota/empty; schema fail twice (caller passes degraded)
-    # Prefer keep: high volume /do + vibe (Agnes free fair-use)
+  # WAVE-18: architect merged into coder (planning rules part of coder prompt).
   vibe_coding.coder:
     relevant_areas: [code, reason]
     hard_threshold: 70
@@ -158,12 +154,9 @@ roles:
     hard_threshold: 68
     # Prefer fallback: Groq 120b RPD exhausted / 429 / empty
     # Prefer keep: hard traceback multi-hop fix
-  deep_research.safety_filter:
-    relevant_areas: [safety]
-    hard_threshold: 60
-    # Prefer keep: specialty Safeguard gate; never put general models here by default
   deep_research.context_compressor:
-    relevant_areas: [reason, synth]
+    # WAVE-18: safety gate folded into compressor (replaces safety_filter role).
+    relevant_areas: [reason, synth, safety]
     hard_threshold: 70
   deep_research.web_search:
     # No role fallback in model_router.yaml — selector never invents one
@@ -204,14 +197,10 @@ reasoning:
   default_include_reasoning: false
   # Per-role floors/ceilings on abstract effort (applied after difficulty band)
   role_effort:
-    vibe_coding.architect:
-      min_effort: low
     vibe_coding.coder:
       min_effort: low
     vibe_coding.debugger:
       min_effort: medium   # fix loops benefit from deeper reasoning
-    deep_research.safety_filter:
-      max_effort: low      # binary allow/deny — keep latency low
     deep_research.context_compressor:
       min_effort: low
     deep_research.web_search:

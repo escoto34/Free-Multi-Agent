@@ -22,10 +22,8 @@ _DEFAULTS = _ROOT / "config" / "defaults_model_router.yaml"
 
 # Roles exposed in the CLI (system, role) — matches current orchestration.
 KNOWN_ROLES: list[tuple[str, str]] = [
-    ("vibe_coding", "architect"),
     ("vibe_coding", "coder"),
     ("vibe_coding", "debugger"),
-    ("deep_research", "safety_filter"),
     ("deep_research", "context_compressor"),
     ("deep_research", "web_search"),
     ("deep_research", "grounding"),

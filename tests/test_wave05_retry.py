@@ -63,7 +63,7 @@ def test_repair_once_succeeds_on_schema_invalid_then_valid(monkeypatch):
 
     result = run_structured_agent(
         "vibe_coding",
-        "architect",
+        "coder",
         messages=[{"role": "user", "content": "Build X"}],
         schema=_FakeSchema,
         router_instance=mock_router,
@@ -88,7 +88,7 @@ def test_repair_does_not_retry_twice(monkeypatch):
     with pytest.raises(Exception):
         run_structured_agent(
             "vibe_coding",
-            "architect",
+            "coder",
             messages=[{"role": "user", "content": "Build X"}],
             schema=_FakeSchema,
             router_instance=mock_router,
