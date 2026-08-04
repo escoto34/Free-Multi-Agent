@@ -86,6 +86,7 @@ Track A is strictly linear except WAVE-04, which may run in parallel with WAVE-0
 | WAVE-15 | Orchestration Research and Concurrent Plan Execution | 07, 13 | `cli_app/orchestrate.py` | M |
 | WAVE-16 | Documentation Coherence Pass | all | `systems.md`, `README.md` | M |
 | WAVE-17 | Structured CLI Output and Cross-AI Context | 13, 15, 16 | `cli_app/output.py` (new), `cli.py`, `cli_app/commands.py`, `cli_app/tools.py`, `cli_app/agent_chat.py`, `cli_app/pipeline_cli.py`, `cli_app/session.py` | L |
+| WAVE-18 | Role Consolidation via Stronger Prompts | 15, 17 | `graphs/vibe_coding_graph.py`, `graphs/deep_research_graph.py`, `agents/vibe_coding/coder.py`, `agents/vibe_coding/debugger.py`, `agents/deep_research/context_compressor.py`, `config/model_router.yaml`, `config/model_benchmarks.yaml`, `core/quota_estimate.py`, `systems.md` | L |
 
 Size legend: S = one focused session, M = one full session, L = may need to split (flagged explicitly where relevant).
 
@@ -1353,6 +1354,74 @@ No changes to the pipeline graphs or `execute_plan` return shape. No removal of 
 
 ### Agent deliverable
 1. Summary. 2. Research basis for the output schema (IBM DS8000 message format + metasintaxis CLI Output Spec) and how it maps to MultiAgent. 3. Files changed. 4. Contract changes + test output (full default suite + new wave tests). 5. Error-code catalog table. 6. Findings/limitations. 7. Checklist ticked.
+
+---
+
+## WAVE-18 — Role Consolidation via Stronger Prompts
+
+### Objective
+Cut LLM calls per pipeline by removing roles whose work can be absorbed into a neighboring role's system prompt, without weakening the anti-hallucination / merge-safety guarantees. User-selected scope: (1) fold the `safety_filter` role into `context_compressor` (System B); (2) fold the `architect` role into `coder` (System A); (3) upgrade the `debugger` prompt with full file context; (4) let the `debugger` fix code directly via an optional `fixed_files` payload (hybrid editor, fallback to coder when absent). Measured on real `runs.db` mix (12 vibe runs: 1×attempts=1, 4×2, 7×3): System A avg 6.0 → ~4.4 calls/run (**-27%**), System B 5 → 4 (**-20%**); combined **~-22%**.
+
+### Dependencies
+WAVE-15 (`execute_plan` consumes only `is_safe`/`content`/`sources` keys — preserved), WAVE-17 (envelope conventions; no graph changes allowed by WAVE-17's prohibitions are re-opened).
+
+### Repository context
+- System A currently: `architect_node` → `coder_node` → `test_executor_node` → `debugger_node` (loop). Calls = 1 + 2×fix_attempts. Architect's output (`TechnicalSpec`) is consumed verbatim by the coder; its only host-side use is `read_existing_sources` pre-read for merge context (`vibe_coding_graph.py:364`).
+- System B currently: `safety_filter_node` (dedicated `gpt-oss-safeguard-20b` call) → `context_compressor_node` → `web_search` → `grounding` → `synthesizer`. `SafetyClassification` and `CondensedTrends` are separate schemas; `_SAFETY_HARD` regex already exists (`difficulty_scorer.py:137`).
+- Debugger sees 4000-char file previews (`debugger.py:66-70`) — suspects for mis-diagnosis given 58% of real runs reach attempts=3.
+- Quota math source of truth: `core/quota_estimate.py:_DEFAULT_SYSTEM_SPECS` (vibe 3 roles / research 5 roles). Role registry: `core/config_editor.py:KNOWN_ROLES`. Per-role benchmarks/effort: `config/model_benchmarks.yaml`.
+
+### Scope
+**In scope:**
+1. **System A — architect folded into coder**: delete `agents/vibe_coding/architect.py`; extend `CodeArtifact` with optional `architecture`/`test_cases`/`files_to_create`; coder prompt = architect planning rules + coder merge rules (surgical file list, grounded facts, static-site rules, landing quality); coder receives the repo tree (paths only, `git ls-files`-style, capped) since pre-read of existing files is impossible pre-call; post-call `read_existing_sources` on `artifact.files_to_create` feeds the existing preservation-warning diff; graph entry → `coder`.
+2. **System A — debugger as hybrid editor**: `DebugReport.fixed_files: Optional[dict[str,str]]`; debugger prompt: full corrected files when confident and fully readable, else `suggested_fix`; preview cap 4000 → 12000 chars, `test_logs` cap → 20000; new `fix_applier` node (path validation like `_write_artifact_files`, updates `artifact` state) routed from debugger → `test_executor`; suggested_fix path unchanged (→ `coder`).
+3. **System B — safety folded into context_compressor**: extend `CondensedTrends` with `is_safe: bool = True` + `safety_reasons: list[str] = []`; compressor prompt gains a safety-gate section (same categories as the old safety prompt); host-side hard pre-gate on the existing `_SAFETY_HARD` regex; delete `safety_filter_node` + `agents/deep_research/safety_filter.py`; graph entry → `context_compressor`; routing on `trends.is_safe`; summarize keeps emitting `is_safe`/`safety_reasons` keys (consumers `cli_app/commands.py:625`, `orchestrate.py:113-114`, `test_planner.py`, `test_wave15.py` depend on them).
+4. **Config + quota**: remove `architect` + `safety_filter` role blocks from `config/model_router.yaml`, `config/defaults_model_router.yaml`, per-role rows + `role_effort` entries in `config/model_benchmarks.yaml`; `KNOWN_ROLES`; `_DEFAULT_SYSTEM_SPECS` (vibe = coder+debugger = 2, research = compressor+web_search+grounding+synthesizer = 4).
+
+**Explicitly out of scope:**
+- Merging `grounding`+`synthesizer` (double-pass scrub/verify is the anti-hallucination core) — analyzed and rejected, see documentation impact.
+- Removing the optional `web_search` query-expansion LLM call (user declined).
+- Changing `execute_plan` return shape or the `is_safe`/`sources` summary keys.
+
+### Mandatory inspection
+`graphs/vibe_coding_graph.py` (full), `graphs/deep_research_graph.py` (full), `agents/vibe_coding/architect.py`, `agents/vibe_coding/coder.py`, `agents/vibe_coding/debugger.py`, `agents/deep_research/context_compressor.py`, `agents/deep_research/safety_filter.py`, `schemas/vibe_coding.py`, `schemas/deep_research.py`, `core/quota_estimate.py`, `core/config_editor.py`, `core/reasoning_params.py`, `config/model_benchmarks.yaml`, `tests/test_graphs_mocked.py`, `tests/test_quota_estimate.py`, `tests/test_handoff.py`, `tests/test_model_selector.py`, `tests/test_reasoning_params.py`, `tests/test_cli_app.py`, `tests/test_wave05_retry.py`.
+
+### Implementation sequence
+1. Schemas first (additive fields + defaults, so existing callers keep working).
+2. System A: coder rewrite + graph fold + debugger prompt/preview + `fix_applier` + routing.
+3. System B: compressor safety gate + graph fold + summarize keys preserved.
+4. Config/quota/benchmarks cleanup (`KNOWN_ROLES`, specs, YAML, role_effort).
+5. Tests: update `test_graphs_mocked` (vibe: no architect, fix-applier path; research: compressor gates, no safety calls), `test_quota_estimate` (2/4 calls, fixtures drop removed roles), `test_model_selector`/`test_reasoning_params` (architect/safety paths → coder/compressor), `test_cli_app` role listings; new tests: `fixed_files` path skips coder, unsafe query aborts at compressor (regex pre-gate + LLM gate), preservation warning still fires post-fold.
+6. Docs: `systems.md` §2 budget math (new call counts + % improvement table), §5 (merged flow), §6 (safety gate in compressor), §4.3 role table, status line; `README.md` "Vibe coding"/"Default roles" sections.
+7. Full default suite; commit spec + implementation as separate commits.
+
+### Contracts
+- `run_coder(task_text, *, repo_tree="", router_instance=None, assessment=None, selection_out=None, **kwargs) -> CodeArtifact` — signature change (was `spec: TechnicalSpec`).
+- `CodeArtifact` — additive optional `architecture`/`test_cases`/`files_to_create`; existing `files`/`summary` required.
+- `DebugReport` — additive optional `fixed_files`; `passed`/`issues`/`suggested_fix` unchanged.
+- `CondensedTrends` — additive `is_safe`/`safety_reasons` with safe defaults.
+- Graph handoff names: vibe `coder` → `test_executor` → `debugger` → (`fix_applier`|`coder`|`git_commit`|`git_rollback`); research `context_compressor` → (`END` unsafe | `web_search` → …).
+- Summaries: `invoke_vibe_coding_pipeline`/`invoke_deep_research_pipeline` return keys unchanged.
+
+### Mandatory tests
+New: `fixed_files` short-circuits coder (debugger provides files → coder call count 0 on the fix cycle, tests re-run); `fixed_files=None` keeps coder loop; unsafe query aborts at compressor (no grounding/synth calls) and regex pre-gate aborts on hard signals; vibe preservation warning fires with merged coder; quota `pipeline_role_calls` = 2 (A) / 4 (B). Updated: graph mocked tests (call counts, handoff chains, state keys), quota estimate tests (fixtures drop architect/safety_filter), `test_model_selector`/`test_reasoning_params` role paths, `test_cli_app` role listings. Full default suite stays green.
+
+### Documentation impact
+`systems.md`: §2 calls-per-pipeline table (A: 2-5→2-4, B: 5-6→4-5 with the optional web expansion), new "WAVE-18 role consolidation" subsection with the % improvement table (A -17% guaranteed / -27% with editor debugger, B -20%, combined ~-22%, happy path -33%) and the rejected grounding+synthesizer merge rationale; §5 role table without architect; §6 role table without safety_filter (compressor gains safety gate); §4.3 benchmark role table; status line. `README.md`: vibe flow line ("Architect → Coder" → merged implementer), "Default roles" table.
+
+### Acceptance criteria
+- [ ] `architect` and `safety_filter` roles removed from YAML, defaults, benchmarks, `KNOWN_ROLES`, quota specs; no code path references them.
+- [ ] System A happy path = 2 LLM calls (implementer + debugger); fix loop with `fixed_files` = 1 call/cycle; `suggested_fix` fallback keeps the coder loop.
+- [ ] System B = 4 LLM calls (compressor w/ safety gate, web_search optional expansion, grounding, synthesizer); unsafe topics abort before search; summary keys `is_safe`/`safety_reasons` preserved.
+- [ ] Preservation warnings + landing-quality rules still enforced after the architect fold; debugger preview cap raised.
+- [ ] `tests` updated + new wave tests pass; full default suite green.
+- [ ] `systems.md` + `README.md` updated with call counts, role tables, and % improvement.
+
+### Prohibitions
+No changes to `execute_plan`/`pipeline_cli` return shapes, `is_safe`/`sources` summary keys, or the `grounding`/`synthesizer` two-pass design. No reintroduction of `/vibe`/`/research` slash commands. Do not touch `Trend-AI/` or `graphify-out/`.
+
+### Agent deliverable
+1. Summary. 2. Role-consolidation analysis with % improvement per candidate (real runs.db mix) and rejected-option rationale. 3. Files changed. 4. Contract changes + test output. 5. Findings/limitations. 6. Checklist ticked.
 
 ---
 
