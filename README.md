@@ -130,14 +130,17 @@ There are no standalone `/vibe` or `/research` commands — use **`/do`**.
 ### Outer CLI (no TUI)
 
 ```bash
-multiagent config show|set|reset
-multiagent keys set|status
-multiagent providers
-multiagent skills list|add|enable|disable|…
-multiagent tools doctor|suggest|search|…
-multiagent quota
-multiagent history --limit 20
+multiagent [--json] config show|set|reset
+multiagent [--json] keys set|status
+multiagent [--json] providers
+multiagent [--json] skills list|add|enable|disable|…
+multiagent [--json] tools doctor|suggest|search|…
+multiagent [--json] quota
+multiagent [--json] history --limit 20
+multiagent pipeline run [--planner-only] [--provider P] [--model M] [--gpt-researcher] TASK…
 ```
+
+`--json` is a **global** flag (before the subcommand): stdout carries one envelope (`status`/`message`/`timestamp`/`errorCode`/`detail`/`context`, error catalog `MAE-xxxx`), progress goes to stderr, exit codes are `0` OK, `1` error, `2` usage, `130` on SIGINT/SIGTERM (`pipeline run`). Default mode renders the same info as a human block.
 
 ---
 
@@ -156,6 +159,8 @@ Safety gate → context compress (with research typology) → live web search �
 ### Planner
 
 Chooses step order (often research, then vibe with prior context). Non-English tasks may be translated for the pipelines; chat still answers in your language.
+
+Chat can also trigger a pipeline plan with the **`run_pipeline`** tool (`{task, use_gpt_researcher?, provider?, model?}`, approval to run). The planner receives a `=== CHAT HISTORY ===` block; chat receives a pipelines briefing plus the latest `RECENT PIPELINE RUNS` from `runs.db` each turn. With `--json`, `pipeline run` returns a structured envelope with the plan and per-step results.
 
 ---
 

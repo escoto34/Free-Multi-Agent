@@ -13,7 +13,7 @@ import re
 from typing import Any, Callable, Optional
 
 from cli_app.language import chat_language_instruction
-from cli_app.session import ConversationSession
+from cli_app.session import ConversationSession, PIPELINES_BRIEFING
 from cli_app.tools import (
     format_tool_results,
     parse_tool_calls,
@@ -40,20 +40,60 @@ _FAKE_TOOL_RE = re.compile(
 )
 
 
-def _seed_context(user_text: str) -> str:
+def _recent_pipeline_runs(limit: int = 4) -> str:
+    """Recent runs from data/runs.db as a bounded context block (WAVE-17).
+
+    Lets the chat answer "what did the last research say" / "is the site done"
+    from recorded facts instead of inventing results.
+    """
+    try:
+        from core.runs import get_run_history
+
+        rows = get_run_history().list_recent(limit=limit)
+    except Exception as exc:
+        logger.debug("recent runs unavailable: %s", exc)
+        return ""
+    if not rows:
+        return ""
+    parts = ["=== RECENT PIPELINE RUNS (recorded facts; do not invent) ==="]
+    for r in rows:
+        summary = (r.get("result_summary") or r.get("input_summary") or "")[:110]
+        parts.append(
+            f"- {str(r.get('created_at'))[:19]}  {r.get('system')}: "
+            f"{r.get('status')}  {summary}"
+        )
+    parts.append("=== END RECENT PIPELINE RUNS ===")
+    return "\n".join(parts)
+
+
+def _seed_context(user_text: str, session: ConversationSession) -> str:
     """Cheap host-side context so the model need not invent graphify CLI."""
     parts: list[str] = []
     try:
         from cli_app.context_tools import (
             gather_dir_context,
             gather_file_context,
+            graph_mtime,
             in_multiagent_project,
+            should_use_graphify,
         )
         from cli_app.graph_rag import graph_available, query_graph
 
-        # Always use package ROOT (not launch cwd)
+        # Always use package ROOT (not launch cwd). WAVE-17: re-query the graph
+        # only on first use or when graph.json changed; reuse the session's
+        # cached snippet otherwise (same policy as the planner).
         if in_multiagent_project() and graph_available():
-            g = query_graph(user_text, budget=1200)
+            if should_use_graphify(
+                session_graph_mtime=session.graph_mtime_at_inject,
+                session_graph_used=session.graph_used,
+            ):
+                g = query_graph(user_text, budget=1200)
+                if g:
+                    session.graph_used = True
+                    session.graph_mtime_at_inject = graph_mtime()
+                    session.cached_graph_snippet = g
+            else:
+                g = session.cached_graph_snippet or ""
             if g:
                 parts.append(f"=== KNOWLEDGE GRAPH (seed) ===\n{g}\n=== END GRAPH ===")
         d = gather_dir_context(user_text)
@@ -62,6 +102,9 @@ def _seed_context(user_text: str) -> str:
         f = gather_file_context(user_text)
         if f:
             parts.append(f"=== PROJECT FILES ===\n{f}\n=== END FILES ===")
+        runs = _recent_pipeline_runs()
+        if runs:
+            parts.append(runs)
         # If the user asks about modern tools / shell / PATH, seed doctor-ish brief
         if re.search(
             r"\b(eza|ripgrep|\brg\b|fd\b|bat\b|modern tool|toolbox|/tools|"
@@ -104,8 +147,10 @@ def _system_prompt() -> str:
         "To CREATE a file you MUST call write_file — describing code is not enough.\n"
         "For mutations (write/edit/bash/pip/venv) the host asks the user to approve "
         "each command one at a time.\n"
-        "Python envs: use create_venv + pip_install.\n"
-        "Heavy multi-pipeline work: suggest /do <task>.\n"
+"Python envs: use create_venv + pip_install.\n"
+        "Heavy multi-pipeline work: use the run_pipeline tool (approval needed) "
+        "or suggest /do <task>.\n"
+        f"{PIPELINES_BRIEFING}\n"
         "Directory listing / search / file view: use list_dir, grep, glob, read_file "
         "(they auto-pick eza/rg/fd/bat when installed). Only use run_terminal for "
         "commands host tools cannot cover; prefer modern CLI names from the toolbox.\n"
@@ -133,7 +178,9 @@ def agent_chat_turn(
     """Run a tool-augmented chat turn."""
     settings = get_cli_settings()
     chat = settings["chat"]
-    recent_n = int(settings.get("chat_recent_messages") or 4)
+    # WAVE-17: use more recent turns when the context is far from the budget.
+    base_n = int(settings.get("chat_recent_messages") or 4)
+    recent_n = max(base_n, 8) if session.usage_ratio() < 0.35 else base_n
     store_max = int(settings.get("store_reply_max_chars") or 2000)
 
     def _prog(msg: str) -> None:
@@ -163,7 +210,7 @@ def agent_chat_turn(
         }
 
     session.add("user", user_text[:800])
-    seed = _seed_context(user_text)
+    seed = _seed_context(user_text, session)
 
     prior = [m for m in session.messages if m.role in ("user", "assistant")]
     prior = prior[:-1] if prior else []
@@ -219,6 +266,8 @@ def agent_chat_turn(
             session.add("assistant", err[:store_max])
             return {
                 "ok": False,
+                "status": "ERROR",
+                "error_code": "MAE-0000",
                 "text": err,
                 "always_approve": always,
                 "tools_used": tools_used,
@@ -282,6 +331,7 @@ def agent_chat_turn(
             approve=approve,
             always_approve=always,
             one_mutating_at_a_time=True,
+            ctx={"session": session, "progress": progress},
         )
         session.always_approve = always_
         for r in results:
@@ -319,10 +369,24 @@ def agent_chat_turn(
         final_text if len(final_text) <= store_max else final_text[: store_max - 1] + "…"
     )
     session.add("assistant", stored)
-    session.maybe_autocompact(threshold=0.55)
+    # WAVE-17: optional LLM-based compaction (opt-in; local drop is the default).
+    if bool(settings.get("llm_compact")):
+        session.compact_with_llm(
+            lambda prompt: invoke_router(
+                None,
+                provider=chat["provider"],
+                model=chat["model"],
+                messages=prompt,
+                fallback=chat.get("fallback"),
+            ).content
+        )
+    else:
+        session.maybe_autocompact(threshold=0.55)
 
     return {
         "ok": True,
+        "status": "OK",
+        "error_code": None,
         "text": final_text,
         "always_approve": always,
         "tools_used": tools_used,

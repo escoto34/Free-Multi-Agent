@@ -39,8 +39,12 @@ def run_pipeline(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     progress: ProgressCb = None,
+    chat_context: str = "",
 ) -> dict:
     """Plan and execute a pipeline for *task*; return the aggregate result.
+
+    *chat_context* is an optional recent-conversation block (WAVE-17) handed
+    to the planner so it sees what the user was just discussing.
 
     Mirrors the internal guts of ``commands._do`` but without a session.
     """
@@ -76,10 +80,17 @@ def run_pipeline(
     ) or task
 
     try:
-        plan = plan_pipelines(pipeline_prompt, provider=prov, model=m)
+        plan = plan_pipelines(
+            pipeline_prompt,
+            provider=prov,
+            model=m,
+            context=chat_context or None,
+        )
     except Exception as exc:
         return {
             "ok": False,
+            "status": "ERROR",
+            "error_code": "MAE-1000",
             "text": f"Planner failed ({prov}/{m}): {exc}",
             "plan": None,
             "steps": [],
@@ -98,6 +109,8 @@ def run_pipeline(
     except Exception as exc:
         return {
             "ok": False,
+            "status": "ERROR",
+            "error_code": "MAE-2000",
             "text": f"Plan:\n{plan_text}\n\nExecution failed: {exc}",
             "plan": plan.model_dump(),
             "steps": [],
@@ -106,6 +119,8 @@ def run_pipeline(
     text = f"Planner: {prov}/{m}  engine: {engine}\n\n{plan_text}\n\n---\n\n{result.get('text', '')}"
     return {
         "ok": bool(result.get("ok")),
+        "status": "OK" if result.get("ok") else "ERROR",
+        "error_code": None if result.get("ok") else "MAE-2000",
         "text": text,
         "plan": result.get("plan"),
         "steps": result.get("steps"),

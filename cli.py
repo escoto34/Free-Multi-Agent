@@ -2,18 +2,24 @@
 Command Line Interface for Free-Multi-Agent.
 
 Pipelines (vibe-coding / deep-research) run only inside the interactive CLI
-via /do (planner chooses steps). Outer commands are chat, config, keys,
-providers, skills, tools, quota, history.
+via /do (planner chooses steps) or headlessly via ``multiagent pipeline run``.
+Outer commands are chat, config, keys, providers, skills, tools, quota, history.
+
+Structured output (WAVE-17): every subcommand accepts ``--json`` and emits a
+single envelope ``{status, message, timestamp, errorCode?, detail?}`` to
+stdout. Diagnostics/progress always go to stderr. Exit codes: 0 = OK,
+1 = ERROR, 2 = usage error, 130 = interrupted (SIGINT/SIGTERM).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import click
 from dotenv import load_dotenv
@@ -21,6 +27,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
 from cli_app.icons import get_icon
+from cli_app.output import eprint, install_signal_handlers, make_envelope, render_json
 from core.agent_config import get_agent_config
 from core.router import get_router
 from core.runs import get_run_history
@@ -29,6 +36,48 @@ logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
+
+# Set by main() before any subcommand callback runs (click order: group
+# callback first). Commands read it instead of threading ctx everywhere.
+_JSON_OUTPUT = False
+
+
+def _json_mode() -> bool:
+    return _JSON_OUTPUT
+
+
+def _emit(
+    status: str = "OK",
+    *,
+    message: str = "",
+    detail: Any = None,
+    error_code: Optional[str] = None,
+) -> None:
+    """Print a JSON envelope to stdout (only used in --json mode)."""
+    env = make_envelope(
+        status=status,
+        message=message,
+        detail=detail,
+        error_code=error_code,
+    )
+    print(render_json(env))
+
+
+def _fail(
+    message: str,
+    *,
+    error_code: str = "MAE-0000",
+    detail: Any = None,
+    exit_code: int = 1,
+) -> None:
+    """Fail consistently: JSON envelope on stdout, human text on stderr."""
+    if _json_mode():
+        _emit("ERROR", message=message, detail=detail, error_code=error_code)
+    else:
+        click.secho(get_icon("error") + " " + message, fg="red", err=True)
+        if detail is not None and detail != "":
+            click.echo(str(detail), err=True)
+    raise SystemExit(exit_code)
 
 
 def _providers_used_by_config() -> set[str]:
@@ -70,17 +119,14 @@ def validate_api_keys() -> None:
         if not val or not val.strip() or "your_" in val or "_here" in val:
             missing.append(f"  {prov:12} " + get_icon("arrow") + f" {env_name}  (multiagent keys set {prov})")
     if missing:
-        click.secho(
+        eprint(
             get_icon("error") + " Missing API keys for providers used by current roles:\n"
             + "\n".join(missing)
             + "\n\nWith free-durable defaults you also need AGNES_API_KEY "
             "(chat/planner/architect/compressor) and MISTRAL_API_KEY (coder). "
             "Optional: gemini/cerebras/ollama/openrouter only if "
             "assigned in /config or as fallbacks. Ollama needs no key "
-            "(install + ollama serve + ollama pull <model>).",
-            fg="red",
-            bold=True,
-            err=True,
+            "(install + ollama serve + ollama pull <model>)."
         )
         sys.exit(1)
 
@@ -102,44 +148,43 @@ def check_hy3_expiration() -> None:
         fb = st.get("expired_fallback") or {}
         fb_label = f"{fb.get('provider', 'groq')}/{fb.get('model', 'openai/gpt-oss-120b')}"
 
-        click.secho("=" * 70, fg="blue")
-        click.secho(
+        eprint("=" * 70)
+        eprint(
             get_icon("calendar") + f" Current Date: {today.isoformat()} | Hy3 free tier expiry: "
-            f"{expiration_date.isoformat()}",
-            fg="blue",
+            f"{expiration_date.isoformat()}"
         )
 
         if 0 <= delta_days <= 3:
-            click.secho(
+            eprint(
                 get_icon("warning") + f" WARNING: tencent/hy3:free expires in {delta_days} day(s) "
                 f"(on {expiration_date.isoformat()})!\n"
                 f"After expiry, model_selector auto-switches to {fb_label} "
-                f"(no manual YAML edit required).",
-                fg="yellow",
-                bold=True,
+                f"(no manual YAML edit required)."
             )
         elif delta_days < 0:
-            click.secho(
+            eprint(
                 get_icon("warning") + f" WARNING: tencent/hy3:free EXPIRED {abs(delta_days)} day(s) ago "
                 f"(on {expiration_date.isoformat()})!\n"
-                f"Scoring/selection skips hy3 and uses {fb_label} automatically.",
-                fg="red",
-                bold=True,
+                f"Scoring/selection skips hy3 and uses {fb_label} automatically."
             )
         else:
-            click.secho(
-                get_icon("info") + f" tencent/hy3:free remains active for {delta_days} more days.",
-                fg="cyan",
+            eprint(
+                get_icon("info") + f" tencent/hy3:free remains active for {delta_days} more days."
             )
-        click.secho("=" * 70 + "\n", fg="blue")
+        eprint("=" * 70 + "\n")
     except Exception as exc:
-        click.secho(f"Failed to check Hy3 expiration date: {exc}", fg="yellow")
+        eprint(f"Failed to check Hy3 expiration date: {exc}")
+
+
+def _quota_summary_data() -> dict[str, Any]:
+    """Raw today usage counters (dict, JSON-serializable)."""
+    router = get_router()
+    return router.quota.status_summary() or {}
 
 
 def _print_quota_summary() -> None:
     """Legacy one-liner usage dump (still used by brief TUI preflight)."""
-    router = get_router()
-    summary = router.quota.status_summary()
+    summary = _quota_summary_data()
     if not summary:
         click.echo("No quota usage recorded today yet.")
         return
@@ -148,6 +193,23 @@ def _print_quota_summary() -> None:
         click.echo(
             f"  • {label}: Used {stats['used']}, Remaining {stats['remaining']}"
         )
+
+
+def _quota_capacity_data() -> dict[str, Any]:
+    """Full System A/B capacity estimate as a JSON-safe dict."""
+    from core.quota_estimate import estimate_all
+    from core.router import get_router
+
+    data = estimate_all(tracker=get_router().quota)
+    out: dict[str, Any] = {"usage_today": data.get("usage_today") or {}}
+    systems: dict[str, Any] = {}
+    for system in ("vibe_coding", "deep_research"):
+        block = (data.get("systems") or {}).get(system) or {}
+        systems[system] = {
+            sc: dataclasses.asdict(est) for sc, est in block.items()
+        }
+    out["systems"] = systems
+    return out
 
 
 def _print_quota_capacity_report() -> None:
@@ -160,13 +222,21 @@ def _print_quota_capacity_report() -> None:
 
 
 @click.group(invoke_without_command=True)
+@click.option(
+    "--json",
+    "json_out",
+    is_flag=True,
+    help="Emit a single JSON envelope to stdout (status/message/timestamp/errorCode/detail).",
+)
 @click.pass_context
-def main(ctx: click.Context) -> None:
+def main(ctx: click.Context, json_out: bool) -> None:
     """Free-Multi-Agent — interactive CLI (pipelines only inside the TUI).
 
     With no subcommand (``multiagent`` / ``python cli.py``), opens the chat TUI.
     Use /do inside the TUI (planner picks vibe/research) — not as outer subcommands.
     """
+    global _JSON_OUTPUT
+    _JSON_OUTPUT = bool(json_out)
     if ctx.invoked_subcommand is None:
         ctx.invoke(chat_cmd)
 
@@ -187,9 +257,27 @@ def show_quota(brief: bool) -> None:
     * planner worst-case: every role with a fallback uses that fallback
     """
     if brief:
+        data = _quota_summary_data()
+        if _json_mode():
+            _emit(
+                "OK",
+                message=f"quota summary: {len(data)} bucket(s)",
+                detail=data,
+            )
+            return
         _print_quota_summary()
         return
-    _print_quota_capacity_report()
+    data = _quota_capacity_data()
+    if _json_mode():
+        _emit(
+            "OK",
+            message="quota & pipeline capacity estimate",
+            detail=data,
+        )
+        return
+    from core.quota_estimate import format_quota_report
+
+    click.echo(format_quota_report(data))
 
 
 @main.command(name="history")
@@ -197,6 +285,13 @@ def show_quota(brief: bool) -> None:
 def show_history(limit: int) -> None:
     """Show recent pipeline runs (from data/runs.db)."""
     rows = get_run_history().list_recent(limit=limit)
+    if _json_mode():
+        _emit(
+            "OK",
+            message=f"{len(rows)} run(s)",
+            detail=rows,
+        )
+        return
     if not rows:
         click.echo("No runs recorded yet.")
         return
@@ -232,7 +327,16 @@ def config_show() -> None:
     """Print active provider/model per agent role."""
     from core.config_editor import list_roles, get_cli_settings
 
-    for row in list_roles():
+    rows = list_roles()
+    settings = get_cli_settings()
+    if _json_mode():
+        _emit(
+            "OK",
+            message=f"{len(rows)} role(s)",
+            detail={"roles": rows, "cli": settings},
+        )
+        return
+    for row in rows:
         if row.get("scalar"):
             click.echo(f"  {row['id']:32} = {row['model']}")
             continue
@@ -242,7 +346,6 @@ def config_show() -> None:
         fb = f"  fallback" + get_icon("arrow") + f" {row['fallback']}" if row.get("fallback") else ""
         free = f"  free_until={row['free_until']}" if row.get("free_until") else ""
         click.echo(f"  {row['id']:32} {row['provider']}/{row['model']}{free}{fb}")
-    settings = get_cli_settings()
     click.echo(f"\n  cli.context_limit_tokens       = {settings['context_limit_tokens']}")
 
 
@@ -255,14 +358,24 @@ def config_set(role_id: str, provider: str, model: str) -> None:
     from core.config_editor import set_role
 
     if "." not in role_id:
-        click.secho("role_id must be system.role", fg="red", err=True)
-        sys.exit(2)
+        _fail(
+            "role_id must be system.role",
+            error_code="MAE-4000",
+            detail=f"got {role_id!r}",
+            exit_code=2,
+        )
     system, role = role_id.split(".", 1)
     try:
         node = set_role(system, role, provider=provider, model=model)
     except Exception as exc:
-        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
-        sys.exit(1)
+        _fail(str(exc), error_code="MAE-4000", exit_code=1)
+    if _json_mode():
+        _emit(
+            "OK",
+            message=f"{role_id} → {node['provider']}/{node['model']}",
+            detail=node,
+        )
+        return
     click.secho(
         get_icon("ok") + f" {role_id} " + get_icon("arrow") + f" {node['provider']}/{node['model']}", fg="green"
     )
@@ -275,6 +388,9 @@ def config_reset() -> None:
     from core.config_editor import reset_to_defaults
 
     reset_to_defaults()
+    if _json_mode():
+        _emit("OK", message="Restored defaults from config/defaults_model_router.yaml")
+        return
     click.secho(get_icon("ok") + " Restored defaults from config/defaults_model_router.yaml", fg="green")
 
 
@@ -289,7 +405,11 @@ def keys_status() -> None:
     """Show which provider keys are set (masked)."""
     from core.keys import get_key_status
 
-    for row in get_key_status():
+    rows = get_key_status()
+    if _json_mode():
+        _emit("OK", message=f"{len(rows)} provider(s)", detail=rows)
+        return
+    for row in rows:
         color = "green" if row["status"] == "set" else "red"
         click.secho(
             f"  {row['provider']:12} {row['env']:22} {row['status']:8} {row['preview']}",
@@ -306,15 +426,24 @@ def keys_set(provider: str, api_key: Optional[str]) -> None:
 
     valid = sorted(provider_env_map())
     if provider.lower() not in valid:
-        click.secho(get_icon("error") + f" Unknown provider. Valid: {valid}", fg="red", err=True)
-        sys.exit(2)
+        _fail(
+            f"Unknown provider. Valid: {valid}",
+            error_code="MAE-4000",
+            exit_code=2,
+        )
     if not api_key:
         api_key = click.prompt(f"{provider} API key", hide_input=True)
     try:
         preview = set_api_key(provider, api_key)
     except Exception as exc:
-        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
-        sys.exit(1)
+        _fail(str(exc), error_code="MAE-4000", exit_code=1)
+    if _json_mode():
+        _emit(
+            "OK",
+            message=f"Saved {provider} key",
+            detail={"provider": provider, "preview": preview},
+        )
+        return
     click.secho(get_icon("ok") + f" Saved {provider} key (preview {preview})", fg="green")
 
 
@@ -325,6 +454,28 @@ def providers_cmd() -> None:
     from core.keys import get_key_status
 
     status = {r["provider"]: r for r in get_key_status()}
+    if _json_mode():
+        detail: list[dict[str, Any]] = []
+        for name in list_provider_names():
+            try:
+                meta = get_provider_meta(name)
+            except Exception as exc:
+                detail.append({"name": name, "error": str(exc)})
+                continue
+            st = status.get(name, {})
+            detail.append(
+                {
+                    "name": name,
+                    "key_status": st.get("status", "?"),
+                    "env_key": meta.get("env_key"),
+                    "base_url": meta.get("base_url"),
+                    "signup": meta.get("signup"),
+                    "notes": meta.get("notes"),
+                    "models": (meta.get("models") or [])[:8],
+                }
+            )
+        _emit("OK", message=f"{len(detail)} provider(s)", detail=detail)
+        return
     click.secho("Free-tier API platforms available to System A / B / chat:\n", bold=True)
     for name in list_provider_names():
         try:
@@ -364,6 +515,9 @@ def chat_cmd() -> None:
 
     ensure_utf8_and_ansi()
 
+    if _json_mode():
+        eprint("note: --json is ignored for the interactive chat TUI")
+
     # Preflight capacity snapshot (same live estimate as `multiagent quota`)
     try:
         from core.quota_estimate import build_system_estimate
@@ -376,25 +530,23 @@ def chat_cmd() -> None:
         b = build_system_estimate(
             "deep_research", scenario="primary", tracker=qt, reload=False
         )
-        click.secho(
+        eprint(
             f"Quota preflight — typical full runs left today (primary): "
             f"System A ≈ {a.runs_remaining}, System B ≈ {b.runs_remaining}  "
-            f"(details: multiagent quota)",
-            fg="cyan",
+            f"(details: multiagent quota)"
         )
     except Exception as exc:
-        click.secho(f"(quota preflight skipped: {exc})", fg="yellow")
+        eprint(f"(quota preflight skipped: {exc})")
 
     try:
         from cli_app.tui import run_app
     except ImportError as exc:
-        click.secho(
-            get_icon("error") + " Interactive TUI requires textual. Install with:\n"
+        _fail(
+            "Interactive TUI requires textual. Install with:\n"
             f"   pip install textual\n({exc})",
-            fg="red",
-            err=True,
+            error_code="MAE-4000",
+            exit_code=1,
         )
-        sys.exit(1)
     run_app()
 
 
@@ -404,12 +556,30 @@ def skills() -> None:
     pass
 
 
+def _skill_row(meta) -> dict[str, Any]:
+    return {
+        "name": meta.name,
+        "enabled": bool(meta.enabled),
+        "valid": bool(meta.valid),
+        "path": str(meta.path),
+        "description": getattr(meta, "description", None) or "",
+        "error": getattr(meta, "error", None) or None,
+    }
+
+
 @skills.command(name="list")
 def skills_list() -> None:
     """List registered skills (ON/off). Works from any directory."""
     from core.skills import GLOBAL_SKILLS_FILE, list_skills
 
     rows = list_skills()
+    if _json_mode():
+        _emit(
+            "OK",
+            message=f"{len(rows)} skill(s)",
+            detail={"registry": str(GLOBAL_SKILLS_FILE), "skills": [_skill_row(s) for s in rows]},
+        )
+        return
     click.echo(f"Registry: {GLOBAL_SKILLS_FILE}")
     if not rows:
         click.echo("  (none) — multiagent skills add /path/to/skill")
@@ -441,12 +611,19 @@ def skills_add(path: str, enable: bool, disabled: bool) -> None:
     try:
         meta = add_skill(path, enabled=enabled)
     except Exception as exc:
-        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
-        sys.exit(1)
+        _fail(str(exc), error_code="MAE-4000", exit_code=1)
+    if _json_mode():
+        _emit(
+            "OK",
+            message=f"Registered {meta.name!r}",
+            detail=_skill_row(meta),
+        )
+        return
     state = "enabled" if meta.enabled else "disabled"
     click.secho(get_icon("ok") + f" Registered {meta.name!r} ({state}) " + get_icon("arrow") + f" {meta.path}", fg="green")
     if not meta.enabled:
         click.echo(f"  Enable with: multiagent skills enable {meta.name}")
+
 
 @skills.command(name="enable")
 @click.argument("name")
@@ -457,8 +634,10 @@ def skills_enable(name: str) -> None:
     try:
         meta = set_enabled(name, True)
     except Exception as exc:
-        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
-        sys.exit(1)
+        _fail(str(exc), error_code="MAE-4000", exit_code=1)
+    if _json_mode():
+        _emit("OK", message=f"{meta.name} enabled", detail=_skill_row(meta))
+        return
     click.secho(get_icon("ok") + f" {meta.name} enabled", fg="green")
 
 
@@ -471,8 +650,10 @@ def skills_disable(name: str) -> None:
     try:
         meta = set_enabled(name, False)
     except Exception as exc:
-        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
-        sys.exit(1)
+        _fail(str(exc), error_code="MAE-4000", exit_code=1)
+    if _json_mode():
+        _emit("OK", message=f"{meta.name} disabled", detail=_skill_row(meta))
+        return
     click.secho(get_icon("ok") + f" {meta.name} disabled", fg="yellow")
 
 
@@ -483,8 +664,10 @@ def skills_remove(name: str) -> None:
     from core.skills import remove_skill
 
     if not remove_skill(name):
-        click.secho(get_icon("error") + f" Skill {name!r} not found", fg="red", err=True)
-        sys.exit(1)
+        _fail(f"Skill {name!r} not found", error_code="MAE-4000", exit_code=1)
+    if _json_mode():
+        _emit("OK", message=f"Unregistered {name!r}")
+        return
     click.secho(get_icon("ok") + f" Unregistered {name!r}", fg="green")
 
 
@@ -497,8 +680,14 @@ def skills_show(name: str) -> None:
     try:
         meta = load_skill(name)
     except Exception as exc:
-        click.secho(get_icon("error") + f" {exc}", fg="red", err=True)
-        sys.exit(1)
+        _fail(str(exc), error_code="MAE-4000", exit_code=1)
+    if _json_mode():
+        _emit(
+            "OK",
+            message=meta.name,
+            detail={**_skill_row(meta), "body": meta.body[:1200]},
+        )
+        return
     click.echo(f"name:        {meta.name}")
     click.echo(f"enabled:     {meta.enabled}")
     click.echo(f"valid:       {meta.valid} {meta.error or ''}")
@@ -531,7 +720,11 @@ def tools_doctor(profile: str, missing_only: bool) -> None:
     """Check which catalog tools are on PATH."""
     from core.toolbox import doctor
 
-    click.echo(doctor(profile, show_installed=not missing_only), nl=False)
+    text = doctor(profile, show_installed=not missing_only)
+    if _json_mode():
+        _emit("OK", message=f"doctor profile {profile}", detail={"text": text})
+        return
+    click.echo(text, nl=False)
 
 
 @tools.command(name="suggest")
@@ -541,7 +734,11 @@ def tools_suggest(task: tuple[str, ...], limit: int) -> None:
     """Recommend tools for a free-form task description."""
     from core.toolbox import suggest
 
-    click.echo(suggest(" ".join(task), limit=limit), nl=False)
+    text = suggest(" ".join(task), limit=limit)
+    if _json_mode():
+        _emit("OK", message="suggestions", detail={"text": text})
+        return
+    click.echo(text, nl=False)
 
 
 @tools.command(name="search")
@@ -550,7 +747,11 @@ def tools_search(query: tuple[str, ...]) -> None:
     """Search the toolbox catalog by keyword."""
     from core.toolbox import search
 
-    click.echo(search(" ".join(query)), nl=False)
+    text = search(" ".join(query))
+    if _json_mode():
+        _emit("OK", message="search results", detail={"text": text})
+        return
+    click.echo(text, nl=False)
 
 
 @tools.command(name="show")
@@ -559,7 +760,11 @@ def tools_show(tool_id: str) -> None:
     """Show one tool: PATH status, tags, install hints."""
     from core.toolbox import show_tool
 
-    click.echo(show_tool(tool_id), nl=False)
+    text = show_tool(tool_id)
+    if _json_mode():
+        _emit("OK", message=f"tool {tool_id}", detail={"text": text})
+        return
+    click.echo(text, nl=False)
 
 
 @tools.command(name="list")
@@ -569,7 +774,11 @@ def tools_list(category: Optional[str], check: bool) -> None:
     """List catalog entries, optionally filtered by category."""
     from core.toolbox import list_tools
 
-    click.echo(list_tools(category=category, check=check), nl=False)
+    text = list_tools(category=category, check=check)
+    if _json_mode():
+        _emit("OK", message=f"tools list {category or '(all)'}", detail={"text": text})
+        return
+    click.echo(text, nl=False)
 
 
 @tools.command(name="alt")
@@ -578,7 +787,11 @@ def tools_alt(classic: str) -> None:
     """Modern alternatives to a classic command (ls, grep, cat, …)."""
     from core.toolbox import alternatives
 
-    click.echo(alternatives(classic), nl=False)
+    text = alternatives(classic)
+    if _json_mode():
+        _emit("OK", message=f"alternatives for {classic}", detail={"text": text})
+        return
+    click.echo(text, nl=False)
 
 
 @tools.command(name="profiles")
@@ -586,7 +799,11 @@ def tools_profiles() -> None:
     """List doctor profiles."""
     from core.toolbox import list_profiles
 
-    for r in list_profiles():
+    rows = list_profiles()
+    if _json_mode():
+        _emit("OK", message=f"{len(rows)} profile(s)", detail=rows)
+        return
+    for r in rows:
         click.echo(f"  {r['name']:14} ({r['count']:3})  {r['description']}")
     click.echo("  all            (all catalog entries)")
 
@@ -622,16 +839,30 @@ def pipeline_run(
     model: Optional[str],
     planner_only: bool,
 ) -> None:
-    """Run `planner -> execute_plan` for TASK, mirroring the TUI /do flow."""
+    """Run `planner -> execute_plan` for TASK, mirroring the TUI /do flow.
+
+    Progress/diagnostics go to stderr; only the final result reaches stdout.
+    In --json mode stdout carries exactly one envelope.
+    """
     from cli_app.pipeline_cli import run_pipeline
+
+    install_signal_handlers(json_mode=_json_mode())
 
     if planner_only:
         from agents.planner import format_plan, plan_pipelines
         from cli_app.pipeline_cli import _resolve_planner
 
         prov, m = _resolve_planner(provider, model)
+        plan = plan_pipelines(" ".join(task), provider=prov, model=m)
+        if _json_mode():
+            _emit(
+                "OK",
+                message=f"Plan ready ({prov}/{m})",
+                detail={"planner": f"{prov}/{m}", "plan": plan.model_dump()},
+            )
+            return
         click.echo(f"Planner: {prov}/{m}\n")
-        click.echo(format_plan(plan_pipelines(" ".join(task), provider=prov, model=m)))
+        click.echo(format_plan(plan))
         return
 
     text = " ".join(task)
@@ -640,8 +871,20 @@ def pipeline_run(
         use_gpt_researcher=gpt_researcher,
         provider=provider,
         model=model,
-        progress=lambda msg: click.echo(msg),
+        progress=eprint,
     )
+    if _json_mode():
+        detail: dict[str, Any] = {}
+        for key in ("plan", "steps", "text"):
+            if out.get(key) is not None:
+                detail[key] = out[key]
+        _emit(
+            out.get("status") or ("OK" if out.get("ok") else "ERROR"),
+            message="Pipeline completed" if out.get("ok") else "Pipeline failed",
+            detail=detail,
+            error_code=out.get("error_code"),
+        )
+        raise SystemExit(0 if out.get("ok") else 1)
     if out.get("ok"):
         click.echo(out["text"], nl=False)
         raise SystemExit(0)

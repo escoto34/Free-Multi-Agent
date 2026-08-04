@@ -1,6 +1,6 @@
 # Systems orchestration — free-durable profile
 
-**Document status:** mid-2026 research snapshot (last updated 2026-08-03, WAVE-16 coherence pass)  
+**Document status:** mid-2026 research snapshot (last updated 2026-08-04, WAVE-17 CLI-output + cross-AI context)  
 **Live config:** `config/model_router.yaml` (loaded by `core/agent_config.py`)  
 **Factory defaults:** `config/defaults_model_router.yaml`  
 **Quota soft-caps:** `core/quotas.py` (must stay ≤ real provider limits)  
@@ -61,6 +61,7 @@ CLI (`chat`, `planner`) uses Agnes → Groq 120b; see §7. Provider-level `fallb
 | **System A — Vibe** | 2–5 | Architect (1) + Coder (1) + Debugger (0–3 fix cycles) |
 | **System B — Research** | 5–6 | Safety + compressor + web_search + grounding + synthesizer; web_search includes **+1 optional** bounded query-expansion LLM call (WAVE-11) that falls back to heuristic facets on any failure |
 | **CLI `/do`** | +1 planner | Then N× vibe and/or research (independent steps may run in parallel, WAVE-15) |
+| **chat `run_pipeline` tool (WAVE-17)** | same as `/do` | No new call shape — same planner + per-step calls; `cli.llm_compact=True` adds **1 chat call per compaction** (off by default) |
 
 **RPD picture after WAVE-09B/10/11/15 (recomputed):** LLM *call counts* are
 unchanged by WAVE-09B (HTTP cache cuts network fetches, not LLM calls), WAVE-10
@@ -536,6 +537,10 @@ The `/do` TUI flow (*planner → execute_plan*) is exposed headlessly as `pipeli
 **Plan-step execution (WAVE-15):** `execute_plan` runs independent (`uses_prior=False`) plan steps in a `ThreadPoolExecutor` wave (results collected in plan order, so a later dependent step sees identical prior context), while dependent (`uses_prior=True`) steps stay strictly sequential. The ADR recommendation was thread-pool-in-`orchestrate.py` over LangGraph-native parallel branches: the outer plan loop is a coarse fan-out with a single dependency signal, LangGraph's Send/branch state-management adds no value at this granularity, and the codebase already uses `ThreadPoolExecutor` for concurrent fetches in `source_fetch.py`. Every concurrent LLM call still goes through WAVE-07's reserve-before-call, thread-safe ledger (`try_reserve` under one lock+connection), so parallel steps near a shared daily limit can never over-commit. System A's architect→coder→debugger and System B's safety→…→synthesis chains are untouched and remain sequential.
 
 **Agent tools (WAVE-14):** the chat READ set gained `git_log`/`git_diff` (structured repo history without a `run_terminal` approval), `run_tests` (project suite via the project venv, structured pass/fail), and `search_web` (WAVE-11's keyless DuckDuckGo chain surfaced to free-form chat). All are READ-classified; every shell-based one runs through the same WAVE-04 hardened `_guarded_shell` gate as `run_terminal` (`_BLOCKED_CMD` denylist + modern-catalog soft-upgrade), never raw `subprocess`.
+
+**CLI output contract (WAVE-17):** every outer CLI subcommand accepts a global `--json` flag (accepted before the subcommand, e.g. `multiagent --json pipeline run …`). In `--json` mode stdout carries exactly one *envelope*; in default mode the same information renders as a human block. Envelope fields: `status` (`OK`/`WARNING`/`ERROR`), `message`, `timestamp` (UTC ISO 8601, `Z` suffix), optional `errorCode` (IBM-style `MAE-<nnnn>` catalog with Explanation/Action, see `cli_app/output.py`), optional `detail` (results container), optional `context` (step/tool/provider/model). Stream policy: final results → stdout; progress/diagnostics/preflight → stderr (`eprint`), in both modes. Exit codes: `0` OK, `1` ERROR, `2` usage error, `130` SIGINT/SIGTERM (headless `pipeline run` emits a final `MAE-9000` envelope then exits 130). All `CommandResult`/`chat_turn`/`ToolResult` objects also carry `status`/`error_code`/`timestamp` fields (additive — the TUI still reads `.text`/`.data`).
+
+**Cross-AI context wiring (WAVE-17):** the planner AI now receives a `=== CHAT HISTORY ===` block (last ~4 turns, 400 chars each, via `_chat_context_for_planner`) merged with the project context in `/do`, and `pipeline run` accepts `chat_context=` for headless callers. The chat AI: (1) gets a PIPELINES briefing in its system prompt (what System A/B do, the `run_pipeline` tool, `RECENT PIPELINE RUNS` from `runs.db` injected each seed — so it can reference recorded pipeline work instead of inventing it); (2) gains a `run_pipeline` chat tool (WRITE-classified → approval required; `{task, use_gpt_researcher?, provider?, model?}`) that delegates to `pipeline_cli.run_pipeline`, forwarding the session's recent conversation to the planner and progress to stderr. Context-economy fixes: the per-turn graphify query is now mtime-gated (reuses `session.cached_graph_snippet` when `graph.json` is unchanged — same policy as the planner), the recent-message window grows 4→8 when usage is <35% of budget, and `cli.llm_compact` (default off) switches auto-compaction from local message-drop to LLM summarization.
 
 ---
 

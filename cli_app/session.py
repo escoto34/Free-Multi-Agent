@@ -24,6 +24,19 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+PIPELINES_BRIEFING = """\
+PIPELINES (the two orchestration systems):
+- System A "vibe" — Architect → Coder → tests → Debugger → git commit. Use to
+  implement or change code/files in this repo.
+- System B "deep_research" — safety → search → grounding → synthesis. Use for
+  factual questions, surveys, brand/competitor research; returns a grounded
+  report with sources.
+- You can run them yourself with the run_pipeline tool (approval required),
+  or suggest /do <task> so the planner splits the work into steps.
+- Recent pipeline runs are listed in the seed context (RECENT PIPELINE RUNS);
+  reference them instead of guessing results."""
+
+
 @dataclass
 class Message:
     role: str  # system | user | assistant | system-note
@@ -61,7 +74,8 @@ class ConversationSession:
         "Other commands: /planner, /config, /keys, /skills, /tools, /help, /approve. "
         "For modern terminal tool recommendations use host tool toolbox_query "
         "(or tell the user about /tools doctor|suggest) — do not invent CLI names. "
-        "Never invent API keys or secrets."
+        "Never invent API keys or secrets.\n"
+        + PIPELINES_BRIEFING
     )
 
     def __post_init__(self) -> None:

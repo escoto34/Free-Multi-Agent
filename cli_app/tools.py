@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from cli_app.output import now_utc
+
 logger = logging.getLogger(__name__)
 
 # Package checkout (MultiAgent source + its graphify-out).
@@ -67,6 +69,7 @@ WRITE_TOOLS = frozenset(
         "graphify_update",
         "create_venv",
         "pip_install",
+        "run_pipeline",  # WAVE-17: heavy, may write files / spend quota
     }
 )
 
@@ -128,6 +131,9 @@ class ToolResult:
     ok: bool
     output: str
     skipped: bool = False
+    # WAVE-17 structured-output fields (additive)
+    error_code: Optional[str] = None
+    timestamp: str = field(default_factory=lambda: now_utc())
 
 
 def tools_help_text() -> str:
@@ -212,6 +218,12 @@ needs approval (write/bash/pip). Read tools may be batched.
 ```
 modes: suggest (default) | doctor | search | show | alt | runtime
 (alias: toolbox)
+
+```tool
+{"name": "run_pipeline", "args": {"task": "research coqui vivo v5 then build a page", "use_gpt_researcher": false}}
+```
+(Cheap reads only: planner + vibe/research executed here, may write files and
+spend quota. REQUIRES approval.) Optional args: provider / model (planner override).
 
 Modern catalog (automatic):
 - list_dir → eza/tre when installed (else Python listing)
@@ -416,11 +428,74 @@ def _find_test_python() -> str:
     return "python3"
 
 
-def exec_tool(name: str, args: dict[str, Any]) -> ToolResult:
-    """Execute a single tool; never raises — returns ToolResult."""
+def _run_pipeline_tool(args: dict[str, Any], ctx: Optional[dict[str, Any]]) -> ToolResult:
+    """WAVE-17: run the planner -> execute_plan flow inside a chat turn.
+
+    Heavy tool (approval-required, listed in WRITE_TOOLS). Passes the recent
+    conversation to the planner as chat context so /do-style intent survives.
+    Progress is forwarded to the caller's progress callback (usually stderr).
+    """
+    task = str(args.get("task") or args.get("prompt") or "").strip()
+    if not task:
+        return ToolResult(
+            "run_pipeline",
+            False,
+            "run_pipeline requires a 'task' argument",
+            error_code="MAE-3100",
+        )
+    chat_context = ""
+    progress = None
+    session = (ctx or {}).get("session")
+    if session is not None:
+        try:
+            from cli_app.commands import _chat_context_for_planner
+
+            chat_context = _chat_context_for_planner(session)
+        except Exception:
+            chat_context = ""
+        progress = (ctx or {}).get("progress")
+
+    from cli_app.pipeline_cli import run_pipeline
+
+    use_gpt = bool(args.get("use_gpt_researcher"))
+    provider = args.get("provider") or None
+    model = args.get("model") or None
+    try:
+        out = run_pipeline(
+            task,
+            use_gpt_researcher=use_gpt,
+            provider=provider,
+            model=model,
+            progress=progress,
+            chat_context=chat_context,
+        )
+    except Exception as exc:
+        return ToolResult(
+            "run_pipeline", False, f"run_pipeline failed: {exc}", error_code="MAE-2000"
+        )
+    body = (out.get("text") or "")[:3000]
+    if out.get("ok"):
+        return ToolResult("run_pipeline", True, f"[run_pipeline OK]\n{body}")
+    return ToolResult(
+        "run_pipeline",
+        False,
+        f"[run_pipeline FAIL]\n{body}",
+        error_code=out.get("error_code") or "MAE-2000",
+    )
+
+
+def exec_tool(name: str, args: dict[str, Any], *, ctx: Optional[dict[str, Any]] = None) -> ToolResult:
+    """Execute a single tool; never raises — returns ToolResult.
+
+    *ctx* (WAVE-17) is an optional call-context dict ``{"session": …, "progress": …}``
+    supplied by the agent loop; only ``run_pipeline`` consumes it.
+    """
     name = (name or "").strip().lower()
     name = _TOOL_ALIASES.get(name, name)
     try:
+        if name == "run_pipeline":
+            return _run_pipeline_tool(args, ctx)
+
         if name == "graphify_query":
             from cli_app.graph_rag import query_graph
 
@@ -961,6 +1036,7 @@ def run_tools(
     approve: Optional[ApprovalFn] = None,
     always_approve: bool = False,
     one_mutating_at_a_time: bool = True,
+    ctx: Optional[dict[str, Any]] = None,
 ) -> tuple[list[ToolResult], bool, bool]:
     """Run tools with optional per-command approval (no batch approve-all).
 
@@ -982,7 +1058,11 @@ def run_tools(
                 except Exception as exc:
                     results.append(
                         ToolResult(
-                            call.name, False, f"approval error: {exc}", skipped=True
+                            call.name,
+                            False,
+                            f"approval error: {exc}",
+                            skipped=True,
+                            error_code="MAE-3000",
                         )
                     )
                     rejected_once = True
@@ -995,18 +1075,33 @@ def run_tools(
                 decision = "approve"
             elif decision in ("reject", "r", "no", "n"):
                 results.append(
-                    ToolResult(call.name, False, "rejected by user", skipped=True)
+                    ToolResult(
+                        call.name,
+                        False,
+                        "rejected by user",
+                        skipped=True,
+                        error_code="MAE-3000",
+                    )
                 )
                 rejected_once = True
                 continue
             if decision not in ("approve", "yes", "y", "a", "ok", "accept"):
                 results.append(
-                    ToolResult(call.name, False, f"rejected ({decision})", skipped=True)
+                    ToolResult(
+                        call.name,
+                        False,
+                        f"rejected ({decision})",
+                        skipped=True,
+                        error_code="MAE-3000",
+                    )
                 )
                 rejected_once = True
                 continue
 
-        results.append(exec_tool(call.name, call.args))
+        if ctx is None:
+            results.append(exec_tool(call.name, call.args))
+        else:
+            results.append(exec_tool(call.name, call.args, ctx=ctx))
 
     return results, always, rejected_once
 
@@ -1029,6 +1124,8 @@ def format_command_header(call: ToolCall) -> str:
         return "graphify update ."
     if n == "apply_patch":
         return f"apply_patch {str(a.get('patch', ''))[:60]}…"
+    if n == "run_pipeline":
+        return f"run_pipeline {str(a.get('task', ''))[:80]}"
     return f"{n} {json.dumps(a, ensure_ascii=False)[:120]}"
 
 

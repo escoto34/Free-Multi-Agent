@@ -286,6 +286,9 @@ def get_cli_settings(config_path: Optional[Path] = None) -> dict[str, Any]:
         "graphify_budget": int(cli.get("graphify_budget") or 1200),
         "chat_recent_messages": int(cli.get("chat_recent_messages") or 4),
         "store_reply_max_chars": int(cli.get("store_reply_max_chars") or 1200),
+        # WAVE-17: auto-compaction strategy — False = local drop (default),
+        # True = LLM-summarize older turns (costs one extra LLM call).
+        "llm_compact": bool(cli.get("llm_compact") or False),
     }
 
 

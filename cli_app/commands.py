@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -30,6 +30,7 @@ from graphs.vibe_coding_graph import invoke_vibe_coding_pipeline
 
 from cli_app.session import ConversationSession
 from cli_app.icons import get_icon
+from cli_app.output import now_utc
 
 ROOT = Path(__file__).parent.parent
 
@@ -40,6 +41,14 @@ class CommandResult:
     text: str
     # Optional structured payload for the TUI
     data: Optional[dict[str, Any]] = None
+    # WAVE-17 structured-output fields (additive; TUI reads .text/.data only)
+    status: str = "OK"
+    error_code: Optional[str] = None
+    timestamp: str = field(default_factory=now_utc)
+
+    def __post_init__(self) -> None:
+        if self.status == "OK" and not self.ok:
+            self.status = "ERROR"
 
 
 CommandHandler = Callable[[list[str], ConversationSession], CommandResult]
@@ -370,6 +379,32 @@ def _planner(args: list[str], session: ConversationSession) -> CommandResult:
     )
 
 
+def _chat_context_for_planner(
+    session: ConversationSession,
+    *,
+    n: int = 4,
+    max_chars_each: int = 400,
+) -> str:
+    """Recent conversation as a CHAT HISTORY block for the planner AI.
+
+    The planner otherwise only sees project files/graphify; without the
+    conversation it may misinterpret a follow-up /do that relies on what was
+    just discussed. Bounded so it never dominates the prompt.
+    """
+    turns = session.recent_turns(n=n, max_chars_each=max_chars_each)
+    if not turns:
+        return ""
+    parts = [
+        "=== CHAT HISTORY (most recent turns — authoritative user intent) ===",
+        "The user has been talking about the following; align the plan with it.",
+    ]
+    for m in turns:
+        role = "USER" if m["role"] == "user" else "ASSISTANT"
+        parts.append(f"[{role}] {m['content']}")
+    parts.append("=== END CHAT HISTORY ===")
+    return "\n".join(parts)
+
+
 def _build_planner_context(prompt: str, session: ConversationSession) -> str:
     """File reads + optional graphify for the planner (not every turn blindly)."""
     from cli_app.context_tools import (
@@ -461,12 +496,19 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
     translated = pipeline_prompt.strip() != prompt.strip()
 
     context = _build_planner_context(pipeline_prompt, session)
+    chat_ctx = _chat_context_for_planner(session)
+    if chat_ctx:
+        context = "\n\n".join(filter(None, [context, chat_ctx]))
     try:
         plan = plan_pipelines(
             pipeline_prompt, provider=prov, model=model, context=context or None
         )
     except Exception as exc:
-        return CommandResult(ok=False, text=f"Planner failed ({prov}/{model}): {exc}")
+        return CommandResult(
+            ok=False,
+            text=f"Planner failed ({prov}/{model}): {exc}",
+            error_code="MAE-1000",
+        )
 
     plan_text = format_plan(plan)
     _prog(f"plan ready — running {len(plan.steps)} step(s)" + get_icon("ellipsis"))
@@ -486,6 +528,7 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
         return CommandResult(
             ok=False,
             text=f"Plan:\n{plan_text}\n\nExecution failed: {exc}",
+            error_code="MAE-2000",
         )
 
     header = f"Planner: {prov}/{model}  engine: {engine}"
@@ -951,7 +994,9 @@ def dispatch(line: str, session: ConversationSession) -> CommandResult:
     try:
         return handler(args, session)
     except Exception as exc:
-        return CommandResult(ok=False, text=f"/{name} failed: {exc}")
+        return CommandResult(
+            ok=False, text=f"/{name} failed: {exc}", error_code="MAE-0000"
+        )
 
 
 def _wants_graph_refresh(text: str) -> bool:
