@@ -1410,18 +1410,288 @@ New: `fixed_files` short-circuits coder (debugger provides files → coder call 
 `systems.md`: §2 calls-per-pipeline table (A: 2-5→2-4, B: 5-6→4-5 with the optional web expansion), new "WAVE-18 role consolidation" subsection with the % improvement table (A -17% guaranteed / -27% with editor debugger, B -20%, combined ~-22%, happy path -33%) and the rejected grounding+synthesizer merge rationale; §5 role table without architect; §6 role table without safety_filter (compressor gains safety gate); §4.3 benchmark role table; status line. `README.md`: vibe flow line ("Architect → Coder" → merged implementer), "Default roles" table.
 
 ### Acceptance criteria
-- [ ] `architect` and `safety_filter` roles removed from YAML, defaults, benchmarks, `KNOWN_ROLES`, quota specs; no code path references them.
-- [ ] System A happy path = 2 LLM calls (implementer + debugger); fix loop with `fixed_files` = 1 call/cycle; `suggested_fix` fallback keeps the coder loop.
-- [ ] System B = 4 LLM calls (compressor w/ safety gate, web_search optional expansion, grounding, synthesizer); unsafe topics abort before search; summary keys `is_safe`/`safety_reasons` preserved.
-- [ ] Preservation warnings + landing-quality rules still enforced after the architect fold; debugger preview cap raised.
-- [ ] `tests` updated + new wave tests pass; full default suite green.
-- [ ] `systems.md` + `README.md` updated with call counts, role tables, and % improvement.
+- [x] `architect` and `safety_filter` roles removed from YAML, defaults, benchmarks, `KNOWN_ROLES`, quota specs; no code path references them.
+- [x] System A happy path = 2 LLM calls (implementer + debugger); fix loop with `fixed_files` = 1 call/cycle; `suggested_fix` fallback keeps the coder loop.
+- [x] System B = 4 LLM calls (compressor w/ safety gate, web_search optional expansion, grounding, synthesizer); unsafe topics abort before search; summary keys `is_safe`/`safety_reasons` preserved.
+- [x] Preservation warnings + landing-quality rules still enforced after the architect fold; debugger preview cap raised.
+- [x] `tests` updated + new wave tests pass; full default suite green.
+- [x] `systems.md` + `README.md` updated with call counts, role tables, and % improvement.
+
+### Follow-ups WAVE-18 (todos restantes, implementación `529d580` commiteada)
+- [ ] Validar con 1-2 vibe runs live (`/do`) y comparar llamadas LLM reales en `data/runs.db` contra la proyección ~4.4 calls/run (tabla % de `systems.md` §2.1); recalibrar la tabla si el mix de attempts=1/2/3 difiere del supuesto (1×1, 4×2, 7×3).
+- [ ] Backfill de "Resultados WAVE-18" con mediciones live aquí en `mejoras.md` (calls reales por run vs. proyectadas, con `file:line` del cálculo en `core/quota_estimate.py`).
+- [ ] (opcional) push del commit `529d580` a remoto — no realizado, working tree quedó reviewable por convención del roadmap.
 
 ### Prohibitions
 No changes to `execute_plan`/`pipeline_cli` return shapes, `is_safe`/`sources` summary keys, or the `grounding`/`synthesizer` two-pass design. No reintroduction of `/vibe`/`/research` slash commands. Do not touch `Trend-AI/` or `graphify-out/`.
 
 ### Agent deliverable
 1. Summary. 2. Role-consolidation analysis with % improvement per candidate (real runs.db mix) and rejected-option rationale. 3. Files changed. 4. Contract changes + test output. 5. Findings/limitations. 6. Checklist ticked.
+
+---
+
+## WAVE-19 — CI Unblock and Provider Catalog Refresh
+
+### Objective
+Fix a broken CI (unsatisfiable `gpt-researcher` pin) and correct provider-catalog drift discovered by live `/models` probes against all 7 configured keys on 2026-08-04: six configured models no longer exist on their providers, and none of the models added since WAVE-08 (opencode_zen) have ever been verified against a real key.
+
+### Dependencies
+None (first wave of a new tranche; independent of WAVE-01..18's completed work). Blocks WAVE-20 (scoring needs a catalog that matches reality before scoring it) and WAVE-21.
+
+### Repository context
+- CI failure root cause: `requirements.txt:29` pins `gpt-researcher>=1.0.0`; PyPI's actual maximum release is `0.16.0` — `>=1.0.0` has never been satisfiable. pip fails immediately on that line; the sibling Python-version matrix leg (`ci.yml:13`, `["3.11","3.12"]`) keeps installing until GitHub cancels it via fail-fast, which is why the failure looks like a long successful install followed by `Error: The operation was canceled.` rather than a clean single error.
+- The import is lazy and function-local (`agents/deep_research/gpt_researcher_wrapper.py:17`, inside `_run_research_direct`), never evaluated at package-import time, but has no `try/except` — a bare `ModuleNotFoundError` propagates uncaught through `gpt_researcher_node` → `graphs/deep_research_graph.py:391`'s `loop.run_until_complete`, unlike every sibling node which uses the `transfer_control(..., note=str(exc))` degraded-path pattern.
+- Nothing in the test suite imports the package: `tests/test_wave13.py:48` only asserts the `--gpt-researcher` Click option is registered; `tests/test_wave15.py:90` passes `use_gpt_researcher=False`. It is exercised only by the opt-in CLI flag (`cli.py:820,837,871`), never by default pipelines (`deep_research_graph.py:454,515,555` all default `False`).
+- `graphs/deep_research_graph.py:369-374`'s docstring still describes "Celery submission, polling … automatic fallback to direct call when Redis/Celery is unavailable" — that mechanism was deleted in WAVE-01; the current wrapper unconditionally calls `_run_research_direct` with `celery_task_id` hardcoded `None` (`gpt_researcher_wrapper.py:46`). The docstring is stale, not descriptive of a fallback that still exists.
+- Provider drift, verified live (not from documentation) against every key present in `.env`:
+  - **openrouter** (`config/model_router.yaml` providers block): configured `google/gemma-3-27b-it:free`, `meta-llama/llama-3.3-70b-instruct:free`, `qwen/qwen3-32b:free`, `tencent/hy3:free` are **gone** from `GET /api/v1/models`. Live `:free` catalog (14 models) includes `nvidia/nemotron-3-ultra-550b-a55b:free` (1M context), `nvidia/nemotron-3-super-120b-a12b:free`, `nvidia/nemotron-3-nano-30b-a3b:free`, `nvidia/nemotron-3.5-content-safety:free`, `google/gemma-4-31b-it:free`, `google/gemma-4-26b-a4b-it:free`, `openai/gpt-oss-20b:free`, `inclusionai/ling-3.0-flash:free`, `poolside/laguna-s-2.1:free`, `poolside/laguna-xs-2.1:free`. `cohere/north-mini-code:free` is still live.
+  - **mistral**: configured `open-mistral-nemo` is gone from `GET /v1/models`. New: `magistral-small-latest` (reasoning-tuned), `devstral-medium-latest`, `ministral-14b-latest`, `mistral-medium-3-5`.
+  - **gemini**: configured `gemma-3-27b-it` is gone from `GET /v1beta/models`. New: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-3-flash-preview`, `gemma-4-31b-it`, `gemma-4-26b-a4b-it`.
+  - **groq**, **cerebras**: live catalogs exactly match what's configured (no drift), but both now also serve models not yet cataloged: groq `llama-3.3-70b-versatile`, `groq/compound` (full, vs. the configured `compound-mini`); cerebras has no additions beyond its 3 configured models.
+  - **agnes**: configured `agnes-2.0-flash` still live; new `agnes-2.5-flash`, `agnes-2.5-pro`, `agnes-2.5-pro-alpha` also live (image/video variants exist too but are out of scope — this stack is text-role routing only).
+  - **cohere**: all 3 configured models (`command-a-plus-05-2026`, `command-r-plus-08-2024`, `command-r7b-12-2024`) still live; new `command-a-reasoning-08-2025`, `north-mini-code-1-0`.
+  - **opencode_zen**: no `OPENCODE_ZEN_API_KEY` in `.env` — added in WAVE-08 but never actually verified against a live key. Cannot be probed this wave.
+- `config/defaults_model_router.yaml` is missing the entire `opencode_zen` provider block and the `opencode_zen_fallback` cascade entry that WAVE-08 added to the *live* `config/model_router.yaml` — confirmed by diff. `multiagent config reset` today silently deletes 8 catalog models.
+- The expiry mechanism (`free_until` + `is_model_available()`) is hardcoded around one model: `core/model_selector.py:47-48` (`_HY3_MODEL_ID`, `_HY3_DEFAULT_UNTIL`), `:147-149` (`model_free_until` fallback), `:247-248` (`_expired_fallback_for`), plus `hy3_status()` called from `cli.py:142`. Four tests are hy3-specific: `test_hy3_available_before_expiry`, `test_hy3_expired_status`, `test_hy3_expired_scores_capped_at_49`, `test_hy3_expired_role_auto_fallback` (`tests/test_model_selector.py:257-320`). Since hy3 is now gone from OpenRouter entirely (not merely past its promo window), this is the natural moment to generalize the mechanism rather than leave it single-model-shaped forever.
+
+### Scope
+**In scope:**
+1. `requirements.txt` — remove the `gpt-researcher` line.
+2. `pyproject.toml` — add a `research` optional-dependency group with a satisfiable floor.
+3. `agents/deep_research/gpt_researcher_wrapper.py` — guard the lazy import with `try/except ImportError`, raising a clear install-hint `RuntimeError` instead of letting `ModuleNotFoundError` propagate raw.
+4. `graphs/deep_research_graph.py:369-374` — rewrite the stale Celery docstring to describe the actual in-process direct call.
+5. `.github/workflows/ci.yml` — add `fail-fast: false` so a failure on one Python-version leg doesn't cancel the other before it finishes.
+6. `config/model_router.yaml` `providers:` — remove the 6 dead model ids; add the newly-verified live free models, catalog/cascade tier only (no role promotion — mirrors WAVE-08's own prohibition).
+7. `config/defaults_model_router.yaml` — sync structurally with the live file, including backfilling the missing `opencode_zen` block/cascade entry.
+8. `config/model_benchmarks.yaml` — add a provisional benchmark row (50-69 adequate band, marked `provisional`) for every newly added model, satisfying `tests/test_provider_registry.py::test_every_registered_model_has_benchmark_row`.
+9. `scripts/probe_providers.py` — new read-only diagnostic script (see Contracts) so this catalog check is repeatable, not a one-off manual probe.
+10. Generalize the hy3-specific expiry mechanism in `core/model_selector.py` to be driven purely by any model row's `free_until` field; rewrite the 4 hy3-specific tests against a synthetic fixture model.
+
+**Explicitly out of scope:**
+- Promoting any newly added model to a role primary/fallback — that is WAVE-21's decision, made after WAVE-20 re-scores the catalog.
+- The scoring schema itself (efficiency axis, quality re-scoring) — WAVE-20.
+- `select_for_role`'s selection algorithm — WAVE-21.
+- Verifying `opencode_zen` — no key available; document the gap, do not guess or delete.
+- Upgrading the many unrelated floor-only pins flagged during investigation (`langgraph`, `openai`, `cohere`, `mcp`, `textual` — all unpinned across major versions). Real latent risk, but unrelated to the current CI failure; a future wave's concern.
+
+### Mandatory inspection
+`requirements.txt`, `pyproject.toml`, `.github/workflows/ci.yml`, `agents/deep_research/gpt_researcher_wrapper.py`, `graphs/deep_research_graph.py:340-400`, `config/model_router.yaml` in full, `config/defaults_model_router.yaml` in full, `config/model_benchmarks.yaml` in full, `core/model_selector.py` in full, `core/provider_registry.py`, `tests/test_model_selector.py:257-320`, `tests/test_provider_registry.py`.
+
+### Implementation sequence
+1. CI fix first (unblocks everything else from running in CI while this wave is in flight): `requirements.txt`, `pyproject.toml` extra, guarded import, docstring fix, `fail-fast: false`.
+2. `scripts/probe_providers.py` — build it before editing the catalog, so the catalog changes below are driven by its output, not manual transcription.
+3. Catalog refresh: `model_router.yaml`, `defaults_model_router.yaml`, provisional `model_benchmarks.yaml` rows.
+4. Generalize hy3 expiry: replace the hardcoded constants with a generic `free_until`-driven path; keep the hy3 row itself (now with `free_until` in the past) as the documented real example; rewrite the 4 dependent tests against a synthetic `tmp_path` fixture model, matching the existing pattern used by `test_mis_specialized_weak_primary_switches`.
+5. Run `scripts/probe_providers.py` again to confirm zero configured-but-gone models remain.
+6. Full test suite + `ruff check .`.
+7. `systems.md` §3 (per-provider catalogs) sync.
+
+### Contracts
+```python
+# scripts/probe_providers.py
+def probe_provider(name: str, meta: ProviderMeta) -> ProbeResult: ...  # live GET, no completions, no writes
+def diff_catalog(configured: set[str], live: set[str]) -> CatalogDiff: ...  # gone / live-only / matched
+# CLI: prints the 3-way diff per provider; exits 1 if any configured model is gone.
+```
+```python
+# core/model_selector.py — generalized, no per-model special-casing
+def model_free_until(provider: str, model: str) -> date | None: ...  # reads models[key].free_until, no hy3 constant
+def is_model_available(provider: str, model: str, *, today: date) -> bool: ...  # unchanged signature
+```
+
+### Mandatory tests
+`pytest -m "not e2e and not real_ai and not real_web" -q` full suite green. The 4 hy3 tests rewritten against a synthetic fixture and passing. `tests/test_provider_registry.py`'s existing benchmark-row and cascade-entry guards pass against the refreshed catalog. New: a smoke test that `scripts/probe_providers.py --help` runs and that its diff function correctly flags a synthetic gone/live pair (no live network call in the test itself — mock the HTTP layer).
+
+### Documentation impact
+`systems.md` §3 (per-provider subsections 3.1-3.9) — sync model lists to what's actually live per the probe. §4.2 — add rows for newly cataloged models (provisional, matching WAVE-08's precedent for unscored additions).
+
+### Acceptance criteria
+- [x] `pytest -m "not e2e and not real_ai and not real_web" -q` green locally on the interpreter available in this session.
+- [x] CI's `gpt-researcher` line removed from `requirements.txt`; optional extra present in `pyproject.toml`; import guarded; stale docstring fixed; `fail-fast: false` added.
+- [x] `scripts/probe_providers.py` exists, runs read-only, and reports zero configured-but-gone models after the catalog refresh.
+- [x] `config/model_router.yaml` and `config/defaults_model_router.yaml` match structurally (opencode_zen present in both); no dead model ids remain in either.
+- [x] Every newly added model has a benchmark row; `test_every_registered_model_has_benchmark_row` and `test_every_provider_has_cascade_entry` pass.
+- [x] hy3 expiry mechanism generalized; 4 hy3 tests pass against a synthetic fixture, not the literal hy3 constant.
+- [x] No new provider promoted to a role primary/fallback.
+- [x] `systems.md` §3/§4.2 synced.
+
+### Follow-ups WAVE-19 (implementación commiteada en este tranche)
+- [ ] WAVE-20 re-scores the 25 WAVE-19 provisional rows from researched sources (`evidence` field), per WAVE-20 scope item 5.
+- [ ] OpenRouter `:free` catalog also serves `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`, `nvidia/nemotron-nano-12b-v2-vl:free`, `nvidia/nemotron-nano-9b-v2:free` — not added (vision/reasoning-variant scope, text-role routing only); re-evaluate if a future wave needs them.
+- [ ] Cohere live catalog includes new `command-a-reasoning-08-2025` / `north-mini-code-1-0` — not added (trial-tier scarce quota, roadmap scope listed no cohere additions); re-evaluate before WAVE-20 catalog scoring if desired.
+- [ ] `scripts/probe_providers.py` skips a provider when its key is absent; a future wave could add `--json` output and a CI drift gate (exit-1 already enforced locally).
+- [ ] README's "research engine" mention (if any) should reference the new `.[research]` extra — checked in the WAVE-21 final README pass.
+
+### Prohibitions
+Do not promote any new or refreshed model to a role primary/fallback in `vibe_coding:`/`deep_research:`/`cli:` — catalog/cascade tier only, exactly like WAVE-08. Do not delete the `opencode_zen` provider block for lack of a key — document the verification gap instead. Do not touch `Trend-AI/` or `graphify-out/`. Do not widen scope into the scoring schema (WAVE-20) or selection algorithm (WAVE-21).
+
+### Agent deliverable
+1. Summary. 2. Probe output (before/after catalog refresh). 3. Files changed. 4. New/changed YAML blocks (quoted). 5. Test output (full suite + targeted hy3 rewrite). 6. Findings (e.g. any provider whose probe behaved unexpectedly). 7. Limitations (opencode_zen unverifiable this wave). 8. Checklist ticked.
+
+---
+
+## WAVE-20 — Scoring v2: Efficiency Axis and Re-Score
+
+### Objective
+The benchmark schema carries only 5 quality integers per model (code/reason/ground/synth/safety) — no latency, throughput, context window, or capacity signal exists anywhere, so "efficiency" cannot be expressed or compared. Add an efficiency axis measured empirically by a repeatable probe, re-score the full (WAVE-19-refreshed) catalog with both quality (researched) and efficiency (measured), and revive six `selection_defaults` YAML keys that currently have zero Python consumers.
+
+### Dependencies
+WAVE-19 (must score the catalog that actually exists, not the stale one). Blocks WAVE-21 (selection needs real fitness scores to rank against).
+
+### Repository context
+- `config/model_benchmarks.yaml` schema today: `models.<key>.scores: {code,reason,ground,synth,safety}` — nothing else per model. `rubric_bands` and 6 `selection_defaults` keys (`logic_weight`, `error_handling_weight`, `context_weight`, `large_context_tokens`, `large_context_boost`, `prefer_fallback_overall`) exist in the YAML but are never read by any Python — confirmed by grep. `core/difficulty_scorer.py:244-255` hardcodes the aggregate weights those first three keys clearly correspond to: `overall = 0.30*code + 0.25*reason + 0.15*ground + 0.15*synth + 0.05*safety + 0.10*max(logic, errors)`.
+- Model keys are ambiguous strings: `f"{provider}/{model}"` produces `groq/openai/gpt-oss-120b` and `groq/groq/compound-mini` — not round-trippable back to `(provider, model)` by naive splitting on the first `/`.
+- Rate limits already live in `config/model_router.yaml` `providers:` as `daily_limit` / `daily_limit_shared` / `daily_limit_per_model`, resolved by `core/provider_registry.provider_limit_key()`. A 45-RPD shared OpenRouter pool and Groq's 800/model must not be treated as equivalent capacity.
+- `core/quotas.py`'s `QuotaTracker.remaining()` and `core/quota_estimate.py` already compute per-bucket headroom at runtime — reuse for `capacity_score`, don't re-derive.
+
+### Scope
+**In scope:**
+1. Bump `config/model_benchmarks.yaml` to `version: 2`. Add per-model `efficiency: {tokens_per_sec, first_token_ms, context_window, speed_score, context_score, capacity_score}`, `evidence: public|vendor|inferred|sparse|provisional`, `verified: "YYYY-MM-DD"`, `available: bool`.
+2. `scripts/benchmark_models.py` — extends WAVE-19's probe with measurement: one minimal fixed-prompt completion per model to time `first_token_ms`/`tokens_per_sec`; derives `speed_score`/`context_score`/`capacity_score` relative within the stack (same rubric philosophy as the existing quality bands — stack-relative, not absolute). `--dry-run` default; `--write` to persist; refuses to run without `--yes` (spends real RPD); skips any provider below a configurable quota margin.
+3. `core/model_scoring.py` (new) — pure functions: `quality_for_role`, `efficiency_score`, `fitness`, `rank_candidates`, `split_model_key` (resolves against the registered provider list instead of naive `/`-splitting).
+4. Wire `core/difficulty_scorer.py`'s aggregate weights to read from `selection_defaults` (defaulting to today's hardcoded values, so scoring output is unchanged until someone edits the YAML). Delete any of the 6 currently-dead keys that still has no consumer after this wave.
+5. Re-score: research vendor cards / public benchmarks for quality on every model added in WAVE-19; run the probe for efficiency on the full catalog; update `systems.md` §4.2 to match (it is the human twin of the YAML and must not drift, per the existing convention documented at the top of that section).
+6. Extend `tests/test_provider_registry.py`'s guard: every model row must carry `efficiency`, `evidence`, `verified` — fail CI on a missing one, same shape as the existing benchmark-row guard.
+
+**Explicitly out of scope:**
+- Changing `select_for_role`'s selection logic to actually use `fitness()` — that's WAVE-21. This wave produces the scores and the pure ranking function; it does not wire them into routing decisions yet.
+- Any role reassignment in `model_router.yaml` — WAVE-21, after scores land.
+- A full deterministic eval harness (run generated tests, exact-match reasoning, citation checks) — rejected per user's explicit choice of the hybrid approach over the "full empirical auto-scorer" option; the probe measures efficiency only, quality stays research-sourced.
+
+### Mandatory inspection
+`config/model_benchmarks.yaml` in full, `core/difficulty_scorer.py` in full, `core/model_selector.py:get_model_scores`, `core/provider_registry.py`, `core/quotas.py`, `core/quota_estimate.py`, `systems.md` §4 in full, `tests/test_provider_registry.py`, `tests/test_reasoning_params.py` (weight-consuming paths must not regress).
+
+### Implementation sequence
+1. Schema change first (additive fields with sensible defaults so nothing currently reading `models.<key>.scores` breaks).
+2. `core/model_scoring.py` — pure, unit-tested in isolation before it touches any live data.
+3. `scripts/benchmark_models.py --dry-run` — build and sanity-check output shape before spending any real quota.
+4. Wire `selection_defaults` weights into `difficulty_scorer.py`; confirm `overall` scores are byte-identical to before the change on the existing test fixtures (this is a behavior-preserving refactor at this point, not a re-tune).
+5. Run the probe for real (`--write --yes`) once quota headroom allows; capture output.
+6. Research and fill in quality scores for newly-added models; update `evidence` honestly.
+7. Extend the guard test; update `systems.md` §4.2.
+8. Full suite + targeted `test_model_scoring.py` (new) + `ruff check .`.
+
+### Contracts
+```python
+# core/model_scoring.py
+def split_model_key(key: str) -> tuple[str, str]: ...              # resolves against registered providers
+def quality_for_role(model_key: str, role_path: str) -> float: ...  # mean over role.relevant_areas
+def efficiency_score(model_key: str) -> float: ...                  # weighted speed/context/capacity
+def fitness(model_key: str, role_path: str) -> float: ...           # quality_weight*quality + efficiency_weight*efficiency
+def rank_candidates(role_path: str, candidates: list[str]) -> list[tuple[str, float]]: ...
+```
+```yaml
+# config/model_benchmarks.yaml — new selection_defaults keys
+quality_weight: 0.75
+efficiency_weight: 0.25
+```
+
+### Mandatory tests
+New `tests/test_model_scoring.py`: `split_model_key` round-trips every real catalog key including the ambiguous `groq/groq/compound-mini` and `groq/openai/gpt-oss-120b`; `quality_for_role`/`efficiency_score`/`fitness` against fixed fixture inputs with hand-computed expected outputs; `rank_candidates` orders correctly on a synthetic 3-model fixture. Regression: `difficulty_scorer` weight-wiring produces identical `overall` scores to pre-change on existing `test_reasoning_params.py`/`test_model_selector.py` fixtures. Extended guard: every benchmark row has `efficiency`/`evidence`/`verified`.
+
+### Documentation impact
+`systems.md` §4.1 (rubric definition — note the new efficiency axis and its bands), §4.2 (full re-score table, quality + efficiency columns, evidence notes updated for every changed row).
+
+### Acceptance criteria
+- [ ] `config/model_benchmarks.yaml` at `version: 2`; every model row has `efficiency`/`evidence`/`verified`/`available`.
+- [ ] `core/model_scoring.py` exists with the 5 contract functions, unit tested in isolation.
+- [ ] `scripts/benchmark_models.py` exists, defaults to `--dry-run`, requires `--yes` to spend quota, skips low-headroom providers.
+- [ ] `difficulty_scorer.py` weights sourced from YAML; `overall` scores unchanged from before this wave on existing fixtures (verified, not assumed).
+- [ ] Dead `selection_defaults` keys either wired to a real consumer or deleted — none left decorative.
+- [ ] `tests/test_provider_registry.py` guard extended and passing.
+- [ ] `systems.md` §4.1/§4.2 synced with the re-score.
+- [ ] No selection-logic change in `core/model_selector.py` this wave (that's WAVE-21) — confirm via diff.
+
+### Prohibitions
+Do not wire `fitness()`/`rank_candidates()` into `select_for_role` — that is WAVE-21's job specifically so the scoring change and the routing-behavior change land, and can be reviewed, as separate commits. Do not invent quality numbers without a source — mark `evidence: provisional` and say so, per the existing rubric's own scoring rules (`systems.md` §4.1 rule 2: "never invent exact HumanEval % you did not read"). Do not run the probe without `--yes`/quota-margin guards — it spends real free-tier RPD.
+
+### Agent deliverable
+1. Summary. 2. Probe output (efficiency measurements per model). 3. Quality re-score table with evidence notes. 4. Files changed. 5. New contract (`core/model_scoring.py`) + test output. 6. Findings (e.g. any model whose measured efficiency surprised you relative to its documented tier). 7. Limitations (unmeasured models, provisional evidence). 8. Checklist ticked.
+
+---
+
+## WAVE-21 — Score-Driven Routing and `cli.chat` Wiring
+
+### Objective
+Today `select_for_role` cannot actually choose a model: it opens with `del assessment, hard_th` (`core/model_selector.py:277`), discarding the `DifficultyAssessment` that was computed and threaded through the entire runtime specifically to inform this decision. The only switch condition (`score_fallback(area) - score_primary(area) >= 8` AND `score_primary(area) <= 49`) can never fire against the shipped catalog, because no configured primary scores that low on its own relevant areas — so selection is, today, a no-op that always returns the YAML-pinned primary. Separately, `cli.chat` bypasses role resolution entirely (`cli_app/agent_chat.py:256` calls `invoke_router` with no `role_path=`/`assessment=`), so its `config/model_benchmarks.yaml` `roles.cli.chat` and `reasoning.role_effort` entries are dead config. This wave makes WAVE-20's scores actually drive model choice, and gives `cli.chat` the same selection/reasoning machinery every other role already has.
+
+### Dependencies
+WAVE-20 (needs real `fitness()` scores to rank against; without it there is nothing to route on).
+
+### Repository context
+- `select_for_role` control flow (`core/model_selector.py:293-480`): expiry gate → no-fallback short circuit → fallback-expiry check → operational-degradation branch (`primary_status` defaults `"ok"`, no production caller ever passes anything else — test-only today) → mis-specialization veto (the dead-on-arrival one described above) → else keep primary.
+- `hard_threshold` per role (`config/model_benchmarks.yaml` `roles.<path>.hard_threshold`) is read into a local and then discarded (`del assessment, hard_th`) — fully inert.
+- `core/difficulty_scorer.py:217-235` has a dead `elif` at line 222 duplicating the `"coder"/"debugger"` condition of the branch immediately above it, making the `"planner"` role-bias branch technically reachable but the intent unreadable; no branch matches `cli.chat` at all.
+- `cli.chat` bypass sites, all sharing the same no-`role_path` pattern: `cli_app/agent_chat.py:256` (interactive chat), `cli_app/agent_chat.py:375` (LLM session compaction), `cli_app/commands.py:140` (`/compact --llm`), `cli_app/commands.py:486-490` and `cli_app/pipeline_cli.py:71-76` (pre-pipeline English translation). `core/config_editor.py:263-270`'s `get_cli_settings` hardcodes a primary fallback with no cascade if `cli.chat` is missing from YAML.
+- `deep_research.web_search`'s primary (`groq/compound-mini`) has no configured fallback by design — `model_benchmarks.yaml:163`/`systems.md` §4.3 document "no live search → abort (graph), not model swap." This must remain true after ranking is introduced; today it's true only because no fallback is configured, which is incidental, not structural.
+- `_VIBE_ROLES`/`_RESEARCH_ROLES` (`difficulty_scorer.py:284-296`) are hardcoded tuples of pre-scored pipeline roles — any role touched by this wave that should be pre-scored up front must be added here too, or it falls back to ad-hoc scoring at call time.
+
+### Scope
+**In scope:**
+1. Rewrite `select_for_role` to rank the candidate set (role primary + role fallback + every available, unexpired, quota-healthy catalog model with a benchmark row) by `fitness()` from WAVE-20's `core/model_scoring.py`, keeping the existing anti-churn hysteresis (`score_advantage_threshold`, default 8 — do not switch on a marginal edge).
+2. Make `hard_threshold` live: when `assessment.relevant_max(role.relevant_areas) >= role.hard_threshold`, require the selected model's role quality to also clear that threshold, escalating to the best candidate that does if the current pick doesn't.
+3. Make `primary_status` real: derive `quota_exhausted` from `QuotaTracker.remaining()`/`core/quota_estimate.py` instead of leaving the degraded branch exercised only by tests.
+4. Add a role-level `pin: true` flag; set it on `deep_research.web_search` so the "never model-fallback, abort instead" rule becomes structural rather than an accident of missing config.
+5. Fix `cli_app/agent_chat.py:256,375`, `cli_app/commands.py:140,486-490`, `cli_app/pipeline_cli.py:71-76` to route through `resolve_role_selection("cli","chat", ...)` (or `"cli","planner"` where applicable) instead of calling `invoke_router` raw. Give `core/config_editor.py:263-270` a real fallback default.
+6. Fix `difficulty_scorer.py:222`'s dead `elif`; add a `cli.chat` role-bias branch (none matches it today).
+7. Re-tune role primaries/fallbacks using `rank_candidates()` output — let the ranking decide, keeping the 4-file sync discipline (`model_router.yaml`, `defaults_model_router.yaml`, `model_benchmarks.yaml` `models:`, `model_benchmarks.yaml` `roles:`+`reasoning.role_effort:`) for every role actually changed.
+8. Every model switch continues to route through `record_model_selection_handoff` → `transfer_control` — no change to the audit mechanism itself, only to what triggers it.
+
+**Explicitly out of scope:**
+- Changing `run_structured_agent`'s single-repair-pass-on-validation-failure behavior, or `run_role_raw`'s shape.
+- Touching `core/router.py`'s provider-level cascade walk (`_next_unvisited_fallback`) — this wave changes which model a role *starts* on, not the runtime HTTP-failure cascade that takes over after.
+- Adding new roles beyond the existing 8 (`vibe_coding.{coder,debugger}`, `deep_research.{context_compressor,web_search,grounding,synthesizer}`, `cli.{chat,planner}`).
+
+### Mandatory inspection
+`core/model_selector.py` in full, `core/model_scoring.py` (WAVE-20), `core/difficulty_scorer.py` in full, `core/agent_runtime.py` in full, `cli_app/agent_chat.py`, `cli_app/commands.py:100-200,470-500`, `cli_app/pipeline_cli.py`, `core/config_editor.py:250-280`, `core/quota_estimate.py`, `config/model_benchmarks.yaml` in full, `systems.md` §4.3/§4.4, `tests/test_model_selector.py` in full, `tests/test_reasoning_params.py`, `tests/test_router_fallback.py`, `tests/test_cli_app.py`.
+
+### Implementation sequence
+1. `select_for_role` rewrite — ranking + hysteresis + live `hard_threshold` + real `primary_status`. This is the highest-risk change in the wave; get it green against the *existing* test suite (which encodes today's "always keep primary" behavior) before changing any config, then update the tests deliberately where the new ranking behavior is intentionally different.
+2. Role-level `pin: true` on `web_search`; confirm it structurally blocks ranking from ever proposing a swap for that role.
+3. `cli.chat`/`cli.planner` bypass fixes — one call site at a time, confirming each still passes its existing tests before moving to the next.
+4. `difficulty_scorer.py` dead-branch fix + `cli.chat` bias branch.
+5. Only now, re-tune role assignments from `rank_candidates()` output — this must come after steps 1-4 land and are tested, so the re-tuning reflects the finished selector, not the transitional one.
+6. Full suite + targeted selector/reasoning/router suites + `ruff check .`.
+7. `systems.md` full sync (§0, §4.3, §4.4, §5, §6, §7, §8).
+
+### Contracts
+```python
+# core/model_selector.py — signature-compatible, behavior changed
+def select_for_role(*role_path: str, assessment: DifficultyAssessment, today: date | None = None,
+                     primary_status: str = "ok") -> ModelSelection: ...  # now genuinely ranks
+```
+```python
+# core/agent_runtime.py — cli.chat gains what every other role already has
+resolve_role_selection("cli", "chat", messages=..., task_text=...) -> (provider, model, fallback, selection, assessment)
+```
+```yaml
+# config/model_benchmarks.yaml — roles: new flag
+roles:
+  deep_research.web_search:
+    pin: true
+```
+
+### Mandatory tests
+Existing `tests/test_model_selector.py` suite must still pass or be deliberately updated with a stated reason where new ranking behavior intentionally differs (e.g. `test_healthy_primary_no_switch_when_fallback_edges_higher` must still hold — hysteresis is a hard requirement, not a regression). New: `hard_threshold` actually escalates on a synthetic hard-task fixture; `primary_status="quota_exhausted"` derived correctly from a mocked `QuotaTracker`; `pin: true` on `web_search` blocks every ranking outcome from proposing a different model regardless of fitness deltas; `cli.chat` handoff record now carries a `role_path` (it never does today — assert this explicitly, since it's the concrete proof the bypass is fixed); `difficulty_scorer` `cli.chat` bias branch fires. Full default suite green.
+
+### Documentation impact
+`systems.md` §0 (role inventory), §4.3 (primary-vs-fallback policy — the "runtime selection rules" numbered list changes materially now that ranking is real), §4.4 (end-to-end selection walkthrough), §5 (System A role assignments if re-tuned), §6 (System B role assignments if re-tuned), §7 (CLI roles — `cli.chat` now goes through selection), §8 (fallback cascade DAG if any role fallback changed).
+
+### Acceptance criteria
+- [ ] `select_for_role` ranks by `fitness()` with hysteresis preserved; existing "don't switch on a marginal fallback edge" test still passes.
+- [ ] `hard_threshold` demonstrably affects selection on a hard-task fixture (it did not, before this wave).
+- [ ] `primary_status` derived from real quota state, not left at the hardcoded `"ok"` default.
+- [ ] `deep_research.web_search` is pinned and never proposed for a swap.
+- [ ] `cli.chat`/`cli.planner`/`/compact --llm`/pipeline translation all route through `resolve_role_selection`; a chat turn's handoff record carries a `role_path`.
+- [ ] `difficulty_scorer.py`'s dead `elif` fixed; `cli.chat` gets a role-bias branch.
+- [ ] Any re-tuned role change kept in sync across all 4 files (router, defaults, benchmark models, benchmark roles/reasoning).
+- [ ] Full test suite green; `systems.md` fully synced.
+
+### Prohibitions
+Do not remove the hysteresis / anti-churn guard — score-driven does not mean "swap on every fractional edge," per the explicit policy already documented in `systems.md` §4.3 rule 4. Do not unpin `deep_research.web_search` or give it a model fallback. Do not change `run_structured_agent`/`run_role_raw`'s validation-repair behavior. Do not touch `Trend-AI/` or `graphify-out/`.
+
+### Agent deliverable
+1. Summary. 2. Before/after selection-behavior comparison on 2-3 representative task difficulties per role. 3. Files changed. 4. Contract changes + test output (full + targeted). 5. Re-tuned role table with rationale (ranking output, not hand-picked). 6. Findings/limitations. 7. Checklist ticked.
 
 ---
 

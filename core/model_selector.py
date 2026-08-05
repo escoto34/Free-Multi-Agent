@@ -44,8 +44,6 @@ from schemas.handoff import PipelineName
 logger = logging.getLogger(__name__)
 
 _BENCHMARKS_PATH = Path(__file__).parent.parent / "config" / "model_benchmarks.yaml"
-_HY3_MODEL_ID = "tencent/hy3:free"
-_HY3_DEFAULT_UNTIL = "2026-07-21"
 
 # Caller / runtime signals that primary is unhealthy (systems.md §4.3).
 DEGRADED_STATUSES = frozenset(
@@ -144,9 +142,6 @@ def model_free_until(
     entry = get_model_entry(provider, model, benchmarks=benchmarks)
     if entry.get("free_until"):
         return parse_free_until(entry.get("free_until"))
-    # Built-in knowledge of hy3 promo even if YAML drifts
-    if model == _HY3_MODEL_ID or model.endswith("/" + _HY3_MODEL_ID):
-        return parse_free_until(_HY3_DEFAULT_UNTIL)
     return None
 
 
@@ -168,30 +163,49 @@ def is_model_available(
     return day <= until
 
 
-def hy3_status(*, today: Optional[date] = None) -> dict[str, Any]:
-    """Status dict for CLI / diagnostics (days remaining, expired, fallback)."""
+def temporal_status(
+    provider: str,
+    model: str,
+    *,
+    today: Optional[date] = None,
+    benchmarks: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
+    """Status dict for any model row carrying ``free_until`` (CLI / diagnostics).
+
+    Generic replacement for the former hy3-specific status: driven entirely
+    by the model row's ``free_until`` + ``expired_fallback`` fields, never by
+    a hardcoded model constant.
+    """
     day = today or date.today()
-    until = model_free_until("openrouter", _HY3_MODEL_ID) or parse_free_until(
-        _HY3_DEFAULT_UNTIL
-    )
-    assert until is not None
+    until = model_free_until(provider, model, benchmarks=benchmarks)
+    assert until is not None, f"{provider}/{model} has no free_until to report"
     delta = (until - day).days
-    entry = get_model_entry("openrouter", _HY3_MODEL_ID)
+    entry = get_model_entry(provider, model, benchmarks=benchmarks)
     fb = entry.get("expired_fallback") or {
         "provider": "groq",
         "model": "openai/gpt-oss-120b",
     }
+    bench = benchmarks if benchmarks is not None else _load_benchmarks()
+    warn_days = int((bench.get("selection_defaults") or {}).get("warn_hy3_days", 3))
     return {
-        "model": _HY3_MODEL_ID,
-        "provider": "openrouter",
+        "model": model,
+        "provider": provider,
         "free_until": until.isoformat(),
         "days_remaining": delta,
         "expired": delta < 0,
-        "warn": 0 <= delta <= int(
-            (_load_benchmarks().get("selection_defaults") or {}).get("warn_hy3_days", 3)
-        ),
+        "warn": 0 <= delta <= warn_days,
         "expired_fallback": dict(fb),
     }
+
+
+def hy3_status(*, today: Optional[date] = None) -> dict[str, Any]:
+    """CLI status for the ``tencent/hy3:free`` row — the documented expiry example.
+
+    The expiry mechanism itself is fully generic (:func:`temporal_status`);
+    this thin wrapper keeps the historical CLI call site intact even though
+    hy3 left the catalog (the benchmark row still holds the ``free_until``).
+    """
+    return temporal_status("openrouter", "tencent/hy3:free", today=today)
 
 
 @dataclass
@@ -244,8 +258,6 @@ def _expired_fallback_for(
     fb = entry.get("expired_fallback")
     if isinstance(fb, dict) and fb.get("provider") and fb.get("model"):
         return {"provider": str(fb["provider"]), "model": str(fb["model"])}
-    if model == _HY3_MODEL_ID:
-        return {"provider": "groq", "model": "openai/gpt-oss-120b"}
     return None
 
 

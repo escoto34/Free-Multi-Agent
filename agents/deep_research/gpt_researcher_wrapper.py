@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Callable, Optional
 
@@ -14,7 +13,13 @@ async def _run_research_direct(
     report_type: str = "research_report",
     max_sources: int = 15,
 ) -> dict[str, Any]:
-    from gpt_researcher import GPTResearcher
+    try:
+        from gpt_researcher import GPTResearcher
+    except ImportError as exc:
+        raise RuntimeError(
+            "GPT-Researcher is not installed. Install the optional research "
+            "extra with `pip install -e \".[research]\"`."
+        ) from exc
 
     researcher = GPTResearcher(query=query, report_type=report_type)
     report = await researcher.conduct_research()

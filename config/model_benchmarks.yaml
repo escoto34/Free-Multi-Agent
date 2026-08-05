@@ -38,6 +38,12 @@ models:
     scores: {code: 82, reason: 90, ground: 48, synth: 85, safety: 45}
   agnes/agnes-2.0-flash:
     scores: {code: 78, reason: 76, ground: 42, synth: 80, safety: 40}
+  # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
+  # pending WAVE-20 re-score from researched sources.
+  agnes/agnes-2.5-flash:
+    scores: {code: 68, reason: 68, ground: 42, synth: 70, safety: 40}
+  agnes/agnes-2.5-pro:
+    scores: {code: 66, reason: 66, ground: 42, synth: 66, safety: 38}
   gemini/gemini-2.0-flash:
     scores: {code: 70, reason: 78, ground: 55, synth: 75, safety: 50}
   cohere/command-a-plus-05-2026:
@@ -63,6 +69,12 @@ models:
   # are scored conservatively (adequate band, 50-69) pending real usage data.
   groq/openai/gpt-oss-20b:
     scores: {code: 72, reason: 80, ground: 44, synth: 72, safety: 40}
+  # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
+  # pending WAVE-20 re-score from researched sources.
+  groq/groq/compound:
+    scores: {code: 52, reason: 60, ground: 90, synth: 54, safety: 30}
+  groq/llama-3.3-70b-versatile:
+    scores: {code: 62, reason: 66, ground: 44, synth: 60, safety: 38}
   groq/qwen/qwen3.6-27b:
     scores: {code: 70, reason: 82, ground: 42, synth: 70, safety: 38}
   cohere/command-r-plus-08-2024:
@@ -71,18 +83,40 @@ models:
     scores: {code: 50, reason: 60, ground: 80, synth: 62, safety: 40}
   mistral/mistral-medium-latest:
     scores: {code: 66, reason: 68, ground: 48, synth: 64, safety: 38}
-  mistral/open-mistral-nemo:
-    scores: {code: 64, reason: 62, ground: 44, synth: 58, safety: 36}
   mistral/devstral-latest:
     scores: {code: 80, reason: 58, ground: 36, synth: 52, safety: 34}
   mistral/ministral-8b-latest:
     scores: {code: 56, reason: 54, ground: 40, synth: 50, safety: 34}
+  # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
+  # pending WAVE-20 re-score from researched sources.
+  mistral/devstral-medium-latest:
+    scores: {code: 68, reason: 58, ground: 36, synth: 52, safety: 34}
+  mistral/mistral-medium-3-5:
+    scores: {code: 68, reason: 70, ground: 48, synth: 66, safety: 38}
+  mistral/ministral-14b-latest:
+    scores: {code: 60, reason: 58, ground: 40, synth: 54, safety: 34}
+  mistral/magistral-small-latest:
+    scores: {code: 62, reason: 66, ground: 40, synth: 60, safety: 36}
   gemini/gemini-2.5-flash:
     scores: {code: 74, reason: 82, ground: 58, synth: 78, safety: 52}
   gemini/gemini-2.5-flash-lite:
     scores: {code: 66, reason: 74, ground: 52, synth: 70, safety: 48}
-  gemini/gemma-3-27b-it:
-    scores: {code: 68, reason: 72, ground: 50, synth: 66, safety: 42}
+  # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
+  # pending WAVE-20 re-score from researched sources.
+  gemini/gemini-3.1-flash-lite:
+    scores: {code: 60, reason: 66, ground: 46, synth: 60, safety: 42}
+  gemini/gemini-3-flash-preview:
+    scores: {code: 66, reason: 72, ground: 50, synth: 66, safety: 44}
+  gemini/gemini-3.5-flash:
+    scores: {code: 66, reason: 72, ground: 50, synth: 66, safety: 44}
+  gemini/gemini-3.5-flash-lite:
+    scores: {code: 62, reason: 68, ground: 46, synth: 62, safety: 42}
+  gemini/gemini-3.6-flash:
+    scores: {code: 68, reason: 74, ground: 50, synth: 68, safety: 46}
+  gemini/gemma-4-31b-it:
+    scores: {code: 68, reason: 72, ground: 44, synth: 64, safety: 40}
+  gemini/gemma-4-26b-a4b-it:
+    scores: {code: 66, reason: 70, ground: 42, synth: 62, safety: 38}
   cerebras/gemma-4-31b:
     scores: {code: 74, reason: 80, ground: 46, synth: 72, safety: 42}
   cerebras/gpt-oss-120b:
@@ -91,12 +125,28 @@ models:
     scores: {code: 68, reason: 74, ground: 44, synth: 66, safety: 40}
   openrouter/cohere/north-mini-code:free:
     scores: {code: 62, reason: 56, ground: 38, synth: 50, safety: 32}
-  openrouter/google/gemma-3-27b-it:free:
-    scores: {code: 66, reason: 70, ground: 46, synth: 62, safety: 40}
-  openrouter/meta-llama/llama-3.3-70b-instruct:free:
-    scores: {code: 64, reason: 66, ground: 44, synth: 60, safety: 38}
-  openrouter/qwen/qwen3-32b:free:
-    scores: {code: 64, reason: 70, ground: 44, synth: 62, safety: 38}
+  # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
+  # pending WAVE-20 re-score from researched sources.
+  openrouter/google/gemma-4-31b-it:free:
+    scores: {code: 68, reason: 72, ground: 44, synth: 64, safety: 40}
+  openrouter/google/gemma-4-26b-a4b-it:free:
+    scores: {code: 66, reason: 70, ground: 42, synth: 62, safety: 38}
+  openrouter/inclusionai/ling-3.0-flash:free:
+    scores: {code: 62, reason: 60, ground: 38, synth: 58, safety: 34}
+  openrouter/nvidia/nemotron-3-nano-30b-a3b:free:
+    scores: {code: 60, reason: 62, ground: 38, synth: 58, safety: 36}
+  openrouter/nvidia/nemotron-3-super-120b-a12b:free:
+    scores: {code: 64, reason: 66, ground: 40, synth: 62, safety: 38}
+  openrouter/nvidia/nemotron-3-ultra-550b-a55b:free:
+    scores: {code: 66, reason: 68, ground: 40, synth: 64, safety: 40}
+  openrouter/nvidia/nemotron-3.5-content-safety:free:
+    scores: {code: 50, reason: 54, ground: 34, synth: 50, safety: 62}
+  openrouter/openai/gpt-oss-20b:free:
+    scores: {code: 68, reason: 76, ground: 42, synth: 68, safety: 40}
+  openrouter/poolside/laguna-s-2.1:free:
+    scores: {code: 60, reason: 58, ground: 36, synth: 54, safety: 32}
+  openrouter/poolside/laguna-xs-2.1:free:
+    scores: {code: 56, reason: 54, ground: 34, synth: 50, safety: 30}
   # WAVE-08 opencode_zen — provisional scores pending real usage data.
   # Catalog / fallback tier only; not assigned as any primary role.
   opencode_zen/big-pickle:
@@ -113,8 +163,6 @@ models:
     scores: {code: 56, reason: 54, ground: 34, synth: 48, safety: 30}
   opencode_zen/ling-3.0-flash-free:
     scores: {code: 62, reason: 60, ground: 38, synth: 54, safety: 34}
-  opencode_zen/hy3-free:
-    scores: {code: 50, reason: 54, ground: 34, synth: 50, safety: 30}
 
 # ---------------------------------------------------------------------------
 # Selection policy (systems.md §4.3) — editable, not hardcoded in Python

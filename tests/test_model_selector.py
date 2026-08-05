@@ -31,6 +31,7 @@ from core.model_selector import (
     record_model_selection_handoff,
     reload_benchmarks,
     select_for_role,
+    temporal_status,
 )
 from core.agent_config import reload_config
 
@@ -250,54 +251,92 @@ def test_healthy_coder_no_switch_even_on_hard_task():
 
 
 # ---------------------------------------------------------------------------
-# (d) hy3 expired → automatic fallback (no YAML edit / no HTTP)
+# (d) free_until expired → automatic fallback (generalized WAVE-19 mechanism,
+#     driven purely by the model row's free_until — synthetic fixture, not the
+#     literal hy3 constant; the real tencent/hy3:free row stays as the
+#     documented example and is still honored by the row-driven path)
 # ---------------------------------------------------------------------------
 
+_SYNTH_BENCH = {
+    "models": {
+        "synthetihub/demo-promo:free": {
+            "scores": {"code": 60, "reason": 60, "ground": 40, "synth": 55, "safety": 30},
+            "free_until": "2026-07-21",
+            "temporal": True,
+            "note": "synthetic WAVE-19 expiry fixture",
+            "expired_fallback": {"provider": "groq", "model": "openai/gpt-oss-120b"},
+        }
+    },
+    "selection_defaults": {"expired_score_cap": 49, "warn_hy3_days": 3},
+    "roles": {"vibe_coding.debugger": {"relevant_areas": ["code", "reason"]}},
+}
 
-def test_hy3_available_before_expiry():
+
+def test_free_until_available_before_expiry():
     assert is_model_available(
-        "openrouter",
-        "tencent/hy3:free",
+        "synthetihub",
+        "demo-promo:free",
         today=date(2026, 7, 17),
+        benchmarks=_SYNTH_BENCH,
     )
-    st = hy3_status(today=date(2026, 7, 17))
+    st = temporal_status(
+        "synthetihub",
+        "demo-promo:free",
+        today=date(2026, 7, 17),
+        benchmarks=_SYNTH_BENCH,
+    )
     assert st["expired"] is False
     assert st["days_remaining"] == 4
 
 
-def test_hy3_expired_status():
-    st = hy3_status(today=date(2026, 7, 22))
+def test_free_until_expired_status():
+    st = temporal_status(
+        "synthetihub",
+        "demo-promo:free",
+        today=date(2026, 7, 22),
+        benchmarks=_SYNTH_BENCH,
+    )
     assert st["expired"] is True
     assert st["days_remaining"] < 0
     assert st["expired_fallback"]["model"] == "openai/gpt-oss-120b"
     assert not is_model_available(
-        "openrouter",
-        "tencent/hy3:free",
+        "synthetihub",
+        "demo-promo:free",
         today=date(2026, 7, 22),
+        benchmarks=_SYNTH_BENCH,
     )
 
 
-def test_hy3_expired_scores_capped_at_49():
+def test_free_until_expired_scores_capped_at_49():
     """Auto-scorer cap after free_until (systems.md: cap ≤49 when expired)."""
     live = get_model_scores(
-        "openrouter", "tencent/hy3:free", today=date(2026, 7, 17)
+        "synthetihub", "demo-promo:free", today=date(2026, 7, 17), benchmarks=_SYNTH_BENCH
     )
     assert live.get("reason", 0) == 60  # uncapped table value
     dead = get_model_scores(
-        "openrouter", "tencent/hy3:free", today=date(2026, 7, 22)
+        "synthetihub", "demo-promo:free", today=date(2026, 7, 22), benchmarks=_SYNTH_BENCH
     )
     assert all(v <= 49 for v in dead.values())
 
 
-def test_hy3_expired_role_auto_fallback(tmp_path: Path):
-    """Role primary hy3 past free_until → selection uses fallback without user action."""
+def test_hy3_row_still_drives_documented_example():
+    """The real hy3 row (kept as the documented example) still resolves
+    through the generic row-driven path — no hardcoded constant involved."""
+    st = hy3_status(today=date(2026, 7, 22))
+    assert st["expired"] is True
+    assert st["days_remaining"] < 0
+    assert st["expired_fallback"]["model"] == "openai/gpt-oss-120b"
+    assert not is_model_available("openrouter", "tencent/hy3:free", today=date(2026, 7, 22))
+
+
+def test_free_until_expired_role_auto_fallback(tmp_path: Path):
+    """Role primary past free_until → selection uses fallback without user action."""
     router_yaml = {
         "providers": {},
         "vibe_coding": {
             "debugger": {
-                "provider": "openrouter",
-                "model": "tencent/hy3:free",
-                "free_until": "2026-07-21",
+                "provider": "synthetihub",
+                "model": "demo-promo:free",
                 "fallback": {
                     "provider": "groq",
                     "model": "openai/gpt-oss-120b",
@@ -307,6 +346,8 @@ def test_hy3_expired_role_auto_fallback(tmp_path: Path):
     }
     cfg_path = tmp_path / "model_router.yaml"
     cfg_path.write_text(yaml.safe_dump(router_yaml), encoding="utf-8")
+    bench_path = tmp_path / "model_benchmarks.yaml"
+    bench_path.write_text(yaml.safe_dump(_SYNTH_BENCH), encoding="utf-8")
 
     assess = DifficultyAssessment(
         code=50,
@@ -319,16 +360,17 @@ def test_hy3_expired_role_auto_fallback(tmp_path: Path):
         subtask="debugger",
         role_path="vibe_coding.debugger",
     )
-    # Before expiry: hy3 still selectable as primary
+    # Before expiry: still selectable as primary
     sel_ok = select_for_role(
         "vibe_coding",
         "debugger",
         assessment=assess,
         today=date(2026, 7, 17),
         config_path=cfg_path,
+        benchmarks_path=bench_path,
     )
-    assert sel_ok.provider == "openrouter"
-    assert sel_ok.model == "tencent/hy3:free"
+    assert sel_ok.provider == "synthetihub"
+    assert sel_ok.model == "demo-promo:free"
     assert sel_ok.forced_expiry is False
 
     # After expiry: auto fallback to gpt-oss-120b
@@ -338,6 +380,7 @@ def test_hy3_expired_role_auto_fallback(tmp_path: Path):
         assessment=assess,
         today=date(2026, 7, 22),
         config_path=cfg_path,
+        benchmarks_path=bench_path,
     )
     assert sel_exp.used_fallback is True
     assert sel_exp.forced_expiry is True

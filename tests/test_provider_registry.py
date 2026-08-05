@@ -109,7 +109,7 @@ def test_opencode_zen_client_resolves():
     assert meta["kind"] == "openai_compatible"
     assert meta["base_url"] == "https://opencode.ai/zen/v1"
     assert meta["env_key"] == "OPENCODE_ZEN_API_KEY"
-    assert len(meta["models"]) == 8
+    assert len(meta["models"]) == 7
 
     client = get_client("opencode_zen")
     assert isinstance(client, OpenAI)

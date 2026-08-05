@@ -6,6 +6,10 @@
 **Quota soft-caps:** `core/quotas.py` (must stay ≤ real provider limits)  
 **Benchmarks + selection + reasoning:** `config/model_benchmarks.yaml`
 
+**Planned, not yet implemented:** `mejoras.md` WAVE-20 (scoring v2 — adds a measured efficiency axis; today's benchmarks are quality-only) and WAVE-21 (score-driven `select_for_role` — today's selector discards the difficulty assessment via `del assessment, hard_th` at `core/model_selector.py:277` and always returns the YAML-pinned primary; `cli.chat` bypasses role selection entirely). Everything below this line describes the **current live code**, not the pending changes — do not treat the waves' contents as already true until each is implemented and this header is updated to reflect it.
+
+> **WAVE-19 (2026-08-04) — done:** CI `gpt-researcher` pin fixed (moved to a `research` optional extra), `scripts/probe_providers.py` added, provider catalogs refreshed from live `/models` probes (dead models removed, new live free models added, opencode_zen verified with a real key, hy3 expiry mechanism generalized to any row's `free_until`).
+
 This document explains **why** each free-tier model sits in each System A / System B / CLI role: benchmarks (relative quality), a reusable **0–100 scoring rubric**, API rate limits, orchestration constraints (shared buckets, cascade design, calls per run), **how primary vs fallback is chosen at runtime**, and **how reasoning/thinking effort is applied inside each call**.
 
 > **Runtime modules (implemented):**  
@@ -111,6 +115,8 @@ Limits below are **public free/trial reference values** as of ~2026-06/07. Provi
 | `openai/gpt-oss-safeguard-20b` | 30 | **1 000** | Safety / moderation flavored |
 | `qwen/qwen3.6-27b` | 30 | **1 000** | Catalog alternate |
 | `groq/compound-mini` | 30 | **~250** | **Built-in Tavily web search** — scarce; search-only |
+| `groq/compound` | 30 | **~250** | Full compound system (web search + reasoning); catalog alternate (WAVE-19) |
+| `llama-3.3-70b-versatile` | 30 | **1 000** | General 70B; live again per 2026-08-04 probe (WAVE-19) |
 | (other Llama/Qwen) | 30–60 | 1 000–14.4k | Some small models historically higher RPD |
 
 - **Scope:** per-model counters (good for spreading roles).  
@@ -122,6 +128,8 @@ Limits below are **public free/trial reference values** as of ~2026-06/07. Provi
 | Model ID | Endpoint | Free notes |
 |----------|----------|------------|
 | **`agnes-2.0-flash`** | `/v1/chat/completions` | Free / $0 per M tokens (promo pricing); ~**20 RPM** free/default plan; large context (docs cite 256K–512K depending on revision); tool-calling, coding, agents; Claw-Eval ~top-10 general / strong agent Pass^3 |
+| `agnes-2.5-flash` | `/v1/chat/completions` | Newer text model, live per 2026-08-04 probe (WAVE-19); catalog alternate |
+| `agnes-2.5-pro` | `/v1/chat/completions` | Larger text model, live per 2026-08-04 probe (WAVE-19); catalog alternate |
 | `agnes-image-2.0-flash` | `/v1/images/generations` | Free image — **not** used in MultiAgent chat roles |
 | `agnes-image-2.1-flash` | `/v1/images/generations` | Free image — not used in chat roles |
 | `agnes-video-v2.0` | `/v1/videos` | Free video (async) — not used in chat roles |
@@ -138,6 +146,10 @@ Limits below are **public free/trial reference values** as of ~2026-06/07. Provi
 | `mistral-small-latest` | Grounding fallback, light JSON | Higher availability under Experiment |
 | `mistral-medium-latest` | Optional quality | Same free pool, tighter if abused |
 | `devstral-latest` | Agent coding alternate | Catalog option |
+| `devstral-medium-latest` | Coding alternate | Live per 2026-08-04 probe (WAVE-19); catalog option |
+| `mistral-medium-3-5` | General quality | Newer medium line, live per probe (WAVE-19) |
+| `ministral-14b-latest` | Small general | Live per probe (WAVE-19) |
+| `magistral-small-latest` | Reasoning-tuned small | Live per probe (WAVE-19) |
 
 - **YAML soft-cap:** 200 calls/day (conservative; console Limits page is source of truth).  
 - **Sources:** Mistral admin docs / Experiment free tier posts 2025–2026.
@@ -149,6 +161,9 @@ Limits below are **public free/trial reference values** as of ~2026-06/07. Provi
 | `gemini-2.5-flash` | ~10–15 | ~250–1 500 | Varies by account/tier updates |
 | `gemini-2.0-flash` | ~15 | often more available for new free users | **Preferred fallback ID** for reliability |
 | `gemini-2.5-flash-lite` | higher | higher | Cheap structured extract |
+| `gemini-3.1-flash-lite`, `gemini-3-flash-preview` | higher | higher | New flash-lite line, live per 2026-08-04 probe (WAVE-19) |
+| `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.6-flash` | ~10–15 | ~250–1 500 | Newer flash line, live per probe (WAVE-19) |
+| `gemma-4-31b-it`, `gemma-4-26b-a4b-it` | ~5–10 | ~250 | Open gemma-4 line on AI Studio, live per probe (WAVE-19) |
 | Pro family | low | very low / paid-only trends | Avoid as free primary |
 
 - **YAML soft-cap:** 400 RPD shared soft (provider-level).  
@@ -190,9 +205,14 @@ Limits below are **public free/trial reference values** as of ~2026-06/07. Provi
 | Example free IDs (catalog) | Notes |
 |----------------------------|--------|
 | `cohere/north-mini-code:free` | Fast code-ish; still shares 50 RPD |
-| `tencent/hy3:free` | Promo; may expire (`free_until` if set) |
-| `meta-llama/llama-3.3-70b-instruct:free` | General |
-| `google/gemma-3-27b-it:free`, `qwen/qwen3-32b:free` | Alternates |
+| `google/gemma-4-31b-it:free`, `google/gemma-4-26b-a4b-it:free` | Open gemma-4 line (WAVE-19) |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | 1M context flagship (WAVE-19) |
+| `nvidia/nemotron-3-super-120b-a12b:free`, `nvidia/nemotron-3-nano-30b-a3b:free` | Nemotron line (WAVE-19) |
+| `nvidia/nemotron-3.5-content-safety:free` | Safety-tuned classifier (WAVE-19) |
+| `openai/gpt-oss-20b:free` | Open reasoning sibling (WAVE-19) |
+| `inclusionai/ling-3.0-flash:free`, `poolside/laguna-s-2.1:free`, `poolside/laguna-xs-2.1:free` | Other live :free alternates (WAVE-19) |
+
+> **WAVE-19 (2026-08-04 live probe):** `tencent/hy3:free`, `meta-llama/llama-3.3-70b-instruct:free`, `google/gemma-3-27b-it:free` and `qwen/qwen3-32b:free` are **gone** from the live catalog and removed. The `tencent/hy3:free` benchmark row remains as the documented `free_until` expiry example (mechanism is row-driven, no hardcoded constant).
 
 - **YAML soft-cap:** 45 RPD shared.  
 - **Orchestration decision:** **off hot path** for free-durable defaults. Cascade `openrouter_fallback` → Agnes, not deeper free OR.  
@@ -212,8 +232,10 @@ Limits below are **public free/trial reference values** as of ~2026-06/07. Provi
 |------|--------|
 | Limits | Free tier, no card — per-model rate limits **not publicly documented**; tracker soft-cap 100 shared/day (conservative placeholder, adjust once observed) |
 | Endpoint | `https://opencode.ai/zen/v1` (OpenAI-compatible), signup `opencode.ai/auth` |
-| Free models | `big-pickle`, `deepseek-v4-flash-free`, `nemotron-3-ultra-free`, `mimo-v2.5-free`, `north-mini-code-free`, `laguna-s-2.1-free`, `ling-3.0-flash-free`, `hy3-free` |
+| Free models | `big-pickle`, `deepseek-v4-flash-free`, `nemotron-3-ultra-free`, `mimo-v2.5-free`, `north-mini-code-free`, `laguna-s-2.1-free`, `ling-3.0-flash-free` |
 | Role fit | **Catalog / fallback tier only** — not assigned as any primary role (WAVE-08 prohibition) |
+
+> **WAVE-19 (2026-08-04):** verified live with a real `OPENCODE_ZEN_API_KEY` — 7/7 configured models confirmed; `hy3-free` is gone from the live catalog and was removed. The WAVE-08 "never verified against a real key" gap is closed.
 
 ---
 
@@ -292,28 +314,48 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **`groq` / `openai/gpt-oss-safeguard-20b`** | 35 | 55 | 30 | 40 | **92** | OpenAI open safety classifier (post-trained from gpt-oss); BYO policy; purpose-built for Trust & Safety — **not** a general coder. `vendor`+`public` |
 | **`openrouter` / `tencent/hy3:free`** ⚠ | 55 | 60 | 38 | 58 | 35 | **Expired promo (window ended 2026-07-21).** Sparse independent benches; historically general free chat. **Not durable free capacity.** Cap auto-score ≤49 (expired). `sparse` |
 
-**Catalog backfill (WAVE-06):** rows below were added so every model registered in `config/model_router.yaml` has a benchmark entry — the silent flat-60 fallback for unscored models is now a loud CI failure. Scores are **provisional** (adequate band, 50–69) pending real usage data; do not treat them as the evidence-backed rows above.
+**Catalog backfill (WAVE-06 + WAVE-19):** rows below were added so every model registered in `config/model_router.yaml` has a benchmark entry — the silent flat-60 fallback for unscored models is now a loud CI failure. Scores are **provisional** (adequate band, 50–69) pending WAVE-20 re-scoring from researched sources; do not treat them as the evidence-backed rows above. WAVE-19 rows were proven **live** on 2026-08-04 via `/models` probes.
 
 | Model (provider ID) | (a) code | (b) reason | (c) ground | (d) synth | (e) safety | Notes |
 |---------------------|--------:|----------:|----------:|---------:|----------:|-------|
 | **`groq` / `openai/gpt-oss-20b`** | 72 | 80 | 44 | 72 | 40 | Lighter sibling of gpt-oss-120b. `provisional` |
 | **`groq` / `qwen/qwen3.6-27b`** | 70 | 82 | 42 | 70 | 38 | Catalog alternate, strong reasoning. `provisional` |
+| **`groq` / `groq/compound`** | 52 | 60 | 90 | 54 | 30 | Full compound system (live 2026-08-04). `provisional` |
+| **`groq` / `llama-3.3-70b-versatile`** | 62 | 66 | 44 | 60 | 38 | General 70B (live again). `provisional` |
+| **`agnes` / `agnes-2.5-flash`** | 68 | 68 | 42 | 70 | 40 | Newer text model (live). `provisional` |
+| **`agnes` / `agnes-2.5-pro`** | 66 | 66 | 42 | 66 | 38 | Larger text model (live). `provisional` |
 | **`cohere` / `command-r-plus-08-2024`** | 54 | 68 | 88 | 72 | 44 | Alternate RAG tier. `provisional` |
 | **`cohere` / `command-r7b-12-2024`** | 50 | 60 | 80 | 62 | 40 | Lighter RAG alternate. `provisional` |
 | **`mistral` / `mistral-medium-latest`** | 66 | 68 | 48 | 64 | 38 | Mid generalist. `provisional` |
-| **`mistral` / `open-mistral-nemo`** | 64 | 62 | 44 | 58 | 36 | Open 12B. `provisional` |
 | **`mistral` / `devstral-latest`** | 80 | 58 | 36 | 52 | 34 | Coding-oriented sibling of codestral. `provisional` |
 | **`mistral` / `ministral-8b-latest`** | 56 | 54 | 40 | 50 | 34 | Small endpoint. `provisional` |
+| **`mistral` / `devstral-medium-latest`** | 68 | 58 | 36 | 52 | 34 | Coding alternate (live). `provisional` |
+| **`mistral` / `mistral-medium-3-5`** | 68 | 70 | 48 | 66 | 38 | Newer medium line (live). `provisional` |
+| **`mistral` / `ministral-14b-latest`** | 60 | 58 | 40 | 54 | 34 | Small general (live). `provisional` |
+| **`mistral` / `magistral-small-latest`** | 62 | 66 | 40 | 60 | 36 | Reasoning-tuned small (live). `provisional` |
 | **`gemini` / `gemini-2.5-flash`** | 74 | 82 | 58 | 78 | 52 | Newer Flash-class. `provisional` |
 | **`gemini` / `gemini-2.5-flash-lite`** | 66 | 74 | 52 | 70 | 48 | Lite Flash-class. `provisional` |
-| **`gemini` / `gemma-3-27b-it`** | 68 | 72 | 50 | 66 | 42 | Open 27B on AI Studio. `provisional` |
+| **`gemini` / `gemini-3.1-flash-lite`** | 60 | 66 | 46 | 60 | 42 | New flash-lite line (live). `provisional` |
+| **`gemini` / `gemini-3-flash-preview`** | 66 | 72 | 50 | 66 | 44 | Preview flash (live). `provisional` |
+| **`gemini` / `gemini-3.5-flash`** | 66 | 72 | 50 | 66 | 44 | Newer flash (live). `provisional` |
+| **`gemini` / `gemini-3.5-flash-lite`** | 62 | 68 | 46 | 62 | 42 | Lite flash (live). `provisional` |
+| **`gemini` / `gemini-3.6-flash`** | 68 | 74 | 50 | 68 | 46 | Newest flash (live). `provisional` |
+| **`gemini` / `gemma-4-31b-it`** | 68 | 72 | 44 | 64 | 40 | Open gemma-4 (live). `provisional` |
+| **`gemini` / `gemma-4-26b-a4b-it`** | 66 | 70 | 42 | 62 | 38 | Open gemma-4 lite (live). `provisional` |
 | **`cerebras` / `gemma-4-31b`** | 74 | 80 | 46 | 72 | 42 | Strong open quality; cascade target (gemini_fallback). `provisional` |
 | **`cerebras` / `gpt-oss-120b`** | 82 | 90 | 48 | 85 | 45 | Same weights as Groq's gpt-oss-120b. `provisional` |
 | **`cerebras` / `zai-glm-4.7`** | 68 | 74 | 44 | 66 | 40 | Catalog alternate. `provisional` |
 | **`openrouter` / `cohere/north-mini-code:free`** | 62 | 56 | 38 | 50 | 32 | Fast code-ish; shares 50 RPD. `provisional` |
-| **`openrouter` / `google/gemma-3-27b-it:free`** | 66 | 70 | 46 | 62 | 40 | Open 27B alternate. `provisional` |
-| **`openrouter` / `meta-llama/llama-3.3-70b-instruct:free`** | 64 | 66 | 44 | 60 | 38 | General 70B alternate. `provisional` |
-| **`openrouter` / `qwen/qwen3-32b:free`** | 64 | 70 | 44 | 62 | 38 | Catalog alternate. `provisional` |
+| **`openrouter` / `google/gemma-4-31b-it:free`** | 68 | 72 | 44 | 64 | 40 | Open gemma-4 (live). `provisional` |
+| **`openrouter` / `google/gemma-4-26b-a4b-it:free`** | 66 | 70 | 42 | 62 | 38 | Open gemma-4 lite (live). `provisional` |
+| **`openrouter` / `inclusionai/ling-3.0-flash:free`** | 62 | 60 | 38 | 58 | 34 | Live alternate. `provisional` |
+| **`openrouter` / `nvidia/nemotron-3-nano-30b-a3b:free`** | 60 | 62 | 38 | 58 | 36 | Nemotron nano (live). `provisional` |
+| **`openrouter` / `nvidia/nemotron-3-super-120b-a12b:free`** | 64 | 66 | 40 | 62 | 38 | Nemotron super (live). `provisional` |
+| **`openrouter` / `nvidia/nemotron-3-ultra-550b-a55b:free`** | 66 | 68 | 40 | 64 | 40 | Nemotron ultra, 1M context (live). `provisional` |
+| **`openrouter` / `nvidia/nemotron-3.5-content-safety:free`** | 50 | 54 | 34 | 50 | 62 | Safety-tuned classifier (live). `provisional` |
+| **`openrouter` / `openai/gpt-oss-20b:free`** | 68 | 76 | 42 | 68 | 40 | Open reasoning sibling (live). `provisional` |
+| **`openrouter` / `poolside/laguna-s-2.1:free`** | 60 | 58 | 36 | 54 | 32 | Live alternate. `provisional` |
+| **`openrouter` / `poolside/laguna-xs-2.1:free`** | 56 | 54 | 34 | 50 | 30 | Live alternate. `provisional` |
 | **`opencode_zen` / `big-pickle`** | 62 | 60 | 38 | 58 | 34 | WAVE-08 catalog tier. `provisional` |
 | **`opencode_zen` / `deepseek-v4-flash-free`** | 64 | 66 | 40 | 60 | 36 | WAVE-08 catalog tier. `provisional` |
 | **`opencode_zen` / `nemotron-3-ultra-free`** | 60 | 62 | 38 | 56 | 34 | WAVE-08 catalog tier. `provisional` |
@@ -321,7 +363,6 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **`opencode_zen` / `north-mini-code-free`** | 58 | 54 | 36 | 50 | 32 | WAVE-08 catalog tier. `provisional` |
 | **`opencode_zen` / `laguna-s-2.1-free`** | 56 | 54 | 34 | 48 | 30 | WAVE-08 catalog tier. `provisional` |
 | **`opencode_zen` / `ling-3.0-flash-free`** | 62 | 60 | 38 | 54 | 34 | WAVE-08 catalog tier. `provisional` |
-| **`opencode_zen` / `hy3-free`** | 50 | 54 | 34 | 50 | 30 | WAVE-08 catalog tier. `provisional` |
 
 **Quick capability matrix (stack defaults):**
 

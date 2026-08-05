@@ -366,12 +366,11 @@ def synthesizer_node(state: DeepResearchState) -> dict[str, Any]:
 
 
 def gpt_researcher_node(state: DeepResearchState) -> dict[str, Any]:
-    """Run GPT-Researcher (via Celery or direct) as a LangGraph node.
+    """Run GPT-Researcher in-process as a LangGraph node.
 
-    Delegates to ``agents.deep_research.gpt_researcher_wrapper.gpt_researcher_node``
-    which handles Celery submission, polling with ``await asyncio.sleep(1)``
-    for TUI responsiveness, and automatic fallback to direct call when
-    Redis/Celery is unavailable.
+    Delegates to ``agents.deep_research.gpt_researcher_wrapper.gpt_researcher_node``,
+    which runs ``_run_research_direct`` directly inside this process. The
+    Celery submission/polling path was removed in WAVE-01.
     """
     import asyncio
 
