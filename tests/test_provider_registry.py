@@ -54,6 +54,35 @@ def test_every_registered_model_has_benchmark_row():
     )
 
 
+def test_every_benchmark_row_has_schema_v2_fields():
+    """WAVE-20 guard: each scored row carries efficiency + evidence + verified.
+
+    A row without these has no provenance and no measured stack position, so
+    ``core/model_scoring.efficiency_score`` would silently read 0.
+    """
+    models = _load(_BENCHMARKS_PATH).get("models") or {}
+    required = ("efficiency", "evidence", "verified", "available")
+    bad = {
+        key: [field for field in required if field not in row]
+        for key, row in models.items()
+        if not all(field in row for field in required)
+    }
+    assert not bad, f"benchmark rows missing schema-v2 fields: {bad}"
+
+
+def test_measured_efficiency_rows_have_all_axis_scores():
+    """WAVE-20 guard: rows claiming measured efficiency expose the full axis."""
+    models = _load(_BENCHMARKS_PATH).get("models") or {}
+    axes = ("speed_score", "context_score", "capacity_score")
+    bad = {
+        key: [a for a in axes if not isinstance(row["efficiency"].get(a), (int, float))]
+        for key, row in models.items()
+        if row.get("evidence") == "measured"
+    }
+    bad = {k: v for k, v in bad.items() if v}
+    assert not bad, f"measured rows missing efficiency axes: {bad}"
+
+
 def test_every_provider_has_cascade_entry():
     """Dead-end guard: every registered provider needs a fallback_cascade entry."""
     cascade = _cascade_entries()

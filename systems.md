@@ -1,12 +1,14 @@
 # Systems orchestration — free-durable profile
 
-**Document status:** mid-2026 research snapshot (last updated 2026-08-04, WAVE-18 role consolidation: architect→coder, safety_filter→compressor)  
+**Document status:** mid-2026 research snapshot (last updated 2026-08-04, WAVE-20 scoring v2: measured efficiency axis + re-scored benchmarks; WAVE-18 role consolidation: architect→coder, safety_filter→compressor)  
 **Live config:** `config/model_router.yaml` (loaded by `core/agent_config.py`)  
 **Factory defaults:** `config/defaults_model_router.yaml`  
 **Quota soft-caps:** `core/quotas.py` (must stay ≤ real provider limits)  
 **Benchmarks + selection + reasoning:** `config/model_benchmarks.yaml`
 
-**Planned, not yet implemented:** `mejoras.md` WAVE-20 (scoring v2 — adds a measured efficiency axis; today's benchmarks are quality-only) and WAVE-21 (score-driven `select_for_role` — today's selector discards the difficulty assessment via `del assessment, hard_th` at `core/model_selector.py:277` and always returns the YAML-pinned primary; `cli.chat` bypasses role selection entirely). Everything below this line describes the **current live code**, not the pending changes — do not treat the waves' contents as already true until each is implemented and this header is updated to reflect it.
+**Planned, not yet implemented:** `mejoras.md` WAVE-21 (score-driven `select_for_role` — today's selector discards the difficulty assessment via `del assessment, hard_th` at `core/model_selector.py:277` and always returns the YAML-pinned primary; `cli.chat` bypasses role selection entirely). Everything below this line describes the **current live code**, not the pending changes — do not treat the waves' contents as already true until each is implemented and this header is updated to reflect it.
+
+> **WAVE-20 (2026-08-04) — done:** scoring v2 landed. `config/model_benchmarks.yaml` is now schema v2 (`quality_aggregate` block under `selection_defaults` replaces the hardcoded aggregate coefficients — `core/difficulty_scorer.py` reads them, byte-identical `overall`; dead `selection_defaults` keys removed). New `core/model_scoring.py` provides the score-driven vocabulary (`quality_for_role`, `efficiency_score`, `fitness`, `rank_candidates`) that WAVE-21 will route on. `scripts/benchmark_models.py` measured **live efficiency** (ttft, tokens/sec, context) for all 43 benchmarkable catalog models on 2026-08-04 → `config/model_efficiency.json`; every benchmark row now carries `efficiency` + `evidence` + `verified` (guard-tested). Quality bands of the WAVE-19 rows were re-scored from public/vendor sources. `fitness = 0.75·quality + 0.25·efficiency`.
 
 > **WAVE-19 (2026-08-04) — done:** CI `gpt-researcher` pin fixed (moved to a `research` optional extra), `scripts/probe_providers.py` added, provider catalogs refreshed from live `/models` probes (dead models removed, new live free models added, opencode_zen verified with a real key, hy3 expiry mechanism generalized to any row's `free_until`).
 
@@ -298,6 +300,16 @@ Five areas map to this repo’s pipelines:
 4. Cap any score at **49** if the model is **unavailable / expired** for that run (auto-scorer should re-probe).  
 5. Specialization beats generalism: a safety-tuned model may score high on (e) and mid/low on (a)–(d) by design.
 
+**Efficiency axis (WAVE-20, measured live 2026-08-04):**
+
+| Axis | Weight | Definition |
+|------|--------:|------------|
+| **speed** | 0.50 | tokens/sec on one 128-token streaming completion (incl. reasoning tokens), stack-relative linear |
+| **context** | 0.25 | live `/models` context window (or documented provider fallback), log-normalized to the stack |
+| **capacity** | 0.25 | tps × context throughput, stack-relative linear |
+
+`efficiency_score = 0.50·speed + 0.25·context + 0.25·capacity`; model `fitness = quality_weight·quality + efficiency_weight·efficiency` (`0.75` / `0.25`, `config/model_benchmarks.yaml` `selection_defaults`). Measured rows live in `config/model_efficiency.json`; providers without a documented context window (opencode_zen) get **0** credit on context/capacity. Reasoning-heavy models that spend the whole 128-token budget thinking report efficiency 0 — that is the rubric intent (poor user-visible latency).
+
 ### 4.2 Benchmark scores by model × area
 
 Scores are **relative within this free-durable stack** (snapshot mid-2026). They are for routing documentation and future auto-scoring — not a claim of absolute frontier rank.
@@ -314,55 +326,117 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **`groq` / `openai/gpt-oss-safeguard-20b`** | 35 | 55 | 30 | 40 | **92** | OpenAI open safety classifier (post-trained from gpt-oss); BYO policy; purpose-built for Trust & Safety — **not** a general coder. `vendor`+`public` |
 | **`openrouter` / `tencent/hy3:free`** ⚠ | 55 | 60 | 38 | 58 | 35 | **Expired promo (window ended 2026-07-21).** Sparse independent benches; historically general free chat. **Not durable free capacity.** Cap auto-score ≤49 (expired). `sparse` |
 
-**Catalog backfill (WAVE-06 + WAVE-19):** rows below were added so every model registered in `config/model_router.yaml` has a benchmark entry — the silent flat-60 fallback for unscored models is now a loud CI failure. Scores are **provisional** (adequate band, 50–69) pending WAVE-20 re-scoring from researched sources; do not treat them as the evidence-backed rows above. WAVE-19 rows were proven **live** on 2026-08-04 via `/models` probes.
+**Catalog backfill (WAVE-06 + WAVE-19, re-scored WAVE-20):** rows below cover every model registered in `config/model_router.yaml` — the silent flat-60 fallback for unscored models is a loud CI failure. WAVE-19 rows were proven **live** on 2026-08-04 via `/models` probes; WAVE-20 re-scored the quality bands from public/vendor sources (`quality_evidence: research_2026-08-04`) and measured **live efficiency** per model (one 128-token streaming completion; `evidence: measured`). Efficiency errors are recorded per row (`benchmark_error` + note) — e.g. gemini-2.0/2.5-flash are unusable on this key (quota 0 / 404) and poolside laguna-s/xs never reached content in 128 thinking tokens. Full probe: `python scripts/benchmark_models.py --yes --write` (dry-run default; `--refresh-context` rescales context without new calls).
+
+| Model (provider ID) | (a) code | (b) reason | (c) ground | (d) synth | (e) safety | Evidence notes |
+|---------------------|--------:|----------:|----------:|---------:|----------:|--------------------------------------------|
+| **`mistral` / `codestral-latest`** | **88** | 62 | 40 | 55 | 35 | public+vendor |
+| **`groq` / `openai/gpt-oss-120b`** | 82 | **90** | 48 | **85** | 45 | public+vendor |
+| **`agnes` / `agnes-2.0-flash`** | 78 | 76 | 42 | 80 | 40 | public+vendor |
+| **`gemini` / `gemini-2.0-flash`** | 70 | 78 | 55 | 75 | 50 | WAVE-20 live-probe error (see note) |
+| **`cohere` / `command-a-plus-05-2026`** | 58 | 72 | **93** | 78 | 48 | WAVE-20 measured efficiency |
+| **`mistral` / `mistral-small-latest`** | 58 | 62 | 55 | 65 | 40 | WAVE-20 measured efficiency |
+| **`groq` / `groq/compound-mini`** | 50 | 58 | **88** | 52 | 30 | WAVE-20 measured efficiency |
+| **`groq` / `openai/gpt-oss-safeguard-20b`** | 35 | 55 | 30 | 40 | **92** | non-conversational (no chat benchmark) |
+| **`openrouter` / `tencent/hy3:free`** ⚠ | 55 | 60 | 38 | 58 | 35 | expired promo example |
+
+
 
 | Model (provider ID) | (a) code | (b) reason | (c) ground | (d) synth | (e) safety | Notes |
 |---------------------|--------:|----------:|----------:|---------:|----------:|-------|
-| **`groq` / `openai/gpt-oss-20b`** | 72 | 80 | 44 | 72 | 40 | Lighter sibling of gpt-oss-120b. `provisional` |
-| **`groq` / `qwen/qwen3.6-27b`** | 70 | 82 | 42 | 70 | 38 | Catalog alternate, strong reasoning. `provisional` |
-| **`groq` / `groq/compound`** | 52 | 60 | 90 | 54 | 30 | Full compound system (live 2026-08-04). `provisional` |
-| **`groq` / `llama-3.3-70b-versatile`** | 62 | 66 | 44 | 60 | 38 | General 70B (live again). `provisional` |
-| **`agnes` / `agnes-2.5-flash`** | 68 | 68 | 42 | 70 | 40 | Newer text model (live). `provisional` |
-| **`agnes` / `agnes-2.5-pro`** | 66 | 66 | 42 | 66 | 38 | Larger text model (live). `provisional` |
-| **`cohere` / `command-r-plus-08-2024`** | 54 | 68 | 88 | 72 | 44 | Alternate RAG tier. `provisional` |
-| **`cohere` / `command-r7b-12-2024`** | 50 | 60 | 80 | 62 | 40 | Lighter RAG alternate. `provisional` |
-| **`mistral` / `mistral-medium-latest`** | 66 | 68 | 48 | 64 | 38 | Mid generalist. `provisional` |
-| **`mistral` / `devstral-latest`** | 80 | 58 | 36 | 52 | 34 | Coding-oriented sibling of codestral. `provisional` |
-| **`mistral` / `ministral-8b-latest`** | 56 | 54 | 40 | 50 | 34 | Small endpoint. `provisional` |
-| **`mistral` / `devstral-medium-latest`** | 68 | 58 | 36 | 52 | 34 | Coding alternate (live). `provisional` |
-| **`mistral` / `mistral-medium-3-5`** | 68 | 70 | 48 | 66 | 38 | Newer medium line (live). `provisional` |
-| **`mistral` / `ministral-14b-latest`** | 60 | 58 | 40 | 54 | 34 | Small general (live). `provisional` |
-| **`mistral` / `magistral-small-latest`** | 62 | 66 | 40 | 60 | 36 | Reasoning-tuned small (live). `provisional` |
-| **`gemini` / `gemini-2.5-flash`** | 74 | 82 | 58 | 78 | 52 | Newer Flash-class. `provisional` |
-| **`gemini` / `gemini-2.5-flash-lite`** | 66 | 74 | 52 | 70 | 48 | Lite Flash-class. `provisional` |
-| **`gemini` / `gemini-3.1-flash-lite`** | 60 | 66 | 46 | 60 | 42 | New flash-lite line (live). `provisional` |
-| **`gemini` / `gemini-3-flash-preview`** | 66 | 72 | 50 | 66 | 44 | Preview flash (live). `provisional` |
-| **`gemini` / `gemini-3.5-flash`** | 66 | 72 | 50 | 66 | 44 | Newer flash (live). `provisional` |
-| **`gemini` / `gemini-3.5-flash-lite`** | 62 | 68 | 46 | 62 | 42 | Lite flash (live). `provisional` |
-| **`gemini` / `gemini-3.6-flash`** | 68 | 74 | 50 | 68 | 46 | Newest flash (live). `provisional` |
-| **`gemini` / `gemma-4-31b-it`** | 68 | 72 | 44 | 64 | 40 | Open gemma-4 (live). `provisional` |
-| **`gemini` / `gemma-4-26b-a4b-it`** | 66 | 70 | 42 | 62 | 38 | Open gemma-4 lite (live). `provisional` |
-| **`cerebras` / `gemma-4-31b`** | 74 | 80 | 46 | 72 | 42 | Strong open quality; cascade target (gemini_fallback). `provisional` |
-| **`cerebras` / `gpt-oss-120b`** | 82 | 90 | 48 | 85 | 45 | Same weights as Groq's gpt-oss-120b. `provisional` |
-| **`cerebras` / `zai-glm-4.7`** | 68 | 74 | 44 | 66 | 40 | Catalog alternate. `provisional` |
-| **`openrouter` / `cohere/north-mini-code:free`** | 62 | 56 | 38 | 50 | 32 | Fast code-ish; shares 50 RPD. `provisional` |
-| **`openrouter` / `google/gemma-4-31b-it:free`** | 68 | 72 | 44 | 64 | 40 | Open gemma-4 (live). `provisional` |
-| **`openrouter` / `google/gemma-4-26b-a4b-it:free`** | 66 | 70 | 42 | 62 | 38 | Open gemma-4 lite (live). `provisional` |
-| **`openrouter` / `inclusionai/ling-3.0-flash:free`** | 62 | 60 | 38 | 58 | 34 | Live alternate. `provisional` |
-| **`openrouter` / `nvidia/nemotron-3-nano-30b-a3b:free`** | 60 | 62 | 38 | 58 | 36 | Nemotron nano (live). `provisional` |
-| **`openrouter` / `nvidia/nemotron-3-super-120b-a12b:free`** | 64 | 66 | 40 | 62 | 38 | Nemotron super (live). `provisional` |
-| **`openrouter` / `nvidia/nemotron-3-ultra-550b-a55b:free`** | 66 | 68 | 40 | 64 | 40 | Nemotron ultra, 1M context (live). `provisional` |
-| **`openrouter` / `nvidia/nemotron-3.5-content-safety:free`** | 50 | 54 | 34 | 50 | 62 | Safety-tuned classifier (live). `provisional` |
-| **`openrouter` / `openai/gpt-oss-20b:free`** | 68 | 76 | 42 | 68 | 40 | Open reasoning sibling (live). `provisional` |
-| **`openrouter` / `poolside/laguna-s-2.1:free`** | 60 | 58 | 36 | 54 | 32 | Live alternate. `provisional` |
-| **`openrouter` / `poolside/laguna-xs-2.1:free`** | 56 | 54 | 34 | 50 | 30 | Live alternate. `provisional` |
-| **`opencode_zen` / `big-pickle`** | 62 | 60 | 38 | 58 | 34 | WAVE-08 catalog tier. `provisional` |
-| **`opencode_zen` / `deepseek-v4-flash-free`** | 64 | 66 | 40 | 60 | 36 | WAVE-08 catalog tier. `provisional` |
-| **`opencode_zen` / `nemotron-3-ultra-free`** | 60 | 62 | 38 | 56 | 34 | WAVE-08 catalog tier. `provisional` |
-| **`opencode_zen` / `mimo-v2.5-free`** | 60 | 58 | 36 | 54 | 32 | WAVE-08 catalog tier. `provisional` |
-| **`opencode_zen` / `north-mini-code-free`** | 58 | 54 | 36 | 50 | 32 | WAVE-08 catalog tier. `provisional` |
-| **`opencode_zen` / `laguna-s-2.1-free`** | 56 | 54 | 34 | 48 | 30 | WAVE-08 catalog tier. `provisional` |
-| **`opencode_zen` / `ling-3.0-flash-free`** | 62 | 60 | 38 | 54 | 34 | WAVE-08 catalog tier. `provisional` |
+| **`groq` / `openai/gpt-oss-20b`** | 72 | 80 | 44 | 72 | 40 | WAVE-20 measured efficiency |
+| **`groq` / `qwen/qwen3.6-27b`** | 70 | 84 | 42 | 70 | 38 | re-scored WAVE-20 + measured efficiency |
+| **`groq` / `groq/compound`** | 52 | 64 | **90** | 54 | 30 | re-scored WAVE-20 + measured efficiency |
+| **`groq` / `llama-3.3-70b-versatile`** | 62 | 68 | 44 | 60 | 38 | re-scored WAVE-20 + measured efficiency |
+| **`agnes` / `agnes-2.5-flash`** | 70 | 72 | 42 | 72 | 40 | re-scored WAVE-20 + measured efficiency |
+| **`agnes` / `agnes-2.5-pro`** | 66 | 70 | 44 | 68 | 38 | re-scored WAVE-20 + measured efficiency |
+| **`cohere` / `command-r-plus-08-2024`** | 54 | 68 | **88** | 72 | 44 | WAVE-20 measured efficiency |
+| **`cohere` / `command-r7b-12-2024`** | 50 | 60 | 80 | 62 | 40 | WAVE-20 measured efficiency |
+| **`mistral` / `mistral-medium-latest`** | 66 | 68 | 48 | 64 | 38 | WAVE-20 measured efficiency |
+| **`mistral` / `devstral-latest`** | 80 | 58 | 36 | 52 | 34 | WAVE-20 measured efficiency |
+| **`mistral` / `ministral-8b-latest`** | 56 | 54 | 40 | 50 | 34 | WAVE-20 measured efficiency |
+| **`mistral` / `devstral-medium-latest`** | 70 | 58 | 36 | 52 | 34 | re-scored WAVE-20 + measured efficiency |
+| **`mistral` / `mistral-medium-3-5`** | 68 | 72 | 48 | 66 | 38 | re-scored WAVE-20 + measured efficiency |
+| **`mistral` / `ministral-14b-latest`** | 62 | 58 | 40 | 54 | 34 | re-scored WAVE-20 + measured efficiency |
+| **`mistral` / `magistral-small-latest`** | 62 | 68 | 40 | 60 | 36 | re-scored WAVE-20 + measured efficiency |
+| **`gemini` / `gemini-2.5-flash`** | 74 | 82 | 58 | 78 | 52 | live probe 2026-08-04: 404 'no longer available to new users' -> currently unusable (follow-up: remove from catalog). |
+| **`gemini` / `gemini-2.5-flash-lite`** | 66 | 74 | 52 | 70 | 48 | live probe 2026-08-04: 404 'no longer available to new users' -> currently unusable (follow-up: remove from catalog). |
+| **`gemini` / `gemini-3.1-flash-lite`** | 60 | 68 | 46 | 60 | 42 | re-scored WAVE-20 + measured efficiency |
+| **`gemini` / `gemini-3-flash-preview`** | 68 | 76 | 50 | 70 | 44 | re-scored WAVE-20 + measured efficiency |
+| **`gemini` / `gemini-3.5-flash`** | 68 | 78 | 50 | 72 | 44 | re-scored WAVE-20 + measured efficiency |
+| **`gemini` / `gemini-3.5-flash-lite`** | 62 | 70 | 46 | 62 | 42 | re-scored WAVE-20 + measured efficiency |
+| **`gemini` / `gemini-3.6-flash`** | 70 | 82 | 52 | 74 | 46 | re-scored WAVE-20 + measured efficiency |
+| **`gemini` / `gemma-4-31b-it`** | 68 | 74 | 44 | 64 | 40 | re-scored WAVE-20 + measured efficiency |
+| **`gemini` / `gemma-4-26b-a4b-it`** | 66 | 72 | 42 | 62 | 38 | re-scored WAVE-20 + measured efficiency |
+| **`cerebras` / `gemma-4-31b`** | 74 | 80 | 46 | 72 | 42 | WAVE-20 measured efficiency |
+| **`cerebras` / `gpt-oss-120b`** | 82 | **90** | 48 | **85** | 45 | WAVE-20 measured efficiency |
+| **`cerebras` / `zai-glm-4.7`** | 68 | 76 | 44 | 66 | 40 | live probe 2026-08-04: empty stream (finish=length, 128 tokens) -> efficiency 0 until validated with tool/reasoning invocation. |
+| **`openrouter` / `cohere/north-mini-code:free`** | 64 | 56 | 38 | 50 | 32 | re-scored WAVE-20 + measured efficiency |
+| **`openrouter` / `google/gemma-4-31b-it:free`** | 68 | 74 | 44 | 64 | 40 | live probe 2026-08-04: upstream 429 (OpenRouter shared pool) on both attempts. |
+| **`openrouter` / `google/gemma-4-26b-a4b-it:free`** | 66 | 72 | 42 | 62 | 38 | re-scored WAVE-20 + measured efficiency |
+| **`openrouter` / `inclusionai/ling-3.0-flash:free`** | 62 | 62 | 38 | 58 | 34 | re-scored WAVE-20 + measured efficiency |
+| **`openrouter` / `nvidia/nemotron-3-nano-30b-a3b:free`** | 62 | 62 | 38 | 58 | 36 | re-scored WAVE-20 + measured efficiency |
+| **`openrouter` / `nvidia/nemotron-3-super-120b-a12b:free`** | 66 | 70 | 40 | 62 | 38 | re-scored WAVE-20 + measured efficiency |
+| **`openrouter` / `nvidia/nemotron-3-ultra-550b-a55b:free`** | 70 | 74 | 40 | 68 | 40 | re-scored WAVE-20 + measured efficiency |
+| **`openrouter` / `nvidia/nemotron-3.5-content-safety:free`** | 50 | 54 | 34 | 50 | 62 | non-conversational content-safety classifier -> not chat-benchmarked. |
+| **`openrouter` / `openai/gpt-oss-20b:free`** | 72 | 78 | 42 | 68 | 40 | re-scored WAVE-20 + measured efficiency |
+| **`openrouter` / `poolside/laguna-s-2.1:free`** | 60 | 62 | 36 | 54 | 32 | live probe 2026-08-04: empty stream in 128 tokens -> efficiency 0 (heavy reasoning). |
+| **`openrouter` / `poolside/laguna-xs-2.1:free`** | 56 | 58 | 34 | 50 | 30 | live probe 2026-08-04: empty stream in 128 tokens -> efficiency 0 (heavy reasoning). |
+| **`opencode_zen` / `big-pickle`** | 62 | 62 | 38 | 58 | 34 | re-scored WAVE-20 + measured efficiency |
+| **`opencode_zen` / `deepseek-v4-flash-free`** | 66 | 72 | 40 | 62 | 36 | re-scored WAVE-20 + measured efficiency |
+| **`opencode_zen` / `nemotron-3-ultra-free`** | 62 | 66 | 38 | 56 | 34 | re-scored WAVE-20 + measured efficiency |
+| **`opencode_zen` / `mimo-v2.5-free`** | 60 | 60 | 36 | 54 | 32 | re-scored WAVE-20 + measured efficiency |
+| **`opencode_zen` / `north-mini-code-free`** | 60 | 54 | 36 | 50 | 32 | re-scored WAVE-20 + measured efficiency |
+| **`opencode_zen` / `laguna-s-2.1-free`** | 56 | 58 | 34 | 48 | 30 | live probe 2026-08-04: heavy reasoning consumed the 128-token budget before content -> efficiency 0 (slow UX). |
+| **`opencode_zen` / `ling-3.0-flash-free`** | 62 | 64 | 38 | 54 | 34 | re-scored WAVE-20 + measured efficiency |
+
+
+
+| Model (provider ID) | tok/s | TTFT (ms) | ctx | speed | context | capacity |
+|---------------------|------:|----------:|----:|------:|--------:|---------:|
+| **`agnes` / `agnes-2.0-flash`** | 133.5 | 12587 | 100,000 | 4 | 83 | 0.5 |
+| **`agnes` / `agnes-2.5-flash`** | 1740.0 | 15865 | 100,000 | 59 | 83 | 5.9 |
+| **`agnes` / `agnes-2.5-pro`** | 55.7 | 4920 | 100,000 | 2 | 83 | 0.2 |
+| **`cerebras` / `gemma-4-31b`** | 2945.7 | 515 | 131,072 | 100 | 85 | 13.1 |
+| **`cerebras` / `gpt-oss-120b`** | 1675.6 | 468 | 131,072 | 57 | 85 | 7.5 |
+| **`cohere` / `command-a-plus-05-2026`** | 216.5 | 412 | 436,000 | 7 | 94 | 3.2 |
+| **`cohere` / `command-r-plus-08-2024`** | 14.4 | 432 | 128,000 | 0 | 85 | 0.1 |
+| **`cohere` / `command-r7b-12-2024`** | 69.8 | 382 | 132,000 | 2 | 85 | 0.3 |
+| **`gemini` / `gemini-3-flash-preview`** | 1847.7 | 17932 | 1,000,000 | 63 | 100 | 62.7 |
+| **`gemini` / `gemini-3.1-flash-lite`** | 153.1 | 789 | 1,000,000 | 5 | 100 | 5.2 |
+| **`gemini` / `gemini-3.5-flash`** | 582.0 | 8099 | 1,000,000 | 20 | 100 | 19.8 |
+| **`gemini` / `gemini-3.5-flash-lite`** | 123.6 | 737 | 1,000,000 | 4 | 100 | 4.2 |
+| **`gemini` / `gemini-3.6-flash`** | 36.3 | 1460 | 1,000,000 | 1 | 100 | 1.2 |
+| **`gemini` / `gemma-4-26b-a4b-it`** | 28.0 | 921 | 1,000,000 | 1 | 100 | 1.0 |
+| **`gemini` / `gemma-4-31b-it`** | 20.4 | 1106 | 1,000,000 | 1 | 100 | 0.7 |
+| **`groq` / `groq/compound`** | 477.2 | 1468 | 131,072 | 16 | 85 | 2.1 |
+| **`groq` / `groq/compound-mini`** | 479.1 | 805 | 131,072 | 16 | 85 | 2.1 |
+| **`groq` / `llama-3.3-70b-versatile`** | 277.6 | 483 | 131,072 | 9 | 85 | 1.2 |
+| **`groq` / `openai/gpt-oss-120b`** | 471.0 | 652 | 131,072 | 16 | 85 | 2.1 |
+| **`groq` / `openai/gpt-oss-20b`** | 1215.0 | 642 | 131,072 | 41 | 85 | 5.4 |
+| **`groq` / `qwen/qwen3.6-27b`** | 446.2 | 458 | 131,072 | 15 | 85 | 2.0 |
+| **`mistral` / `codestral-latest`** | 166.1 | 791 | 256,000 | 6 | 90 | 1.4 |
+| **`mistral` / `devstral-latest`** | 38.8 | 629 | 262,144 | 1 | 90 | 0.3 |
+| **`mistral` / `devstral-medium-latest`** | 46.6 | 676 | 262,144 | 2 | 90 | 0.4 |
+| **`mistral` / `magistral-small-latest`** | 82.2 | 765 | 262,144 | 3 | 90 | 0.7 |
+| **`mistral` / `ministral-14b-latest`** | 99.2 | 660 | 262,144 | 3 | 90 | 0.9 |
+| **`mistral` / `ministral-8b-latest`** | 108.5 | 601 | 262,144 | 4 | 90 | 1.0 |
+| **`mistral` / `mistral-medium-3-5`** | 65.8 | 603 | 262,144 | 2 | 90 | 0.6 |
+| **`mistral` / `mistral-medium-latest`** | 165.6 | 611 | 262,144 | 6 | 90 | 1.5 |
+| **`mistral` / `mistral-small-latest`** | 141.2 | 690 | 262,144 | 5 | 90 | 1.3 |
+| **`opencode_zen` / `big-pickle`** | 75.5 | 1265 | 0 | 3 | 0 | 0.0 |
+| **`opencode_zen` / `deepseek-v4-flash-free`** | 89.8 | 1648 | 0 | 3 | 0 | 0.0 |
+| **`opencode_zen` / `ling-3.0-flash-free`** | 358.1 | 2336 | 0 | 12 | 0 | 0.0 |
+| **`opencode_zen` / `mimo-v2.5-free`** | 31.8 | 3448 | 0 | 1 | 0 | 0.0 |
+| **`opencode_zen` / `nemotron-3-ultra-free`** | 130.9 | 2859 | 0 | 4 | 0 | 0.0 |
+| **`opencode_zen` / `north-mini-code-free`** | 28.2 | 6028 | 0 | 1 | 0 | 0.0 |
+| **`openrouter` / `cohere/north-mini-code:free`** | 10.2 | 3872 | 256,000 | 0 | 90 | 0.1 |
+| **`openrouter` / `google/gemma-4-26b-a4b-it:free`** | 17.8 | 1149 | 262,144 | 1 | 90 | 0.2 |
+| **`openrouter` / `inclusionai/ling-3.0-flash:free`** | 224.0 | 816 | 262,144 | 8 | 90 | 2.0 |
+| **`openrouter` / `nvidia/nemotron-3-nano-30b-a3b:free`** | 167.6 | 814 | 256,000 | 6 | 90 | 1.5 |
+| **`openrouter` / `nvidia/nemotron-3-super-120b-a12b:free`** | 128.3 | 1111 | 262,144 | 4 | 90 | 1.1 |
+| **`openrouter` / `nvidia/nemotron-3-ultra-550b-a55b:free`** | 54.4 | 1176 | 1,000,000 | 2 | 100 | 1.8 |
+| **`openrouter` / `openai/gpt-oss-20b:free`** | 46.4 | 5827 | 131,072 | 2 | 85 | 0.2 |
 
 **Quick capability matrix (stack defaults):**
 

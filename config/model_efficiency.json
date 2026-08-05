@@ -1,0 +1,361 @@
+{
+  "errors": {
+    "cerebras/zai-glm-4.7": "RuntimeError: zai-glm-4.7: no content tokens received",
+    "gemini/gemini-2.0-flash": "RuntimeError: Error code: 429 - [{'error': {'code': 429, 'message': 'You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-2.0-flash\\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.0-flash\\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-2.0-flash\\nPlease retry in 18.484357986s.', 'status': 'RESOURCE_EXHAUSTED', 'details': [{'@type': 'type.googleapis.com/google.rpc.Help', 'links': [{'description': 'Learn more about Gemini API quotas', 'url': 'https://ai.google.dev/gemini-api/docs/rate-limits'}]}, {'@type': 'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_input_token_count', 'quotaId': 'GenerateContentInputTokensPerModelPerMinute-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.0-flash'}}, {'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.0-flash'}}, {'quotaMetric': 'generativelanguage.googleapis.com/generate_content_free_tier_requests', 'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'quotaDimensions': {'location': 'global', 'model': 'gemini-2.0-flash'}}]}, {'@type': 'type.googleapis.com/google.rpc.RetryInfo', 'retryDelay': '18s'}]}}]",
+    "gemini/gemini-2.5-flash": "RuntimeError: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use a newer model for the latest features and improvements.', 'status': 'NOT_FOUND'}}]",
+    "gemini/gemini-2.5-flash-lite": "RuntimeError: Error code: 404 - [{'error': {'code': 404, 'message': 'This model models/gemini-2.5-flash-lite is no longer available to new users. Please update your code to use a newer model for the latest features and improvements.', 'status': 'NOT_FOUND'}}]",
+    "opencode_zen/laguna-s-2.1-free": "RuntimeError: laguna-s-2.1-free: no content tokens received",
+    "openrouter/google/gemma-4-31b-it:free": "RuntimeError: Error code: 429 - {'error': {'message': 'Provider returned error', 'code': 429, 'metadata': {'raw': 'google/gemma-4-31b-it:free is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations', 'provider_name': 'Google AI Studio', 'is_byok': False, 'provider_error_code': '429', 'limit_source': 'upstream_provider_shared_pool', 'remedy_hint': 'Retry shortly, add your own provider key (https://openrouter.ai/settings/integrations), or route to another provider with provider routing: https://openrouter.ai/docs/features/provider-routing'}}, 'user_id': 'user_3FpfYPPpC3wyevSPMu6CYAU2wLI'}",
+    "openrouter/poolside/laguna-s-2.1:free": "RuntimeError: poolside/laguna-s-2.1:free: no content tokens received",
+    "openrouter/poolside/laguna-xs-2.1:free": "RuntimeError: poolside/laguna-xs-2.1:free: no content tokens received"
+  },
+  "measured": {
+    "agnes/agnes-2.0-flash": {
+      "capacity_score": 0.5,
+      "context_score": 83.3,
+      "context_window": 100000,
+      "first_token_ms": 12586.8,
+      "speed_score": 4.5,
+      "tokens_per_sec": 133.52
+    },
+    "agnes/agnes-2.5-flash": {
+      "capacity_score": 5.9,
+      "context_score": 83.3,
+      "context_window": 100000,
+      "first_token_ms": 15864.8,
+      "speed_score": 59.1,
+      "tokens_per_sec": 1740.02
+    },
+    "agnes/agnes-2.5-pro": {
+      "capacity_score": 0.2,
+      "context_score": 83.3,
+      "context_window": 100000,
+      "first_token_ms": 4920.4,
+      "speed_score": 1.9,
+      "tokens_per_sec": 55.66
+    },
+    "cerebras/gemma-4-31b": {
+      "capacity_score": 13.1,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 515.3,
+      "speed_score": 100.0,
+      "tokens_per_sec": 2945.67
+    },
+    "cerebras/gpt-oss-120b": {
+      "capacity_score": 7.5,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 468.0,
+      "speed_score": 56.9,
+      "tokens_per_sec": 1675.58
+    },
+    "cohere/command-a-plus-05-2026": {
+      "capacity_score": 3.2,
+      "context_score": 94.0,
+      "context_window": 436000,
+      "first_token_ms": 412.5,
+      "speed_score": 7.4,
+      "tokens_per_sec": 216.54
+    },
+    "cohere/command-r-plus-08-2024": {
+      "capacity_score": 0.1,
+      "context_score": 85.1,
+      "context_window": 128000,
+      "first_token_ms": 432.3,
+      "speed_score": 0.5,
+      "tokens_per_sec": 14.45
+    },
+    "cohere/command-r7b-12-2024": {
+      "capacity_score": 0.3,
+      "context_score": 85.3,
+      "context_window": 132000,
+      "first_token_ms": 382.5,
+      "speed_score": 2.4,
+      "tokens_per_sec": 69.78
+    },
+    "gemini/gemini-3-flash-preview": {
+      "capacity_score": 62.7,
+      "context_score": 100.0,
+      "context_window": 1000000,
+      "first_token_ms": 17932.0,
+      "speed_score": 62.7,
+      "tokens_per_sec": 1847.68
+    },
+    "gemini/gemini-3.1-flash-lite": {
+      "capacity_score": 5.2,
+      "context_score": 100.0,
+      "context_window": 1000000,
+      "first_token_ms": 788.9,
+      "speed_score": 5.2,
+      "tokens_per_sec": 153.1
+    },
+    "gemini/gemini-3.5-flash": {
+      "capacity_score": 19.8,
+      "context_score": 100.0,
+      "context_window": 1000000,
+      "first_token_ms": 8098.6,
+      "speed_score": 19.8,
+      "tokens_per_sec": 582.01
+    },
+    "gemini/gemini-3.5-flash-lite": {
+      "capacity_score": 4.2,
+      "context_score": 100.0,
+      "context_window": 1000000,
+      "first_token_ms": 737.2,
+      "speed_score": 4.2,
+      "tokens_per_sec": 123.64
+    },
+    "gemini/gemini-3.6-flash": {
+      "capacity_score": 1.2,
+      "context_score": 100.0,
+      "context_window": 1000000,
+      "first_token_ms": 1459.5,
+      "speed_score": 1.2,
+      "tokens_per_sec": 36.26
+    },
+    "gemini/gemma-4-26b-a4b-it": {
+      "capacity_score": 1.0,
+      "context_score": 100.0,
+      "context_window": 1000000,
+      "first_token_ms": 921.3,
+      "speed_score": 1.0,
+      "tokens_per_sec": 28.01
+    },
+    "gemini/gemma-4-31b-it": {
+      "capacity_score": 0.7,
+      "context_score": 100.0,
+      "context_window": 1000000,
+      "first_token_ms": 1105.9,
+      "speed_score": 0.7,
+      "tokens_per_sec": 20.35
+    },
+    "groq/groq/compound": {
+      "capacity_score": 2.1,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 1468.4,
+      "speed_score": 16.2,
+      "tokens_per_sec": 477.2
+    },
+    "groq/groq/compound-mini": {
+      "capacity_score": 2.1,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 804.6,
+      "speed_score": 16.3,
+      "tokens_per_sec": 479.15
+    },
+    "groq/llama-3.3-70b-versatile": {
+      "capacity_score": 1.2,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 483.3,
+      "speed_score": 9.4,
+      "tokens_per_sec": 277.6
+    },
+    "groq/openai/gpt-oss-120b": {
+      "capacity_score": 2.1,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 652.4,
+      "speed_score": 16.0,
+      "tokens_per_sec": 471.0
+    },
+    "groq/openai/gpt-oss-20b": {
+      "capacity_score": 5.4,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 642.5,
+      "speed_score": 41.2,
+      "tokens_per_sec": 1214.95
+    },
+    "groq/qwen/qwen3.6-27b": {
+      "capacity_score": 2.0,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 458.5,
+      "speed_score": 15.1,
+      "tokens_per_sec": 446.22
+    },
+    "mistral/codestral-latest": {
+      "capacity_score": 1.4,
+      "context_score": 90.1,
+      "context_window": 256000,
+      "first_token_ms": 790.7,
+      "speed_score": 5.6,
+      "tokens_per_sec": 166.12
+    },
+    "mistral/devstral-latest": {
+      "capacity_score": 0.3,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 629.1,
+      "speed_score": 1.3,
+      "tokens_per_sec": 38.77
+    },
+    "mistral/devstral-medium-latest": {
+      "capacity_score": 0.4,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 676.3,
+      "speed_score": 1.6,
+      "tokens_per_sec": 46.57
+    },
+    "mistral/magistral-small-latest": {
+      "capacity_score": 0.7,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 765.1,
+      "speed_score": 2.8,
+      "tokens_per_sec": 82.21
+    },
+    "mistral/ministral-14b-latest": {
+      "capacity_score": 0.9,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 660.2,
+      "speed_score": 3.4,
+      "tokens_per_sec": 99.25
+    },
+    "mistral/ministral-8b-latest": {
+      "capacity_score": 1.0,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 601.2,
+      "speed_score": 3.7,
+      "tokens_per_sec": 108.53
+    },
+    "mistral/mistral-medium-3-5": {
+      "capacity_score": 0.6,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 602.9,
+      "speed_score": 2.2,
+      "tokens_per_sec": 65.78
+    },
+    "mistral/mistral-medium-latest": {
+      "capacity_score": 1.5,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 610.8,
+      "speed_score": 5.6,
+      "tokens_per_sec": 165.57
+    },
+    "mistral/mistral-small-latest": {
+      "capacity_score": 1.3,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 690.5,
+      "speed_score": 4.8,
+      "tokens_per_sec": 141.22
+    },
+    "opencode_zen/big-pickle": {
+      "capacity_score": 0.0,
+      "context_score": 0.0,
+      "context_window": 0,
+      "first_token_ms": 1265.4,
+      "speed_score": 2.6,
+      "tokens_per_sec": 75.46
+    },
+    "opencode_zen/deepseek-v4-flash-free": {
+      "capacity_score": 0.0,
+      "context_score": 0.0,
+      "context_window": 0,
+      "first_token_ms": 1648.5,
+      "speed_score": 3.0,
+      "tokens_per_sec": 89.81
+    },
+    "opencode_zen/ling-3.0-flash-free": {
+      "capacity_score": 0.0,
+      "context_score": 0.0,
+      "context_window": 0,
+      "first_token_ms": 2335.8,
+      "speed_score": 12.2,
+      "tokens_per_sec": 358.1
+    },
+    "opencode_zen/mimo-v2.5-free": {
+      "capacity_score": 0.0,
+      "context_score": 0.0,
+      "context_window": 0,
+      "first_token_ms": 3447.9,
+      "speed_score": 1.1,
+      "tokens_per_sec": 31.82
+    },
+    "opencode_zen/nemotron-3-ultra-free": {
+      "capacity_score": 0.0,
+      "context_score": 0.0,
+      "context_window": 0,
+      "first_token_ms": 2858.6,
+      "speed_score": 4.4,
+      "tokens_per_sec": 130.92
+    },
+    "opencode_zen/north-mini-code-free": {
+      "capacity_score": 0.0,
+      "context_score": 0.0,
+      "context_window": 0,
+      "first_token_ms": 6027.5,
+      "speed_score": 1.0,
+      "tokens_per_sec": 28.22
+    },
+    "openrouter/cohere/north-mini-code:free": {
+      "capacity_score": 0.1,
+      "context_score": 90.1,
+      "context_window": 256000,
+      "first_token_ms": 3872.0,
+      "speed_score": 0.3,
+      "tokens_per_sec": 10.15
+    },
+    "openrouter/google/gemma-4-26b-a4b-it:free": {
+      "capacity_score": 0.2,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 1148.7,
+      "speed_score": 0.6,
+      "tokens_per_sec": 17.82
+    },
+    "openrouter/inclusionai/ling-3.0-flash:free": {
+      "capacity_score": 2.0,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 815.8,
+      "speed_score": 7.6,
+      "tokens_per_sec": 223.97
+    },
+    "openrouter/nvidia/nemotron-3-nano-30b-a3b:free": {
+      "capacity_score": 1.5,
+      "context_score": 90.1,
+      "context_window": 256000,
+      "first_token_ms": 813.6,
+      "speed_score": 5.7,
+      "tokens_per_sec": 167.62
+    },
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free": {
+      "capacity_score": 1.1,
+      "context_score": 90.3,
+      "context_window": 262144,
+      "first_token_ms": 1110.9,
+      "speed_score": 4.4,
+      "tokens_per_sec": 128.29
+    },
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {
+      "capacity_score": 1.8,
+      "context_score": 100.0,
+      "context_window": 1000000,
+      "first_token_ms": 1176.5,
+      "speed_score": 1.8,
+      "tokens_per_sec": 54.4
+    },
+    "openrouter/openai/gpt-oss-20b:free": {
+      "capacity_score": 0.2,
+      "context_score": 85.3,
+      "context_window": 131072,
+      "first_token_ms": 5827.1,
+      "speed_score": 1.6,
+      "tokens_per_sec": 46.38
+    }
+  },
+  "note": "one 128-token completion per model; stack-relative scores (speed 0.50 linear / context 0.25 log / capacity 0.25 = tps*ctx). ttft = first streamed text token incl. reasoning. systems.md \u00a74.1 WAVE-20.",
+  "skipped": {},
+  "updated": "2026-08-04"
+}

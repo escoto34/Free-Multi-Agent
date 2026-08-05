@@ -14,7 +14,10 @@ Two entry points:
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Literal, Optional
+
+import yaml
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -22,6 +25,45 @@ AreaName = Literal["code", "reason", "ground", "synth", "safety"]
 ALL_AREAS: tuple[AreaName, ...] = ("code", "reason", "ground", "synth", "safety")
 
 PipelineKind = Literal["vibe_coding", "deep_research"]
+
+_BENCHMARKS_PATH = Path(__file__).parent.parent / "config" / "model_benchmarks.yaml"
+_bench_cache: Optional[dict[str, Any]] = None
+
+# WAVE-20: the former hardcoded aggregate coefficients (byte-identical default).
+_DEFAULT_AGGREGATE: dict[str, float] = {
+    "code": 0.30,
+    "reason": 0.25,
+    "ground": 0.15,
+    "synth": 0.15,
+    "safety": 0.05,
+    "logic_error": 0.10,
+}
+_AGGREGATE_KEYS = ("code_weight", "reason_weight", "ground_weight", "synth_weight", "safety_weight", "logic_error_weight")
+
+
+def _load_benchmarks() -> dict[str, Any]:
+    global _bench_cache
+    if _bench_cache is None:
+        with open(_BENCHMARKS_PATH, encoding="utf-8") as fh:
+            _bench_cache = yaml.safe_load(fh) or {}
+    return _bench_cache
+
+
+def reload_benchmarks() -> None:
+    global _bench_cache
+    _bench_cache = None
+
+
+def _aggregate_weights() -> dict[str, float]:
+    """Aggregate coefficients from ``selection_defaults.quality_aggregate``
+    (defaulting to today's hardcoded values — output is byte-identical)."""
+    defaults = _load_benchmarks().get("selection_defaults") or {}
+    agg = defaults.get("quality_aggregate") or {}
+    out = dict(_DEFAULT_AGGREGATE)
+    for key in _AGGREGATE_KEYS:
+        leaf = key.removesuffix("_weight")
+        out[leaf] = float(agg.get(key, _DEFAULT_AGGREGATE[leaf]))
+    return out
 
 
 class DifficultyAssessment(BaseModel):
@@ -219,7 +261,7 @@ def score_task_difficulty(
     if "coder" in rp or "debugger" in rp:
         code = _clip(max(code, logic, errors))
         reason = _clip(max(reason, logic - 5))
-    elif "coder" in rp or "debugger" in rp or "planner" in rp:
+    elif "planner" in rp:
         reason = _clip(max(reason, base + 5))
         synth = _clip(max(synth, base - 5))
     elif "grounding" in rp:
@@ -241,15 +283,16 @@ def score_task_difficulty(
         reason = _clip(reason + 8)
         synth = _clip(synth + 8)
 
+    agg = _aggregate_weights()
     overall = _clip(
         int(
             round(
-                0.30 * code
-                + 0.25 * reason
-                + 0.15 * ground
-                + 0.15 * synth
-                + 0.05 * safety
-                + 0.10 * max(logic, errors)
+                agg["code"] * code
+                + agg["reason"] * reason
+                + agg["ground"] * ground
+                + agg["synth"] * synth
+                + agg["safety"] * safety
+                + agg["logic_error"] * max(logic, errors)
             )
         )
     )

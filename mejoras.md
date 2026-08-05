@@ -1593,14 +1593,22 @@ New `tests/test_model_scoring.py`: `split_model_key` round-trips every real cata
 `systems.md` §4.1 (rubric definition — note the new efficiency axis and its bands), §4.2 (full re-score table, quality + efficiency columns, evidence notes updated for every changed row).
 
 ### Acceptance criteria
-- [ ] `config/model_benchmarks.yaml` at `version: 2`; every model row has `efficiency`/`evidence`/`verified`/`available`.
-- [ ] `core/model_scoring.py` exists with the 5 contract functions, unit tested in isolation.
-- [ ] `scripts/benchmark_models.py` exists, defaults to `--dry-run`, requires `--yes` to spend quota, skips low-headroom providers.
-- [ ] `difficulty_scorer.py` weights sourced from YAML; `overall` scores unchanged from before this wave on existing fixtures (verified, not assumed).
-- [ ] Dead `selection_defaults` keys either wired to a real consumer or deleted — none left decorative.
-- [ ] `tests/test_provider_registry.py` guard extended and passing.
-- [ ] `systems.md` §4.1/§4.2 synced with the re-score.
-- [ ] No selection-logic change in `core/model_selector.py` this wave (that's WAVE-21) — confirm via diff.
+- [x] `config/model_benchmarks.yaml` at `version: 2`; every model row has `efficiency`/`evidence`/`verified`/`available`.
+- [x] `core/model_scoring.py` exists with the 5 contract functions, unit tested in isolation.
+- [x] `scripts/benchmark_models.py` exists, defaults to `--dry-run`, requires `--yes` to spend quota, skips low-headroom providers.
+- [x] `difficulty_scorer.py` weights sourced from YAML; `overall` scores unchanged from before this wave on existing fixtures (verified, not assumed).
+- [x] Dead `selection_defaults` keys either wired to a real consumer or deleted — none left decorative.
+- [x] `tests/test_provider_registry.py` guard extended and passing.
+- [x] `systems.md` §4.1/§4.2 synced with the re-score.
+- [x] No selection-logic change in `core/model_selector.py` this wave (that's WAVE-21) — confirm via diff.
+
+### Follow-ups WAVE-20 (implementación commiteada en este tranche)
+Pendientes para WAVE-21 / limpieza futura, observados durante el tranche:
+- gemini-2.0-flash (quota limit 0) y gemini-2.5-flash / 2.5-flash-lite (404 "no longer available to new users") son **inutilizables con esta key** — decidir si se retiran del catálogo (`available: false` marcado en benchmarks; no afecta selección aún).
+- `opencode_zen` no expone context window en `/models`: queda con credit 0 en context/capacity del axis de eficiencia hasta documentar un default por modelo.
+- Modelos "reasoning-heavy" (poolside laguna-s/xs) no emiten contenido en 128 tokens de pensamiento → efficiency 0 medido (señal real de latencia, no bugdel script); si WAVE-21 prioriza por fitness, quedarán últimos salvo calidad compensatoria.
+- `cerebras/zai-glm-4.7` y `groq/openai/gpt-oss-20b` devuelven stream vacío con `max_tokens=128` — validar con invocación tool/reasoning antes de darles crédito de eficiencia.
+- `model_efficiency.json` es huérfano de CI: candidate a regeneración automática en el gate de drift (FIXME de WAVE-19 sigue abierto).
 
 ### Prohibitions
 Do not wire `fitness()`/`rank_candidates()` into `select_for_role` — that is WAVE-21's job specifically so the scoring change and the routing-behavior change land, and can be reviewed, as separate commits. Do not invent quality numbers without a source — mark `evidence: provisional` and say so, per the existing rubric's own scoring rules (`systems.md` §4.1 rule 2: "never invent exact HumanEval % you did not read"). Do not run the probe without `--yes`/quota-margin guards — it spends real free-tier RPD.

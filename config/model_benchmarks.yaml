@@ -3,8 +3,8 @@
 # Source of truth for auto primary/fallback choice (core/model_selector.py).
 # Edit thresholds here — do not hardcode them in Python.
 
-version: 1
-updated: "2026-08-03"
+version: 2
+updated: "2026-08-04"
 
 # Rubric bands (0-100) — mirrors systems.md §4.1
 rubric_bands:
@@ -34,30 +34,126 @@ rubric_bands:
 models:
   mistral/codestral-latest:
     scores: {code: 88, reason: 62, ground: 40, synth: 55, safety: 35}
+    efficiency:
+      speed_score: 5.6
+      context_score: 90.1
+      capacity_score: 1.4
+      tokens_per_sec: 166.12
+      first_token_ms: 790.7
+      context_window: 256000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   groq/openai/gpt-oss-120b:
     scores: {code: 82, reason: 90, ground: 48, synth: 85, safety: 45}
+    efficiency:
+      speed_score: 16.0
+      context_score: 85.3
+      capacity_score: 2.1
+      tokens_per_sec: 471.0
+      first_token_ms: 652.4
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   agnes/agnes-2.0-flash:
     scores: {code: 78, reason: 76, ground: 42, synth: 80, safety: 40}
+    efficiency:
+      speed_score: 4.5
+      context_score: 83.3
+      capacity_score: 0.5
+      tokens_per_sec: 133.52
+      first_token_ms: 12586.8
+      context_window: 100000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
   # pending WAVE-20 re-score from researched sources.
   agnes/agnes-2.5-flash:
-    scores: {code: 68, reason: 68, ground: 42, synth: 70, safety: 40}
+    scores: {code: 70, reason: 72, ground: 42, synth: 72, safety: 40}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 59.1
+      context_score: 83.3
+      capacity_score: 5.9
+      tokens_per_sec: 1740.02
+      first_token_ms: 15864.8
+      context_window: 100000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   agnes/agnes-2.5-pro:
-    scores: {code: 66, reason: 66, ground: 42, synth: 66, safety: 38}
+    scores: {code: 66, reason: 70, ground: 44, synth: 68, safety: 38}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 1.9
+      context_score: 83.3
+      capacity_score: 0.2
+      tokens_per_sec: 55.66
+      first_token_ms: 4920.4
+      context_window: 100000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   gemini/gemini-2.0-flash:
     scores: {code: 70, reason: 78, ground: 55, synth: 75, safety: 50}
+    efficiency: {}
+    evidence: benchmark_error
+    available: false
+    verified: "2026-08-04"
+    note: "live probe 2026-08-04: quota limit 0 for this key -> currently unusable (follow-up: drop or rotate)."
   cohere/command-a-plus-05-2026:
     scores: {code: 58, reason: 72, ground: 93, synth: 78, safety: 48}
+    efficiency:
+      speed_score: 7.4
+      context_score: 94.0
+      capacity_score: 3.2
+      tokens_per_sec: 216.54
+      first_token_ms: 412.5
+      context_window: 436000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   mistral/mistral-small-latest:
     scores: {code: 58, reason: 62, ground: 55, synth: 65, safety: 40}
+    efficiency:
+      speed_score: 4.8
+      context_score: 90.3
+      capacity_score: 1.3
+      tokens_per_sec: 141.22
+      first_token_ms: 690.5
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   groq/groq/compound-mini:
     scores: {code: 50, reason: 58, ground: 88, synth: 52, safety: 30}
+    efficiency:
+      speed_score: 16.3
+      context_score: 85.3
+      capacity_score: 2.1
+      tokens_per_sec: 479.15
+      first_token_ms: 804.6
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   groq/openai/gpt-oss-safeguard-20b:
     scores: {code: 35, reason: 55, ground: 30, synth: 40, safety: 92}
+    efficiency: {}
+    evidence: skipped_non_conversational
+    available: true
+    verified: "2026-08-04"
+    note: "non-conversational safety guard rail -> not chat-benchmarked."
   # Temporal OpenRouter promo — NOT default primary/fallback (free-durable).
   # free_until past → is_model_available=false; get_model_scores caps each area ≤49.
   openrouter/tencent/hy3:free:
     scores: {code: 55, reason: 60, ground: 38, synth: 58, safety: 35}
+    efficiency: {}
+    evidence: temporal_example
+    available: false
+    verified: "2026-08-04"
     free_until: "2026-07-21"
     temporal: true
     note: "Verify availability before every run; expired → expired_fallback; scores capped ≤49."
@@ -69,100 +165,522 @@ models:
   # are scored conservatively (adequate band, 50-69) pending real usage data.
   groq/openai/gpt-oss-20b:
     scores: {code: 72, reason: 80, ground: 44, synth: 72, safety: 40}
+    efficiency:
+      speed_score: 41.2
+      context_score: 85.3
+      capacity_score: 5.4
+      tokens_per_sec: 1214.95
+      first_token_ms: 642.5
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
   # pending WAVE-20 re-score from researched sources.
   groq/groq/compound:
-    scores: {code: 52, reason: 60, ground: 90, synth: 54, safety: 30}
+    scores: {code: 52, reason: 64, ground: 90, synth: 54, safety: 30}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 16.2
+      context_score: 85.3
+      capacity_score: 2.1
+      tokens_per_sec: 477.2
+      first_token_ms: 1468.4
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   groq/llama-3.3-70b-versatile:
-    scores: {code: 62, reason: 66, ground: 44, synth: 60, safety: 38}
+    scores: {code: 62, reason: 68, ground: 44, synth: 60, safety: 38}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 9.4
+      context_score: 85.3
+      capacity_score: 1.2
+      tokens_per_sec: 277.6
+      first_token_ms: 483.3
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   groq/qwen/qwen3.6-27b:
-    scores: {code: 70, reason: 82, ground: 42, synth: 70, safety: 38}
+    scores: {code: 70, reason: 84, ground: 42, synth: 70, safety: 38}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 15.1
+      context_score: 85.3
+      capacity_score: 2.0
+      tokens_per_sec: 446.22
+      first_token_ms: 458.5
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   cohere/command-r-plus-08-2024:
     scores: {code: 54, reason: 68, ground: 88, synth: 72, safety: 44}
+    efficiency:
+      speed_score: 0.5
+      context_score: 85.1
+      capacity_score: 0.1
+      tokens_per_sec: 14.45
+      first_token_ms: 432.3
+      context_window: 128000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   cohere/command-r7b-12-2024:
     scores: {code: 50, reason: 60, ground: 80, synth: 62, safety: 40}
+    efficiency:
+      speed_score: 2.4
+      context_score: 85.3
+      capacity_score: 0.3
+      tokens_per_sec: 69.78
+      first_token_ms: 382.5
+      context_window: 132000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   mistral/mistral-medium-latest:
     scores: {code: 66, reason: 68, ground: 48, synth: 64, safety: 38}
+    efficiency:
+      speed_score: 5.6
+      context_score: 90.3
+      capacity_score: 1.5
+      tokens_per_sec: 165.57
+      first_token_ms: 610.8
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   mistral/devstral-latest:
     scores: {code: 80, reason: 58, ground: 36, synth: 52, safety: 34}
+    efficiency:
+      speed_score: 1.3
+      context_score: 90.3
+      capacity_score: 0.3
+      tokens_per_sec: 38.77
+      first_token_ms: 629.1
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   mistral/ministral-8b-latest:
     scores: {code: 56, reason: 54, ground: 40, synth: 50, safety: 34}
+    efficiency:
+      speed_score: 3.7
+      context_score: 90.3
+      capacity_score: 1.0
+      tokens_per_sec: 108.53
+      first_token_ms: 601.2
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
   # pending WAVE-20 re-score from researched sources.
   mistral/devstral-medium-latest:
-    scores: {code: 68, reason: 58, ground: 36, synth: 52, safety: 34}
+    scores: {code: 70, reason: 58, ground: 36, synth: 52, safety: 34}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 1.6
+      context_score: 90.3
+      capacity_score: 0.4
+      tokens_per_sec: 46.57
+      first_token_ms: 676.3
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   mistral/mistral-medium-3-5:
-    scores: {code: 68, reason: 70, ground: 48, synth: 66, safety: 38}
+    scores: {code: 68, reason: 72, ground: 48, synth: 66, safety: 38}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 2.2
+      context_score: 90.3
+      capacity_score: 0.6
+      tokens_per_sec: 65.78
+      first_token_ms: 602.9
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   mistral/ministral-14b-latest:
-    scores: {code: 60, reason: 58, ground: 40, synth: 54, safety: 34}
+    scores: {code: 62, reason: 58, ground: 40, synth: 54, safety: 34}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 3.4
+      context_score: 90.3
+      capacity_score: 0.9
+      tokens_per_sec: 99.25
+      first_token_ms: 660.2
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   mistral/magistral-small-latest:
-    scores: {code: 62, reason: 66, ground: 40, synth: 60, safety: 36}
+    scores: {code: 62, reason: 68, ground: 40, synth: 60, safety: 36}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 2.8
+      context_score: 90.3
+      capacity_score: 0.7
+      tokens_per_sec: 82.21
+      first_token_ms: 765.1
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   gemini/gemini-2.5-flash:
     scores: {code: 74, reason: 82, ground: 58, synth: 78, safety: 52}
+    efficiency: {}
+    evidence: benchmark_error
+    available: false
+    verified: "2026-08-04"
+    note: "live probe 2026-08-04: 404 'no longer available to new users' -> currently unusable (follow-up: remove from catalog)."
   gemini/gemini-2.5-flash-lite:
     scores: {code: 66, reason: 74, ground: 52, synth: 70, safety: 48}
+    efficiency: {}
+    evidence: benchmark_error
+    available: false
+    verified: "2026-08-04"
+    note: "live probe 2026-08-04: 404 'no longer available to new users' -> currently unusable (follow-up: remove from catalog)."
   # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
   # pending WAVE-20 re-score from researched sources.
   gemini/gemini-3.1-flash-lite:
-    scores: {code: 60, reason: 66, ground: 46, synth: 60, safety: 42}
+    scores: {code: 60, reason: 68, ground: 46, synth: 60, safety: 42}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 5.2
+      context_score: 100.0
+      capacity_score: 5.2
+      tokens_per_sec: 153.1
+      first_token_ms: 788.9
+      context_window: 1000000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   gemini/gemini-3-flash-preview:
-    scores: {code: 66, reason: 72, ground: 50, synth: 66, safety: 44}
+    scores: {code: 68, reason: 76, ground: 50, synth: 70, safety: 44}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 62.7
+      context_score: 100.0
+      capacity_score: 62.7
+      tokens_per_sec: 1847.68
+      first_token_ms: 17932.0
+      context_window: 1000000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   gemini/gemini-3.5-flash:
-    scores: {code: 66, reason: 72, ground: 50, synth: 66, safety: 44}
+    scores: {code: 68, reason: 78, ground: 50, synth: 72, safety: 44}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 19.8
+      context_score: 100.0
+      capacity_score: 19.8
+      tokens_per_sec: 582.01
+      first_token_ms: 8098.6
+      context_window: 1000000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   gemini/gemini-3.5-flash-lite:
-    scores: {code: 62, reason: 68, ground: 46, synth: 62, safety: 42}
+    scores: {code: 62, reason: 70, ground: 46, synth: 62, safety: 42}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 4.2
+      context_score: 100.0
+      capacity_score: 4.2
+      tokens_per_sec: 123.64
+      first_token_ms: 737.2
+      context_window: 1000000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   gemini/gemini-3.6-flash:
-    scores: {code: 68, reason: 74, ground: 50, synth: 68, safety: 46}
+    scores: {code: 70, reason: 82, ground: 52, synth: 74, safety: 46}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 1.2
+      context_score: 100.0
+      capacity_score: 1.2
+      tokens_per_sec: 36.26
+      first_token_ms: 1459.5
+      context_window: 1000000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   gemini/gemma-4-31b-it:
-    scores: {code: 68, reason: 72, ground: 44, synth: 64, safety: 40}
+    scores: {code: 68, reason: 74, ground: 44, synth: 64, safety: 40}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 0.7
+      context_score: 100.0
+      capacity_score: 0.7
+      tokens_per_sec: 20.35
+      first_token_ms: 1105.9
+      context_window: 1000000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   gemini/gemma-4-26b-a4b-it:
-    scores: {code: 66, reason: 70, ground: 42, synth: 62, safety: 38}
+    scores: {code: 66, reason: 72, ground: 42, synth: 62, safety: 38}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 1.0
+      context_score: 100.0
+      capacity_score: 1.0
+      tokens_per_sec: 28.01
+      first_token_ms: 921.3
+      context_window: 1000000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   cerebras/gemma-4-31b:
     scores: {code: 74, reason: 80, ground: 46, synth: 72, safety: 42}
+    efficiency:
+      speed_score: 100.0
+      context_score: 85.3
+      capacity_score: 13.1
+      tokens_per_sec: 2945.67
+      first_token_ms: 515.3
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   cerebras/gpt-oss-120b:
     scores: {code: 82, reason: 90, ground: 48, synth: 85, safety: 45}
+    efficiency:
+      speed_score: 56.9
+      context_score: 85.3
+      capacity_score: 7.5
+      tokens_per_sec: 1675.58
+      first_token_ms: 468.0
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   cerebras/zai-glm-4.7:
-    scores: {code: 68, reason: 74, ground: 44, synth: 66, safety: 40}
+    scores: {code: 68, reason: 76, ground: 44, synth: 66, safety: 40}
+    quality_evidence: research_2026-08-04
+    efficiency: {}
+    evidence: benchmark_error
+    available: true
+    verified: "2026-08-04"
+    note: "live probe 2026-08-04: empty stream (finish=length, 128 tokens) -> efficiency 0 until validated with tool/reasoning invocation."
   openrouter/cohere/north-mini-code:free:
-    scores: {code: 62, reason: 56, ground: 38, synth: 50, safety: 32}
+    scores: {code: 64, reason: 56, ground: 38, synth: 50, safety: 32}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 0.3
+      context_score: 90.1
+      capacity_score: 0.1
+      tokens_per_sec: 10.15
+      first_token_ms: 3872.0
+      context_window: 256000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   # WAVE-19 additions — proven live 2026-08-04; provisional (adequate band)
   # pending WAVE-20 re-score from researched sources.
   openrouter/google/gemma-4-31b-it:free:
-    scores: {code: 68, reason: 72, ground: 44, synth: 64, safety: 40}
+    scores: {code: 68, reason: 74, ground: 44, synth: 64, safety: 40}
+    quality_evidence: research_2026-08-04
+    efficiency: {}
+    evidence: benchmark_error
+    available: true
+    verified: "2026-08-04"
+    note: "live probe 2026-08-04: upstream 429 (OpenRouter shared pool) on both attempts."
   openrouter/google/gemma-4-26b-a4b-it:free:
-    scores: {code: 66, reason: 70, ground: 42, synth: 62, safety: 38}
+    scores: {code: 66, reason: 72, ground: 42, synth: 62, safety: 38}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 0.6
+      context_score: 90.3
+      capacity_score: 0.2
+      tokens_per_sec: 17.82
+      first_token_ms: 1148.7
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   openrouter/inclusionai/ling-3.0-flash:free:
-    scores: {code: 62, reason: 60, ground: 38, synth: 58, safety: 34}
+    scores: {code: 62, reason: 62, ground: 38, synth: 58, safety: 34}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 7.6
+      context_score: 90.3
+      capacity_score: 2.0
+      tokens_per_sec: 223.97
+      first_token_ms: 815.8
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   openrouter/nvidia/nemotron-3-nano-30b-a3b:free:
-    scores: {code: 60, reason: 62, ground: 38, synth: 58, safety: 36}
+    scores: {code: 62, reason: 62, ground: 38, synth: 58, safety: 36}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 5.7
+      context_score: 90.1
+      capacity_score: 1.5
+      tokens_per_sec: 167.62
+      first_token_ms: 813.6
+      context_window: 256000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   openrouter/nvidia/nemotron-3-super-120b-a12b:free:
-    scores: {code: 64, reason: 66, ground: 40, synth: 62, safety: 38}
+    scores: {code: 66, reason: 70, ground: 40, synth: 62, safety: 38}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 4.4
+      context_score: 90.3
+      capacity_score: 1.1
+      tokens_per_sec: 128.29
+      first_token_ms: 1110.9
+      context_window: 262144
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   openrouter/nvidia/nemotron-3-ultra-550b-a55b:free:
-    scores: {code: 66, reason: 68, ground: 40, synth: 64, safety: 40}
+    scores: {code: 70, reason: 74, ground: 40, synth: 68, safety: 40}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 1.8
+      context_score: 100.0
+      capacity_score: 1.8
+      tokens_per_sec: 54.4
+      first_token_ms: 1176.5
+      context_window: 1000000
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   openrouter/nvidia/nemotron-3.5-content-safety:free:
     scores: {code: 50, reason: 54, ground: 34, synth: 50, safety: 62}
+    efficiency: {}
+    evidence: skipped_non_conversational
+    available: true
+    verified: "2026-08-04"
+    note: "non-conversational content-safety classifier -> not chat-benchmarked."
   openrouter/openai/gpt-oss-20b:free:
-    scores: {code: 68, reason: 76, ground: 42, synth: 68, safety: 40}
+    scores: {code: 72, reason: 78, ground: 42, synth: 68, safety: 40}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 1.6
+      context_score: 85.3
+      capacity_score: 0.2
+      tokens_per_sec: 46.38
+      first_token_ms: 5827.1
+      context_window: 131072
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   openrouter/poolside/laguna-s-2.1:free:
-    scores: {code: 60, reason: 58, ground: 36, synth: 54, safety: 32}
+    scores: {code: 60, reason: 62, ground: 36, synth: 54, safety: 32}
+    quality_evidence: research_2026-08-04
+    efficiency: {}
+    evidence: benchmark_error
+    available: true
+    verified: "2026-08-04"
+    note: "live probe 2026-08-04: empty stream in 128 tokens -> efficiency 0 (heavy reasoning)."
   openrouter/poolside/laguna-xs-2.1:free:
-    scores: {code: 56, reason: 54, ground: 34, synth: 50, safety: 30}
+    scores: {code: 56, reason: 58, ground: 34, synth: 50, safety: 30}
+    quality_evidence: research_2026-08-04
+    efficiency: {}
+    evidence: benchmark_error
+    available: true
+    verified: "2026-08-04"
+    note: "live probe 2026-08-04: empty stream in 128 tokens -> efficiency 0 (heavy reasoning)."
   # WAVE-08 opencode_zen — provisional scores pending real usage data.
   # Catalog / fallback tier only; not assigned as any primary role.
   opencode_zen/big-pickle:
-    scores: {code: 62, reason: 60, ground: 38, synth: 58, safety: 34}
+    scores: {code: 62, reason: 62, ground: 38, synth: 58, safety: 34}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 2.6
+      context_score: 0.0
+      capacity_score: 0.0
+      tokens_per_sec: 75.46
+      first_token_ms: 1265.4
+      context_window: 0
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   opencode_zen/deepseek-v4-flash-free:
-    scores: {code: 64, reason: 66, ground: 40, synth: 60, safety: 36}
+    scores: {code: 66, reason: 72, ground: 40, synth: 62, safety: 36}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 3.0
+      context_score: 0.0
+      capacity_score: 0.0
+      tokens_per_sec: 89.81
+      first_token_ms: 1648.5
+      context_window: 0
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   opencode_zen/nemotron-3-ultra-free:
-    scores: {code: 60, reason: 62, ground: 38, synth: 56, safety: 34}
+    scores: {code: 62, reason: 66, ground: 38, synth: 56, safety: 34}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 4.4
+      context_score: 0.0
+      capacity_score: 0.0
+      tokens_per_sec: 130.92
+      first_token_ms: 2858.6
+      context_window: 0
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   opencode_zen/mimo-v2.5-free:
-    scores: {code: 60, reason: 58, ground: 36, synth: 54, safety: 32}
+    scores: {code: 60, reason: 60, ground: 36, synth: 54, safety: 32}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 1.1
+      context_score: 0.0
+      capacity_score: 0.0
+      tokens_per_sec: 31.82
+      first_token_ms: 3447.9
+      context_window: 0
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   opencode_zen/north-mini-code-free:
-    scores: {code: 58, reason: 54, ground: 36, synth: 50, safety: 32}
+    scores: {code: 60, reason: 54, ground: 36, synth: 50, safety: 32}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 1.0
+      context_score: 0.0
+      capacity_score: 0.0
+      tokens_per_sec: 28.22
+      first_token_ms: 6027.5
+      context_window: 0
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
   opencode_zen/laguna-s-2.1-free:
-    scores: {code: 56, reason: 54, ground: 34, synth: 48, safety: 30}
+    scores: {code: 56, reason: 58, ground: 34, synth: 48, safety: 30}
+    quality_evidence: research_2026-08-04
+    efficiency: {}
+    evidence: benchmark_error
+    available: true
+    verified: "2026-08-04"
+    note: "live probe 2026-08-04: heavy reasoning consumed the 128-token budget before content -> efficiency 0 (slow UX)."
   opencode_zen/ling-3.0-flash-free:
-    scores: {code: 62, reason: 60, ground: 38, synth: 54, safety: 34}
+    scores: {code: 62, reason: 64, ground: 38, synth: 54, safety: 34}
+    quality_evidence: research_2026-08-04
+    efficiency:
+      speed_score: 12.2
+      context_score: 0.0
+      capacity_score: 0.0
+      tokens_per_sec: 358.1
+      first_token_ms: 2335.8
+      context_window: 0
+    evidence: measured
+    available: true
+    verified: "2026-08-04"
 
 # ---------------------------------------------------------------------------
 # Selection policy (systems.md §4.3) — editable, not hardcoded in Python
@@ -180,14 +698,22 @@ selection_defaults:
   weak_specialization_max: 49    # primary ≤ this on a relevant area → weak specialist
   hard_threshold: 70             # difficulty on a relevant area ≥ this for mis-spec path
   capacity_margin: 5             # kept for diagnostics / future planners
-  prefer_fallback_overall: 75    # kept for diagnostics; not sole switch trigger
   warn_hy3_days: 3               # CLI warning window (days before free_until)
   expired_score_cap: 49          # cap model area scores after free_until (auto-scorer)
-  logic_weight: 0.45
-  error_handling_weight: 0.35
-  context_weight: 0.20
-  large_context_tokens: 12000
-  large_context_boost: 15
+  # WAVE-20 scoring v2 — quality/efficiency fusion (core/model_scoring.py)
+  quality_weight: 0.75
+  efficiency_weight: 0.25
+  # Difficulty aggregate (core/difficulty_scorer.py): the 6 coefficients were
+  # hardcoded (0.30*code + 0.25*reason + 0.15*ground + 0.15*synth + 0.05*safety
+  # + 0.10*max(logic, errors)); defaults below preserve byte-identical output.
+  # Editing these values changes aggregate difficulty behavior.
+  quality_aggregate:
+    code_weight: 0.30
+    reason_weight: 0.25
+    ground_weight: 0.15
+    synth_weight: 0.15
+    safety_weight: 0.05
+    logic_error_weight: 0.10
 
 # Per-role: which systems.md areas matter + threshold overrides (§4.3 role table)
 roles:
