@@ -8,17 +8,21 @@ Consumes:
 * ``config/model_router.yaml`` — live primary/fallback per role
 * :class:`~core.difficulty_scorer.DifficultyAssessment`
 
-Policy (systems.md §4.3) — prefer fallback when:
+Policy (systems.md §4.3) — WAVE-21 score-driven selection:
 
-1. Primary is **unavailable/degraded** (expired promo, quota, 429, empty
-   completion) and a role (or catalog) fallback exists; **or**
-2. Primary is **mis-specialized** for a relevant area:
-   ``score_fallback(area) − score_primary(area) ≥ score_advantage_threshold``
-   (default **8**, editable in YAML) **and** (primary score is weak **or**
-   task difficulty on that area exceeds primary capacity).
-
-Healthy primary + easy/adequate task → **stay on primary** even if the
-fallback edges higher by a few points on one area.
+1. Build the candidate set (role primary + role fallback + every available,
+   unexpired, quota-healthy catalog model with a benchmark row) and rank it by
+   ``core.model_scoring.fitness()`` (quality 0.75 + efficiency 0.25).
+2. **Primary unavailable/degraded** (expired promo, quota, 429, empty
+   completion) → best-ranked non-primary candidate.
+3. **Hard tasks** (``assessment.relevant_max(areas) >= hard_threshold``) →
+   the picked model's role quality must also clear ``hard_threshold``;
+   escalate to the best-ranked candidate that does.
+4. **Anti-churn hysteresis**: on a healthy primary, only switch when the best
+   candidate's fitness beats the primary by ≥ ``score_advantage_threshold``
+   (default **8**) — never on a marginal edge.
+5. **Pinned roles** (``roles.<path>.pin: true``, e.g. ``deep_research.web_search``)
+   are never proposed for a swap — structural, not incidental.
 
 When the decision leaves the configured primary, callers **must** record the
 transition with :func:`record_model_selection_handoff` (uses
@@ -32,13 +36,14 @@ import logging
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Callable, Mapping, MutableMapping, Optional, Sequence
 
 import yaml
 
 from core.agent_config import get_agent_config
 from core.difficulty_scorer import DifficultyAssessment
 from core.handoff import transfer_control
+from core.model_scoring import fitness, quality_for_role, rank_candidates, split_model_key
 from schemas.handoff import PipelineName
 
 logger = logging.getLogger(__name__)
@@ -57,6 +62,23 @@ DEGRADED_STATUSES = frozenset(
 )
 
 _bench_cache: Optional[dict[str, Any]] = None
+_quota_tracker: Optional["Any"] = None
+
+
+def default_quota_remaining(provider: str, model: str) -> int:
+    """Live remaining-call budget for *provider*/*model* (WAVE-21).
+
+    Production call sites pass this as ``quota_remaining=`` so ``select_for_role``
+    derives ``quota_exhausted`` from real ledger state instead of the hardcoded
+    ``"ok"`` default. Lazy singleton: the SQLite ledger is only touched on first
+    use. Tests should inject a stub rather than touching the real ledger.
+    """
+    global _quota_tracker
+    if _quota_tracker is None:
+        from core.quotas import QuotaTracker
+
+        _quota_tracker = QuotaTracker()
+    return _quota_tracker.remaining(provider, model)
 
 
 def _load_benchmarks(path: Optional[Path] = None) -> dict[str, Any]:
@@ -265,43 +287,6 @@ def _is_primary_degraded(status: str) -> bool:
     return (status or "ok").strip().lower() in DEGRADED_STATUSES
 
 
-def _mis_specialization_reasons(
-    *,
-    p_scores: Mapping[str, int],
-    f_scores: Mapping[str, int],
-    assessment: DifficultyAssessment,
-    areas: Sequence[str],
-    advantage_th: int,
-    weak_max: int,
-    hard_th: int,
-) -> list[str]:
-    """systems.md mis-specialized path (e.g. Safeguard on coding).
-
-    Prefer fallback only when, on a relevant area:
-    ``score_fallback − score_primary ≥ advantage_th`` **and**
-    primary score is in the weak band (≤ ``weak_max``, default 49).
-
-    A healthy specialist (Codestral code 88) must **not** lose the role just
-    because the fallback edges higher on a secondary area (e.g. reason).
-    Hard-task routing without degradation stays on primary; ops degradation
-    is handled separately via ``primary_status``.
-    """
-    del assessment, hard_th  # reserved for future planner hooks / diagnostics
-    why: list[str] = []
-    for area in areas:
-        sp = int(p_scores.get(area, 60))
-        sf = int(f_scores.get(area, 60))
-        delta = sf - sp
-        if delta < advantage_th:
-            continue
-        if sp <= weak_max:
-            why.append(
-                f"{area}: mis-specialized primary={sp}<={weak_max}, "
-                f"fallback={sf} (Δ{delta}>={advantage_th})"
-            )
-    return why
-
-
 def select_for_role(
     *role_path: str,
     assessment: DifficultyAssessment,
@@ -310,18 +295,26 @@ def select_for_role(
     benchmarks_path: Optional[Path] = None,
     force_primary: bool = False,
     primary_status: str = "ok",
+    quota_remaining: Optional[Callable[[str, str], int]] = None,
 ) -> ModelSelection:
-    """Choose primary or fallback for ``role_path`` given a difficulty assessment.
+    """Choose the best model for ``role_path`` by WAVE-20 fitness ranking.
 
-    Pure decision function — no HTTP. Hy3 (and any model with ``free_until``)
-    past expiry is treated as unavailable and replaced automatically.
+    Pure decision function — no HTTP. Expired promos are replaced
+    automatically; pinned roles never swap; a healthy primary keeps its seat
+    unless the best candidate wins by ``score_advantage_threshold``.
 
     Parameters
     ----------
     primary_status:
         ``\"ok\"`` (default) or a degraded signal from
         :data:`DEGRADED_STATUSES` (``quota_exhausted``, ``rate_limited_429``,
-        ``empty_completion``, ``unavailable``, ``degraded``).
+        ``empty_completion``, ``unavailable``, ``degraded``). When left
+        ``\"ok\"`` and *quota_remaining* is provided, primary quota exhaustion
+        is derived from real ledger state.
+    quota_remaining:
+        Optional ``(provider, model) -> remaining calls`` callable (e.g.
+        :func:`default_quota_remaining`). Exhausted models are excluded from
+        the candidate set; an exhausted primary is treated as degraded.
     """
     if len(role_path) < 1:
         raise ValueError("role_path required")
@@ -341,8 +334,20 @@ def select_for_role(
     hard_th = int(rules.get("hard_threshold", 70))
     margin = int(rules.get("capacity_margin", 5))
     advantage_th = int(rules.get("score_advantage_threshold", 8))
-    weak_max = int(rules.get("weak_specialization_max", 49))
     status = (primary_status or "ok").strip().lower()
+
+    def _quota_healthy(provider: str, model: str) -> bool:
+        if quota_remaining is None:
+            return True
+        try:
+            return int(quota_remaining(provider, model)) > 0
+        except Exception:
+            return True
+
+    # WAVE-21: derive quota degradation from the real ledger unless the caller
+    # supplied an explicit status signal.
+    if status == "ok" and not _quota_healthy(primary_p, primary_m):
+        status = "quota_exhausted"
 
     def _sel(
         provider: str,
@@ -372,9 +377,33 @@ def select_for_role(
                 "hard_threshold": hard_th,
                 "capacity_margin": margin,
                 "score_advantage_threshold": advantage_th,
-                "weak_specialization_max": weak_max,
             },
         )
+
+    def _pick(
+        key: str,
+        *,
+        used_fallback: bool,
+        reason: str,
+        chain: Optional[dict[str, str]] = None,
+    ) -> ModelSelection:
+        provider, model = split_model_key(key)
+        return _sel(
+            provider,
+            model,
+            used_fallback=used_fallback,
+            reason=reason,
+            chain_fallback=chain,
+        )
+
+    def _role_chain_for(key: str) -> Optional[dict[str, str]]:
+        """Role fallback as the runtime next hop — unless the pick IS it."""
+        if not (fb_p and fb_m):
+            return None
+        picked_p, picked_m = split_model_key(key)
+        if (picked_p, picked_m) == (fb_p, fb_m):
+            return None
+        return {"provider": fb_p, "model": fb_m}
 
     # --- Primary expired (e.g. hy3 after 2026-07-21) ---
     primary_ok = is_model_available(
@@ -416,79 +445,116 @@ def select_for_role(
             reason=f"Primary expired but no usable fallback for {dotted}",
         )
 
-    if force_primary or not fb_p or not fb_m:
+    if force_primary:
         return _sel(
             primary_p,
             primary_m,
             used_fallback=False,
-            reason="Stay on primary (no fallback configured or force_primary)",
+            reason="Stay on primary (force_primary)",
             chain_fallback=dict(fb_cfg) if isinstance(fb_cfg, dict) else None,
         )
 
-    # Fallback also expired?
-    fb_ok = is_model_available(fb_p, fb_m, today=day, benchmarks=bench)
-    if not fb_ok:
+    # --- Pinned roles never swap (structural; web_search abort-not-swap rule) ---
+    if bool(rules.get("pin")):
         return _sel(
             primary_p,
             primary_m,
             used_fallback=False,
-            reason=f"Fallback {fb_p}/{fb_m} unavailable; keep primary",
-            chain_fallback=None,
+            reason=(
+                f"Role {dotted} pinned to primary {primary_p}/{primary_m}; "
+                f"no model swap allowed"
+            ),
+            chain_fallback=dict(fb_cfg) if isinstance(fb_cfg, dict) else None,
         )
+
+    # --- WAVE-21: candidate set + fitness ranking ---
+    # Role primary + role fallback + every available, unexpired,
+    # quota-healthy catalog model with a benchmark row.
+    primary_key = model_key(primary_p, primary_m)
+    candidates: list[str] = [primary_key]
+    if fb_p and fb_m:
+        candidates.append(model_key(fb_p, fb_m))
+    for key, row in (bench.get("models") or {}).items():
+        if not isinstance(row, dict) or row.get("available") is False:
+            continue
+        if key in candidates:
+            continue
+        try:
+            cand_p, cand_m = split_model_key(key)
+        except ValueError:
+            continue
+        if not is_model_available(cand_p, cand_m, today=day, benchmarks=bench):
+            continue
+        if not _quota_healthy(cand_p, cand_m):
+            continue
+        candidates.append(key)
+    ranked = rank_candidates(dotted, candidates, benchmarks=bench)
+    primary_fit = fitness(primary_key, dotted, benchmarks=bench)
 
     # --- (1) Primary degraded / unhealthy (quota, 429, empty) ---
     if _is_primary_degraded(status):
+        for key, fit in ranked:
+            if key == primary_key:
+                continue
+            return _pick(
+                key,
+                used_fallback=True,
+                reason=(
+                    f"Primary degraded ({status}); score-driven switch to best "
+                    f"candidate {key} (fitness {fit})"
+                ),
+                chain=_role_chain_for(key),
+            )
         return _sel(
-            fb_p,
-            fb_m,
-            used_fallback=True,
-            reason=(
-                f"Primary degraded ({status}); using role fallback {fb_p}/{fb_m} "
-                f"(systems.md §4.3 operational switch)"
-            ),
-            chain_fallback=None,
+            primary_p,
+            primary_m,
+            used_fallback=False,
+            reason=f"Primary degraded ({status}) but no alternative candidate",
+            chain_fallback=dict(fb_cfg) if isinstance(fb_cfg, dict) else None,
         )
 
-    # --- (2) Mis-specialization: score_fb − score_p ≥ threshold + weak/hard ---
-    p_scores = get_model_scores(
-        primary_p, primary_m, benchmarks=bench, today=day, role_cfg=role_cfg
-    )
-    f_scores = get_model_scores(fb_p, fb_m, benchmarks=bench, today=day)
-    if not p_scores:
-        p_scores = {a: 60 for a in ("code", "reason", "ground", "synth", "safety")}
-    if not f_scores:
-        f_scores = {a: 60 for a in ("code", "reason", "ground", "synth", "safety")}
+    # --- (2) Healthy primary: hard-threshold escalation + hysteresis ---
+    selected_key = primary_key
+    if (
+        assessment.relevant_max(areas) >= hard_th
+        and quality_for_role(primary_key, dotted, benchmarks=bench) < hard_th
+    ):
+        for key, fit in ranked:
+            if key == primary_key:
+                continue
+            if quality_for_role(key, dotted, benchmarks=bench) >= hard_th:
+                selected_key, selected_fit = key, fit
+                break
 
-    mis_why = _mis_specialization_reasons(
-        p_scores=p_scores,
-        f_scores=f_scores,
-        assessment=assessment,
-        areas=areas,
-        advantage_th=advantage_th,
-        weak_max=weak_max,
-        hard_th=hard_th,
-    )
-    if mis_why:
-        return _sel(
-            fb_p,
-            fb_m,
+    if selected_key == primary_key and ranked and ranked[0][0] != primary_key:
+        best_key, best_fit = ranked[0]
+        if best_fit - primary_fit >= advantage_th:
+            selected_key, selected_fit = best_key, best_fit
+
+    if selected_key != primary_key:
+        return _pick(
+            selected_key,
             used_fallback=True,
-            reason="Mis-specialized primary prefers fallback: " + "; ".join(mis_why),
-            chain_fallback=None,
+            reason=(
+                f"Score-driven routing prefers {selected_key} over primary "
+                f"{primary_key} (fitness Δ{selected_fit - primary_fit:.2f} "
+                f">= {advantage_th})"
+            ),
+            chain=_role_chain_for(selected_key),
         )
 
     # Healthy primary, adequate specialization → keep primary
-    # (even if fallback is slightly better on one area by < advantage_th)
+    # (even if the best candidate edges fitness by < score_advantage_threshold)
     return _sel(
         primary_p,
         primary_m,
         used_fallback=False,
         reason=(
-            f"Primary healthy and specialized enough for {dotted} "
+            f"Primary healthy and adequate for {dotted} "
             f"(overall={assessment.overall}, status={status}, "
             f"areas={areas}, advantage_th={advantage_th})"
         ),
-        chain_fallback={"provider": fb_p, "model": fb_m},
+        chain_fallback={"provider": fb_p, "model": fb_m} if fb_p and fb_m else None,
     )
 
 

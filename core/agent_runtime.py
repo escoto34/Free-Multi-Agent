@@ -15,13 +15,17 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date
-from typing import Any, Mapping, MutableMapping, Optional, TypeVar
+from typing import Any, Callable, Mapping, MutableMapping, Optional, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from core.agent_config import get_agent_config
 from core.difficulty_scorer import DifficultyAssessment, score_task_difficulty
-from core.model_selector import ModelSelection, select_for_role
+from core.model_selector import (
+    ModelSelection,
+    default_quota_remaining,
+    select_for_role,
+)
 from core.reasoning_params import resolve_reasoning_kwargs
 from core.router import LLMResponse, call_agent
 
@@ -120,6 +124,7 @@ def resolve_role_selection(
     fallback_override: Optional[dict[str, str]] = None,
     skip_difficulty_selection: bool = False,
     today: Optional[date] = None,
+    quota_remaining: Optional[Callable[[str, str], int]] = None,
 ) -> tuple[
     str,
     str,
@@ -127,7 +132,12 @@ def resolve_role_selection(
     Optional[ModelSelection],
     Optional[DifficultyAssessment],
 ]:
-    """Return (provider, model, fallback, selection, assessment) for a role call."""
+    """Return (provider, model, fallback, selection, assessment) for a role call.
+
+    ``quota_remaining`` defaults to the live ledger (:func:`default_quota_remaining`)
+    so ``select_for_role`` derives ``quota_exhausted`` from real state; pass a
+    stub in tests that must stay offline/deterministic.
+    """
     cfg = get_agent_config(*role_path)
     dotted = ".".join(role_path)
     text = task_text if task_text is not None else _task_text_from_messages(messages)
@@ -142,7 +152,14 @@ def resolve_role_selection(
     assess = assessment or score_task_difficulty(
         text, role_path=dotted, subtask=role_path[-1] if role_path else ""
     )
-    selection = select_for_role(*role_path, assessment=assess, today=today)
+    selection = select_for_role(
+        *role_path,
+        assessment=assess,
+        today=today,
+        quota_remaining=(
+            quota_remaining if quota_remaining is not None else default_quota_remaining
+        ),
+    )
 
     # If caller forced a fallback_override, prefer that as the *chain* after selection
     if selection.used_fallback:

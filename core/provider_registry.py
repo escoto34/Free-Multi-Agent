@@ -71,16 +71,36 @@ _DEFAULT_OPENAI_COMPAT: dict[str, dict[str, Any]] = {
 }
 
 
+_providers_yaml_cache: dict[str, Any] | None = None
+
+
 def _load_providers_yaml() -> dict[str, Any]:
-    try:
-        if _CONFIG_PATH.exists():
-            data = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
-            providers = data.get("providers") or {}
-            if isinstance(providers, dict):
-                return providers
-    except Exception:
-        pass
-    return {}
+    """Parse ``config/model_router.yaml``'s ``providers:`` block once.
+
+    Cached so hot paths (``split_model_key``/``quota.remaining`` in
+    ``select_for_role``) do not re-parse the YAML per candidate — the wave-21
+    candidate scan calls this hundreds of times per selection otherwise.
+    ``reset_provider_registry_cache()`` re-reads on the next call.
+    """
+    global _providers_yaml_cache
+    if _providers_yaml_cache is None:
+        providers: dict[str, Any] = {}
+        try:
+            if _CONFIG_PATH.exists():
+                data = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+                parsed = data.get("providers") or {}
+                if isinstance(parsed, dict):
+                    providers = parsed
+        except Exception:
+            providers = {}
+        _providers_yaml_cache = providers
+    return dict(_providers_yaml_cache)
+
+
+def reset_provider_registry_cache() -> None:
+    """Drop the cached ``providers`` block (config reloads / tests)."""
+    global _providers_yaml_cache
+    _providers_yaml_cache = None
 
 
 def get_registered_providers() -> dict[str, dict[str, Any]]:

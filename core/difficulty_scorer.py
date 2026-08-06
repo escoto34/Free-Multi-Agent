@@ -275,6 +275,10 @@ def score_task_difficulty(
     elif "compressor" in rp:
         reason = _clip(max(reason, base))
         synth = _clip(max(synth, base - 5))
+    elif "chat" in rp:
+        reason = _clip(max(reason, base + 5))
+        synth = _clip(max(synth, base - 5))
+        code = _clip(max(code, base - 5))
 
     # Context estimate from length
     est_tokens = max(500, min(200_000, int(len(text) * 0.35) + 1500))

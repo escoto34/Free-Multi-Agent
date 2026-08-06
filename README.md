@@ -170,20 +170,22 @@ Live config: `config/model_router.yaml` · factory reset: `multiagent config res
 
 | Role | Primary | Fallback |
 |------|---------|----------|
-| vibe coder *(merged plan+implement)* | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` |
+| vibe coder *(merged plan+implement)* | `cerebras` / `gpt-oss-120b` | `mistral` / `codestral-latest` |
 | vibe debugger | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
-| research compressor *(incl. safety gate)* | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
+| research compressor *(incl. safety gate)* | `cerebras` / `gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
 | research web_search | `groq` / `groq/compound-mini` | — (hard fail if no live search) |
 | research grounding | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` |
 | research synthesizer | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
-| chat / planner | `agnes` / `agnes-2.0-flash` | `groq` / `openai/gpt-oss-120b` |
+| chat / planner | `cerebras` / `gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
 
 ```bash
-multiagent config set vibe_coding.coder mistral codestral-latest
+multiagent config set vibe_coding.coder cerebras gpt-oss-120b
 multiagent config reset
 # optional local model:
 # ollama pull llama3.2 && multiagent config set cli.chat ollama llama3.2
 ```
+
+Selection is **score-driven** (WAVE-21): `select_for_role` ranks every available, unexpired, quota-healthy catalog model by fitness (quality 0.75 + efficiency 0.25) for the role's `relevant_areas`, then applies hard-threshold escalation, a ≥8-point anti-churn hysteresis, and `pin: true` (web_search never swaps). Quota exhaustion is derived from the live ledger (`data/quotas.db`).
 
 Soft daily call caps and remaining-run estimates: `multiagent quota`.  
 Full cascade, benchmarks, and “when fallback wins” rules: **[`systems.md`](systems.md)**.

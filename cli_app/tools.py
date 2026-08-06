@@ -103,7 +103,8 @@ _BLOCKED_CMD = re.compile(
     r">\s*/etc/|chmod\s+-R\s+777\s+/|"
     r"format\s+[a-z]:|\bcacls|\bdeltree\s+[a-z]:|"
     r"net\s+user\s+\w+\s+\w+\s+/add|net\s+localgroup\s+administrators\s+\w+\s+/add|"
-    r"reg\s+(add|delete|import)\b)",  # Windows destructive tools
+    r"reg\s+(add|delete|import)\b|"
+    r"del\s+/(f|s|q)|rd\s+/s)",  # Windows destructive tools (incl. del /f /s /q, rd /s)
     re.I,
 )
 

@@ -35,7 +35,11 @@ from core.difficulty_scorer import (
     plan_pipeline_difficulties,
 )
 from core.handoff import HandoffError, transfer_control
-from core.model_selector import record_model_selection_handoff, select_for_role
+from core.model_selector import (
+    default_quota_remaining,
+    record_model_selection_handoff,
+    select_for_role,
+)
 from core.runs import get_run_history
 from schemas.requests import VibeCodingRequest
 from schemas.vibe_coding import CodeArtifact, DebugReport, TechnicalSpec
@@ -352,7 +356,9 @@ def coder_node(state: VibeCodingState) -> dict[str, Any]:
             task_text=state.get("idea") or "",
             role_path="vibe_coding.coder",
         )
-        selection = select_for_role("vibe_coding", "coder", assessment=assess)
+        selection = select_for_role(
+            "vibe_coding", "coder", assessment=assess, quota_remaining=default_quota_remaining
+        )
         state_for_call: dict[str, Any] = dict(state)
         state_for_call = {
             **state_for_call,
@@ -551,7 +557,9 @@ def debugger_node(state: VibeCodingState) -> dict[str, Any]:
             task_text=(state.get("idea") or "") + "\n" + test_logs[:2000],
             role_path="vibe_coding.debugger",
         )
-        selection = select_for_role("vibe_coding", "debugger", assessment=assess)
+        selection = select_for_role(
+            "vibe_coding", "debugger", assessment=assess, quota_remaining=default_quota_remaining
+        )
         state_for_call: dict[str, Any] = {
             **dict(state),
             **record_model_selection_handoff(

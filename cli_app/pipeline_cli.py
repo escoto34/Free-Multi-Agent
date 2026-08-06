@@ -66,17 +66,21 @@ def run_pipeline(
 
     _prog("planning…")
     try:
-        from core.agent_config import get_agent_config
+        from core.agent_runtime import resolve_role_selection
 
-        chat = (get_agent_config("cli", "chat") or {})
+        chat_p, chat_m, chat_fb, _sel_, _as_ = resolve_role_selection(
+            "cli",
+            "chat",
+            messages=[{"role": "user", "content": task}],
+        )
     except Exception:
-        chat = {}
+        chat_p, chat_m, chat_fb = prov, m, None
     pipeline_prompt = to_english_for_pipelines(
         task,
         invoke_fn=invoke_router,
-        provider=str(chat.get("provider") or prov),
-        model=str(chat.get("model") or m),
-        fallback=chat.get("fallback"),
+        provider=chat_p or prov,
+        model=chat_m or m,
+        fallback=chat_fb,
     ) or task
 
     try:

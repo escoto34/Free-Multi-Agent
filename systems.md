@@ -1,12 +1,12 @@
 # Systems orchestration — free-durable profile
 
-**Document status:** mid-2026 research snapshot (last updated 2026-08-04, WAVE-20 scoring v2: measured efficiency axis + re-scored benchmarks; WAVE-18 role consolidation: architect→coder, safety_filter→compressor)  
+**Document status:** mid-2026 research snapshot (last updated 2026-08-05, WAVE-21 score-driven `select_for_role` live + 4 roles re-tuned to `cerebras/gpt-oss-120b`; WAVE-20 scoring v2: measured efficiency axis + re-scored benchmarks; WAVE-18 role consolidation: architect→coder, safety_filter→compressor)  
 **Live config:** `config/model_router.yaml` (loaded by `core/agent_config.py`)  
 **Factory defaults:** `config/defaults_model_router.yaml`  
 **Quota soft-caps:** `core/quotas.py` (must stay ≤ real provider limits)  
 **Benchmarks + selection + reasoning:** `config/model_benchmarks.yaml`
 
-**Planned, not yet implemented:** `mejoras.md` WAVE-21 (score-driven `select_for_role` — today's selector discards the difficulty assessment via `del assessment, hard_th` at `core/model_selector.py:277` and always returns the YAML-pinned primary; `cli.chat` bypasses role selection entirely). Everything below this line describes the **current live code**, not the pending changes — do not treat the waves' contents as already true until each is implemented and this header is updated to reflect it.
+> **WAVE-21 (2026-08-05) — done:** `select_for_role` (`core/model_selector.py`) is now **score-driven**: it ranks every available/unexpired/quota-healthy catalog model by `fitness` (`core/model_scoring.py`, quality 0.75 + efficiency 0.25) and actually acts on the difficulty `assessment` (the WAVE-20 stub that `del assessment, hard_th` discarded is gone). New rules landed: **hard-threshold escalation** (`relevant_max(areas) ≥ hard_threshold` ⇒ the picked model's role quality must also clear it), **anti-churn hysteresis** (healthy primary only yields to a candidate ahead by ≥ `score_advantage_threshold` = 8), **`pin: true`** (structural no-swap, e.g. `deep_research.web_search`), and quota degradation **derived from the live ledger** via `quota_remaining=` (`default_quota_remaining`). The `cli.chat` / `cli.planner` bypass is gone — chat turns, `/do` planning and `_compact --llm` resolve through `resolve_role_selection("cli","chat"|"planner")` and carry `role_path`. Four roles re-tuned to `cerebras/gpt-oss-120b` on fitness (coder, context_compressor, cli.chat, cli.planner), each keeping its former primary as the role fallback; `deep_research.web_search` is `pin: true`. Perf: `provider_registry` + `model_scoring._providers` now cache the YAML (a wave-21 candidate scan was re-reading `model_router.yaml` per candidate — a single select went 14.6s → ~0.4s). `tests/test_wave21.py` adds the wave's mandatory tests (hysteresis, escalation, pin, quota-derived status, `role_path` on chat turns, cli.chat difficulty bias).
 
 > **WAVE-20 (2026-08-04) — done:** scoring v2 landed. `config/model_benchmarks.yaml` is now schema v2 (`quality_aggregate` block under `selection_defaults` replaces the hardcoded aggregate coefficients — `core/difficulty_scorer.py` reads them, byte-identical `overall`; dead `selection_defaults` keys removed). New `core/model_scoring.py` provides the score-driven vocabulary (`quality_for_role`, `efficiency_score`, `fitness`, `rank_candidates`) that WAVE-21 will route on. `scripts/benchmark_models.py` measured **live efficiency** (ttft, tokens/sec, context) for all 43 benchmarkable catalog models on 2026-08-04 → `config/model_efficiency.json`; every benchmark row now carries `efficiency` + `evidence` + `verified` (guard-tested). Quality bands of the WAVE-19 rows were re-scored from public/vendor sources. `fitness = 0.75·quality + 0.25·efficiency`.
 
@@ -27,23 +27,23 @@ Roles requested for scoring (WAVE-18: `architect` folded into `coder`; `safety_f
 
 | Pipeline | Role | Primary `provider` / `model` | Fallback `provider` / `model` |
 |----------|------|------------------------------|-------------------------------|
-| **A — Vibe** | `coder` *(merged plan+implement)* | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` |
+| **A — Vibe** | `coder` *(merged plan+implement)* | `cerebras` / `gpt-oss-120b` | `mistral` / `codestral-latest` |
 | **A — Vibe** | `debugger` | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
-| **B — Research** | `context_compressor` *(incl. safety gate)* | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` |
+| **B — Research** | `context_compressor` *(incl. safety gate)* | `cerebras` / `gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
 | **B — Research** | `web_search` | `groq` / `groq/compound-mini` | **none** (hard-fail if no live search) |
 
-The `web_search` role is **wired, not reserved**: one bounded LLM call per run expands a vague topic into concrete DuckDuckGo facets (`expand_query_facets`), then the live DDG scrape + page fetches run. The expansion call is optional — if quota/network fails, the heuristic facet builder is used unchanged; the live-search requirement is unchanged (pipeline still hard-aborts if the search admits it did not run live).
+The `web_search` role is **wired, not reserved**: one bounded LLM call per run expands a vague topic into concrete DuckDuckGo facets (`expand_query_facets`), then the live DDG scrape + page fetches run. The expansion call is optional — if quota/network fails, the heuristic facet builder is used unchanged; the live-search requirement is unchanged (pipeline still hard-aborts if the search admits it did not run live). WAVE-21: this role is `pin: true` in `config/model_benchmarks.yaml` — `select_for_role` never proposes a swap for it.
 | **B — Research** | `grounding` | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` |
 | **B — Research** | `synthesizer` | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` |
 
 **Unique models in the live hot path (primary or role-level fallback):**  
-`agnes-2.0-flash`, `gemini-2.0-flash`, `codestral-latest`, `openai/gpt-oss-120b`, `groq/compound-mini`, `command-a-plus-05-2026`, `mistral-small-latest`.
+`cerebras/gpt-oss-120b`, `codestral-latest`, `agnes-2.0-flash`, `openai/gpt-oss-120b`, `groq/compound-mini`, `command-a-plus-05-2026`, `mistral-small-latest`.
 
 **Catalog-only (not currently assigned as primary/fallback to those roles):**  
 `tencent/hy3:free` remains in the OpenRouter free catalog and is scored below for historical/optional use.  
 **⚠ `tencent/hy3:free` promo window ended 2026-07-21** — treat as **expired / non-durable**; verified absent from any hot-path default. Keep the row only for historical/optional profiles, never as free-durable capacity.
 
-CLI (`chat`, `planner`) uses Agnes → Groq 120b; see §7. Provider-level `fallback_cascade` is §8.
+CLI (`chat`, `planner`) uses Cerebras 120b → Agnes fallback — they now route through `select_for_role`/`resolve_role_selection(name)` just like pipeline roles; see §7. Provider-level `fallback_cascade` is §8.
 
 ---
 
@@ -449,34 +449,35 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **(e) Safety** | Compressor LLM gate + host hard-regex pre-gate (WAVE-18) | Random general chat for policy gates |
 | **Live web search** | **Only** `groq/compound-mini` in this free stack | Models that “pretend” to search |
 
-### 4.3 Recomendación primario vs fallback por rol
+### 4.3 Recomendación primario vs fallback por rol (WAVE-21 score-driven)
 
-Política **implementada** en `core/model_selector.py` + umbrales en `config/model_benchmarks.yaml`  
-(`score_advantage_threshold: 8`, `weak_specialization_max: 49`). El planeador emite un  
-`DifficultyAssessment` estructurado; el grafo/runtime llama `select_for_role(...)`.
+Política **implementada** en `core/model_selector.py` (`select_for_role`) + reglas en `config/model_benchmarks.yaml` (`score_advantage_threshold: 8`, `hard_threshold`, `pin`, `capacity_margin`). El planeador emite un `DifficultyAssessment` estructurado; el grafo/runtime llama `select_for_role(...)` — ahora **usa** el assessment (ya no lo descarta).
 
 | Role | Primary (scores that matter) | Fallback | Prefer **fallback** when… | Prefer **keep primary** when… |
 |------|------------------------------|----------|---------------------------|-------------------------------|
-| **coder** *(merged plan+implement, WAVE-18)* | Codestral (code **88**, reason **62**) | Agnes (code **78**, reason **76**, synth **80**) | Mistral 429 / empty artifact / quota; never switch only because Agnes is “good enough” | Healthy Codestral on a clean plan+implement call — best free coding specialist; agent planning rules live in the coder prompt (no separate architect call) |
+| **coder** *(merged plan+implement, WAVE-18)* | Cerebras GPT-OSS-120B (code **82**, reason **90**) | Codestral (code **88**) | Primary degraded (429 / quota / empty) / a candidate clearly out-fitnesses by ≥8 | Healthy primary + best candidate wins by < `score_advantage_threshold` (8) |
 | **debugger** | GPT-OSS-120B (code **82**, reason **90**) | Agnes (code **78**, reason **76**) | Groq 120b RPD exhausted / 429 / empty | Healthy 120b + hard traceback — raise **reasoning_effort**, do not hop early |
-| **context_compressor** *(incl. safety gate, WAVE-18)* | Agnes (reason **76**, synth **80**); LLM gate + host regex for safety | Gemini Flash (reason **78**) | Agnes quota / empty JSON | High research volume on Agnes; compressor is now a single call that also classifies safety |
-| **web_search** | compound-mini (ground **88**) | *none* | **Never model-fallback** — no live search → **abort run** | Always when research needs live web |
+| **context_compressor** *(incl. safety gate, WAVE-18)* | Cerebras GPT-OSS-120B (reason **90**, synth **85**, safety **45**) | Agnes (reason **76**, synth **80**) | Cerebras quota / empty JSON | Healthy Cerebras; compressor is one call that also classifies safety |
+| **web_search** | compound-mini (ground **88**) | *none* | **Never model-fallback** — no live search → **abort run**; `pin: true` blocks any swap | Always when research needs live web |
 | **grounding** | Command A+ (ground **93**, synth **78**) | Mistral Small (ground **55**, synth **65**) | Cohere trial empty / 429 / ToS | Default cited claims; scarce bucket |
 | **synthesizer** | GPT-OSS-120B (synth **85**, reason **90**) | Agnes (synth **80**, large context) | Groq 120b exhausted / 429 / empty | Healthy 120b + long report — raise **reasoning_effort** |
 
-**Runtime selection rules (code):**
+**Runtime selection rules (code → `select_for_role`):**
 
-1. **Expired promo** (`free_until` past — e.g. `tencent/hy3:free` after **2026-07-21**) → role/catalog fallback; scores capped ≤49.  
-2. **`primary_status` degraded** (`quota_exhausted` | `rate_limited_429` | `empty_completion` | `unavailable` | `degraded`) → role fallback if configured.  
-3. **Mis-specialized:** for a relevant area, `score_fb − score_p ≥ score_advantage_threshold` (default **8**) **and** primary score ≤ `weak_specialization_max` (default **49**) — e.g. Safeguard forced onto coding.  
-4. Else **keep primary** (even if fallback edges higher by a few points on a secondary area).  
-5. Model switches **must** go through `record_model_selection_handoff` → `transfer_control` (user input preserved + audit).
+1. **Candidate set** = role primary + role fallback + every catalog model that is `available`, unexpired (`free_until`), and quota-healthy; ranked by `fitness` (quality 0.75 + efficiency 0.25, `core/model_scoring.py`).
+2. **Primary expired** (`free_until` past — e.g. `tencent/hy3:free` after **2026-07-21**) → role fallback then catalog `expired_fallback`; scores capped ≤49.
+3. **`primary_status` degraded** (`quota_exhausted` | `rate_limited_429` | `empty_completion` | `unavailable` | `degraded`) → best-ranked **non-primary** candidate. When `quota_remaining=` is provided (all live call sites pass `default_quota_remaining`), an exhausted primary is **derived** as `quota_exhausted` from the real ledger.
+4. **Hard-task escalation:** when `assessment.relevant_max(areas) ≥ hard_threshold` (default 70), the picked model's role quality must also clear it — escalate to the best-ranked candidate that does (never a fit leader missing the required strength).
+5. **Anti-churn hysteresis:** on a healthy primary, only switch when the best candidate's fitness beats the primary by ≥ `score_advantage_threshold` (default **8**). A marginal edge keeps the primary.
+6. **Pinned roles** (`roles.<path>.pin: true` — `deep_research.web_search`) never swap, structurally.
+7. Model switches **must** go through `record_model_selection_handoff` → `transfer_control` (user input preserved + audit) and rely on `chain_fallback` as the runtime next hop.
 
 **Also never:**
 
 - Promote `tencent/hy3:free` as free-durable default primary/fallback.  
-- Replace `compound-mini` for web_search.  
-- Put Command A+ on coder/debugger/synth primary.
+- Replace `compound-mini` for web_search (pinned).  
+- Put Command A+ on coder/debugger/synth primary.  
+- Switch away from a healthy primary on a sub-threshold fitness edge (churn).
 
 ### 4.4 Cómo se elige y se usa el modelo en un run (end-to-end)
 
@@ -484,14 +485,18 @@ Política **implementada** en `core/model_selector.py` + umbrales en `config/mod
 User task
    │
    ▼
-DifficultyAssessment  (core/difficulty_scorer.py)
+DifficultyAssessment  (core/difficulty_scorer.py; cli.chat turns get a +5 reason
+   │  / −5 synth / −5 code role bias through the same scorer)
    │  areas: code, reason, ground, synth, safety  (0–100)
    │  + overall, logic_complexity, estimated_context_tokens
    ▼
-select_for_role(role, assessment)  (core/model_selector.py)
-   │  reads model_router.yaml primary/fallback
-   │  reads model_benchmarks.yaml scores + thresholds
-   │  → ModelSelection { provider, model, used_fallback, reason }
+select_for_role(role, assessment, quota_remaining=default_quota_remaining)  (core/model_selector.py)
+   │  candidate set = primary + fallback + catalog models (available, unexpired,
+   │  quota-healthy) ranked by fitness
+   │  rules: quota-derived degradation, hard_threshold escalation, hysteresis
+   │  (score_advantage_threshold), pin-immune roles
+   │  → ModelSelection { provider, model, used_fallback, reason, role_path,
+   │                     primary_status, chain_fallback }
    ▼
 [if used_fallback / forced_expiry]
    record_model_selection_handoff → transfer_control  (audit trail)
@@ -516,6 +521,7 @@ Worker agent (coder / debugger / …) returns domain schema
 | `run_structured_agent` / `run_role_raw` | yes | yes (default) |
 | `invoke_router(..., assessment=, role_path=)` | no (caller fixed provider/model) | yes if assessment provided |
 | Graph nodes | `select_for_role` + handoff | via agents → runtime |
+| `resolve_role_selection` (CLI: `cli.chat`, `cli.planner`, `_compact --llm`, `/do`) | yes — resolves `select_for_role` per turn | yes |
 | Direct `call_agent` without runtime | none | only if caller passes kwargs |
 
 **State fields (LangGraph):** `difficulty_by_role`, `last_model_selection`, `handoff_history`.
@@ -588,10 +594,10 @@ Coder (plan + implement) → Test Executor (local) → Debugger (≤ 3) ─→ f
 
 | Role | Primary | Fallback | Why this placement |
 |------|---------|----------|--------------------|
-| **coder** *(merged plan+implement, WAVE-18)* | `mistral` / `codestral-latest` | `agnes` / `agnes-2.0-flash` | Highest coding specialization among free APIs we integrate; agent/planning rules (surgical edits, repo tree, grounded facts, preservation) are part of the coder system prompt, so the old `architect` LLM call is gone. Agnes fallback keeps code generation alive if Mistral Experiment is rate-limited, without OpenRouter’s 50 RPD pool. |
+| **coder** *(merged plan+implement, WAVE-18)* | `cerebras` / `gpt-oss-120b` | `mistral` / `codestral-latest` | WAVE-21 re-tune: `cerebras/gpt-oss-120b` is the fitness top for the coder's `[code, reason]` areas (quality 82/90 + measured efficiency) and has 150 RPD of its own bucket. The former primary `codestral-latest` (code **88**) stays as the role fallback — best free coding specialist when Cerebras is degraded. Agent/planning rules (surgical edits, repo tree, grounded facts, preservation) are part of the coder system prompt, so the old `architect` LLM call is gone. |
 | **debugger** | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Fix loops (up to 3) need strong reasoning + roomy per-model RPD. GPT-OSS-120B on Groq is fast and independent of Agnes volume. Agnes is the durable free alternate when Groq 120b is exhausted or 429s. WAVE-18: when the debugger edits a fully-visible file, it ships `fixed_files` → local `fix_applier` re-writes and re-runs tests (no coder call back); else it emits `suggested_fix` → coder fix cycle. |
 
-**Not used as Vibe primaries:** Cohere (save for research grounding), OpenRouter `:free` (shared 50 RPD), compound-mini (search budget only), Cerebras (5 RPM too slow for fix loops).
+**Not used as Vibe primaries:** Cohere (save for research grounding), OpenRouter `:free` (shared 50 RPD), compound-mini (search budget only), gemini-2.0-flash (quota 0 / 404 on this key — `available: false`).
 
 ---
 
@@ -603,7 +609,7 @@ Context compressor (incl. safety gate, WAVE-18) → Web search (+ primary URL fe
 
 | Role | Primary | Fallback | Why this placement |
 |------|---------|----------|--------------------|
-| **context_compressor** *(incl. safety gate, WAVE-18)* | `agnes` / `agnes-2.0-flash` | `gemini` / `gemini-2.0-flash` | Keyword/trend extraction is medium difficulty, high frequency. Agnes free volume replaces OpenRouter/hy3. Gemini Flash is a reliable structured alternative. WAVE-18: the safety gate from the removed `safety_filter` role moved here — the prompt classifies the query (`is_safe` + `safety_reasons`) and a host-side hard-regex pre-gate (`SAFETY_HARD_RE`) overrides an unsafe LLM verdict; the graph routes to END on `is_safe=False`. |
+| **context_compressor** *(incl. safety gate, WAVE-18)* | `cerebras` / `gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | WAVE-21 re-tune: Cerebras GPT-OSS-120B tops `[reason, synth, safety]` (90/85/45) — the compressor's structured JSON + safety classification benefits from the strongest reasoning. Agnes free volume is the durable fallback (large context). The old gemini fallback is gone: `gemini-2.0-flash` is `available: false` (quota 0 / 404 on this key, WAVE-20 follow-up). WAVE-18: the safety gate from the removed `safety_filter` role lives here — the prompt classifies the query (`is_safe` + `safety_reasons`) and a host-side hard-regex pre-gate (`SAFETY_HARD_RE`) overrides an unsafe LLM verdict; the graph routes to END on `is_safe=False`. |
 | **web_search** | `groq` / `groq/compound-mini` | *(none — hard fail if no live search)* | **Only free stack role with integrated search.** ~250 RPD — **used** for one optional bounded query-expansion LLM call per run (vague topic → concrete DDG facets; on failure the heuristic builder stands in). Also HTTP-fetches user-named domains into a PRIMARY SOURCES block before the live dump. Live-search emptiness still aborts the run (anti-fabrication). |
 | **grounding** | `cohere` / `command-a-plus-05-2026` | `mistral` / `mistral-small-latest` | **Single Cohere primary** in the whole product. Best trial-tier anti-hallucination / documents grounding for claims+citations. Mistral Small preserves pipeline if Cohere trial is empty (lower grounding quality). Post-step **scrub** strips emails/phones/archive URLs/hex colors not present in the corpus. |
 | **synthesizer** | `groq` / `openai/gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Long report assembly needs strong reasoning + large output; Groq 120b has headroom separate from safeguard and compound-mini. Agnes large-context fallback if Groq synth is exhausted. **Not Cohere** — that would double-tax the 28/day pool with grounding. Scrub again + drop sources absent from the search dump. |
@@ -655,8 +661,8 @@ Heuristics + compressor JSON fields feed a `ResearchProfile` used by search face
 
 | Role | Primary | Fallback | Why |
 |------|---------|----------|-----|
-| **chat** | `agnes` / `agnes-2.0-flash` | `groq` / `openai/gpt-oss-120b` | Interactive volume; tool-using host agent benefits from Agnes agent/coding strengths and free fair-use. Groq 120b backup for quality bursts. |
-| **planner** (`/do`) | `agnes` / `agnes-2.0-flash` | `groq` / `openai/gpt-oss-120b` | Task split into vibe/research steps is agent-style planning — Agnes-fit. Must stay cheap and available every `/do`. |
+| **chat** | `cerebras` / `gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | WAVE-21: `cli.chat` now resolves through `resolve_role_selection("cli","chat")` per turn (the raw `invoke_router` bypass is gone — the turn's `model_selection` is recorded in the reply envelope). Cerebras GPT-OSS-120B tops `[reason, synth]` for interactive tool-using conversation; Agnes free fair-use volume is the fallback. |
+| **planner** (`/do`) | `cerebras` / `gpt-oss-120b` | `agnes` / `agnes-2.0-flash` | Same re-tune: `/do` planning + `_compact --llm` and the pipeline translation resolve via role selection (`cli.planner` / `cli.chat`). Agent-style planning benefits from Cerebras reasoning; Agnes stays the cheap durable fallback every `/do`. |
 
 The `/do` TUI flow (*planner → execute_plan*) is exposed headlessly as `pipeline run [--planner-only] [--provider P] [--model M] [--gpt-researcher] TASK…` (`cli_app/pipeline_cli.py`). It resolves the planner from the same `cli.planner` config, translates non-English tasks with the same chat router, and returns a machine-readable dict — the loop lives only there, so CI/cron/other programs can drive a pipeline with no TUI or session. Chat (agent-loop) hygiene: read-only tools are batched into a single `run_tools` call per turn (approval stays strictly per mutating call via `one_mutating_at_a_time`), and the chat agent's `webfetch` returns readable page text through the cache-aware `agents.deep_research.source_fetch.fetch_url` instead of raw truncated HTML.
 

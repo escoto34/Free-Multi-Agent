@@ -21,7 +21,7 @@ from cli_app.tools import (
     strip_tool_blocks,
     tools_help_text,
 )
-from core.agent_runtime import invoke_router
+from core.agent_runtime import invoke_router, resolve_role_selection
 from core.config_editor import get_cli_settings
 
 logger = logging.getLogger(__name__)
@@ -177,7 +177,6 @@ def agent_chat_turn(
 ) -> dict[str, Any]:
     """Run a tool-augmented chat turn."""
     settings = get_cli_settings()
-    chat = settings["chat"]
     # WAVE-17: use more recent turns when the context is far from the budget.
     base_n = int(settings.get("chat_recent_messages") or 4)
     recent_n = max(base_n, 8) if session.usage_ratio() < 0.35 else base_n
@@ -234,6 +233,12 @@ def agent_chat_turn(
 
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     messages.extend(recent)
+    # WAVE-21: cli.chat goes through the same role-selection machinery as every
+    # other role (fitness ranking + reasoning effort). Resolved once per turn so
+    # the budget/accreditation decision holds for the whole tool loop.
+    chat_p, chat_m, chat_fb, chat_selection, chat_assessment = resolve_role_selection(
+        "cli", "chat", messages=messages
+    )
     user_block = user_text
     if seed:
         user_block = (
@@ -255,10 +260,12 @@ def agent_chat_turn(
         try:
             resp = invoke_router(
                 None,
-                provider=chat["provider"],
-                model=chat["model"],
+                provider=chat_p,
+                model=chat_m,
                 messages=messages,
-                fallback=chat.get("fallback"),
+                fallback=chat_fb,
+                assessment=chat_assessment,
+                role_path="cli.chat",
             )
             raw = (resp.content or "").strip()
         except Exception as exc:
@@ -371,15 +378,21 @@ def agent_chat_turn(
     session.add("assistant", stored)
     # WAVE-17: optional LLM-based compaction (opt-in; local drop is the default).
     if bool(settings.get("llm_compact")):
-        session.compact_with_llm(
-            lambda prompt: invoke_router(
+
+        def _llm_compact(prompt: list[dict[str, str]]) -> str:
+            cp, cm, cfb, _csel, _cas = resolve_role_selection(
+                "cli", "chat", messages=prompt
+            )
+            return invoke_router(
                 None,
-                provider=chat["provider"],
-                model=chat["model"],
+                provider=cp,
+                model=cm,
                 messages=prompt,
-                fallback=chat.get("fallback"),
+                fallback=cfb,
+                role_path="cli.chat",
             ).content
-        )
+
+        session.compact_with_llm(_llm_compact)
     else:
         session.maybe_autocompact(threshold=0.55)
 
@@ -394,5 +407,10 @@ def agent_chat_turn(
             "used_graph": used_graph,
             "tools": tools_used,
             "always_approve": always,
+            # WAVE-21: proof cli.chat routed through role selection — the
+            # handoff record now carries the role_path it never did before.
+            "model_selection": (
+                chat_selection.as_dict() if chat_selection is not None else None
+            ),
         },
     }

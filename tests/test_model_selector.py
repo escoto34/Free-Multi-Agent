@@ -51,7 +51,12 @@ def _reload_yaml_caches():
 
 
 def test_easy_task_stays_on_coder_primary():
-    """Simple coding task → Codestral primary (not Agnes fallback)."""
+    """Simple coding task → re-tuned primary (cerebras/gpt-oss-120b), no switch.
+
+    WAVE-21: coder primary moved from mistral/codestral-latest to
+    cerebras/gpt-oss-120b (fitness top for [code, reason]); the ranking
+    (hysteresis) keeps a healthy primary on easy tasks.
+    """
     easy = (
         "Write a simple function that returns hello world. "
         "Just print a greeting. Minimal todo list helper."
@@ -63,8 +68,8 @@ def test_easy_task_stays_on_coder_primary():
     sel = select_for_role("vibe_coding", "coder", assessment=assess)
     assert sel.used_fallback is False
     assert sel.forced_expiry is False
-    assert sel.provider == "mistral"
-    assert sel.model == "codestral-latest"
+    assert sel.provider == "cerebras"
+    assert sel.model == "gpt-oss-120b"
 
 
 def test_easy_debugger_stays_on_primary():
@@ -99,14 +104,16 @@ def test_hard_task_degraded_primary_switches_and_handoff():
         subtask="coder",
         role_path="vibe_coding.coder",
     )
-    # Healthy: stay Codestral even if Agnes edges reason 78 vs 76 (Δ=2 < 8)
+    # Healthy: stay cerebras (re-tuned primary is the fitness top for coder).
     sel_ok = select_for_role(
         "vibe_coding", "coder", assessment=assess, primary_status="ok"
     )
     assert sel_ok.used_fallback is False
-    assert sel_ok.provider == "mistral"
+    assert sel_ok.provider == "cerebras"
+    assert sel_ok.model == "gpt-oss-120b"
 
-    # Degraded: operational switch to role fallback (systems.md §4.3)
+    # Degraded: operational switch to the best-ranked non-primary candidate
+    # (cerebras/gemma-4-31b — systems.md §4.3 / WAVE-21 score-driven).
     sel = select_for_role(
         "vibe_coding",
         "coder",
@@ -114,8 +121,8 @@ def test_hard_task_degraded_primary_switches_and_handoff():
         primary_status="quota_exhausted",
     )
     assert sel.used_fallback is True
-    assert sel.provider == "agnes"
-    assert sel.model == "agnes-2.0-flash"
+    assert sel.provider == "cerebras"
+    assert sel.model == "gemma-4-31b"
     assert "degraded" in sel.reason.lower() or "quota" in sel.reason.lower()
 
     state = {
@@ -136,7 +143,7 @@ def test_hard_task_degraded_primary_switches_and_handoff():
     rec = patch["handoff_history"][0]
     assert rec["user_input"] == "Design a complex distributed system"
     assert "coder@" in rec["to_agent"]
-    assert "agnes" in rec["to_agent"]
+    assert "gemma-4-31b" in rec["to_agent"]
     assert patch["last_model_selection"]["used_fallback"] is True
     assert patch["last_model_selection"]["primary_status"] == "quota_exhausted"
 
@@ -156,8 +163,8 @@ def test_empty_completion_degraded_switches_coder():
         primary_status="empty_completion",
     )
     assert sel.used_fallback is True
-    assert sel.provider == "agnes"
-    assert sel.model == "agnes-2.0-flash"
+    assert sel.provider == "cerebras"
+    assert sel.model == "gemma-4-31b"
 
 
 def test_hard_keyword_heuristic_raises_code_difficulty():
@@ -170,8 +177,13 @@ def test_hard_keyword_heuristic_raises_code_difficulty():
     assert assess.logic_complexity >= 70
 
 
-def test_mis_specialized_weak_primary_switches(tmp_path: Path):
-    """Safeguard-as-coder (code 35) vs Agnes (code 78): Δ≥8 and weak primary → fallback."""
+def test_weak_primary_score_driven_switch(tmp_path: Path):
+    """Safeguard-as-coder (code 35) vs the catalog top → score-driven switch.
+
+    WAVE-21: the former mis-specialization veto is superseded by fitness
+    ranking — a weak specialist loses to the best candidate by a large delta
+    (Δ43.7 ≥ score_advantage_threshold).
+    """
     router_yaml = {
         "providers": {},
         "vibe_coding": {
@@ -203,8 +215,9 @@ def test_mis_specialized_weak_primary_switches(tmp_path: Path):
         primary_status="ok",
     )
     assert sel.used_fallback is True
-    assert sel.provider == "agnes"
-    assert "mis-specialized" in sel.reason.lower() or "Mis-specialized" in sel.reason
+    assert sel.provider == "cerebras"
+    assert sel.model == "gpt-oss-120b"
+    assert "score-driven" in sel.reason.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +226,12 @@ def test_mis_specialized_weak_primary_switches(tmp_path: Path):
 
 
 def test_healthy_primary_no_switch_when_fallback_edges_higher():
-    """Codestral stays primary + mid difficulty → keep Codestral (no fallback)."""
+    """Cerebras (re-tuned coder primary, fitness top) stays on mid difficulty.
+
+    Re-based on the WAVE-21 re-tuned config: the anti-churn hysteresis property
+    itself (fallback edges < score_advantage_threshold → no switch) is asserted
+    deterministically against a synthetic fixture in tests/test_wave21.py.
+    """
     assess = DifficultyAssessment(
         code=55,
         reason=55,
@@ -229,12 +247,13 @@ def test_healthy_primary_no_switch_when_fallback_edges_higher():
         "vibe_coding", "coder", assessment=assess, primary_status="ok"
     )
     assert sel.used_fallback is False
-    assert sel.provider == "mistral"
-    assert sel.model == "codestral-latest"
+    assert sel.provider == "cerebras"
+    assert sel.model == "gpt-oss-120b"
 
 
 def test_healthy_coder_no_switch_even_on_hard_task():
-    """Codestral code 88 is best-in-stack; hard task alone must not leave primary."""
+    """Re-tuned primary (cerebras code 82 / reason 90) best-in-stack; a hard
+    task must not leave it — hard-threshold quality gate is satisfied (86 ≥ 70)."""
     assess = DifficultyAssessment(
         code=95,
         reason=80,
@@ -246,8 +265,8 @@ def test_healthy_coder_no_switch_even_on_hard_task():
         "vibe_coding", "coder", assessment=assess, primary_status="ok"
     )
     assert sel.used_fallback is False
-    assert sel.provider == "mistral"
-    assert sel.model == "codestral-latest"
+    assert sel.provider == "cerebras"
+    assert sel.model == "gpt-oss-120b"
 
 
 # ---------------------------------------------------------------------------
@@ -430,13 +449,16 @@ def test_resolve_role_selection_easy_no_http():
     """agent_runtime.resolve_role_selection stays offline for easy tasks."""
     from core.agent_runtime import resolve_role_selection
 
+    # quota stub keeps the test deterministic regardless of live ledger state
+    # (WAVE-21 derives quota_exhausted from the real ledger by default).
     provider, model, fb, sel, assess = resolve_role_selection(
         "vibe_coding",
         "coder",
         messages=[{"role": "user", "content": "simple hello world function"}],
+        quota_remaining=lambda p, m: 1,
     )
-    assert provider == "mistral"
-    assert model == "codestral-latest"
+    assert provider == "cerebras"
+    assert model == "gpt-oss-120b"
     assert sel is not None
     assert sel.used_fallback is False
     assert assess is not None

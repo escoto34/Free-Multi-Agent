@@ -685,18 +685,17 @@ models:
 # ---------------------------------------------------------------------------
 # Selection policy (systems.md §4.3) — editable, not hardcoded in Python
 # ---------------------------------------------------------------------------
-# Prefer fallback when EITHER:
-#   (1) primary is degraded/unavailable (quota_exhausted | rate_limited_429 |
-#       empty_completion | unavailable) and a role fallback exists, OR
-#   (2) primary is mis-specialized for a relevant area:
-#       score_fallback(area) − score_primary(area) ≥ score_advantage_threshold
-#       AND primary score ≤ weak_specialization_max (e.g. Safeguard on coding).
-# Healthy primary (even on hard tasks) → keep primary; do not switch just
-# because fallback edges higher on a secondary area (Gemini reason 78 vs Agnes 76).
+# WAVE-21: selection is score-driven (core/model_scoring.py fitness ranking).
+#   (1) primary degraded/unavailable (quota_exhausted | rate_limited_429 |
+#       empty_completion | unavailable) → best-ranked non-primary candidate;
+#   (2) hard task (relevant_max ≥ hard_threshold) → picked model's role
+#       quality must also clear hard_threshold (escalate if not);
+#   (3) pinned roles (pin: true, e.g. deep_research.web_search) never swap;
+#   (4) healthy primary keeps its seat unless the best candidate wins by
+#       score_advantage_threshold (anti-churn hysteresis).
 selection_defaults:
-  score_advantage_threshold: 8   # systems.md: score_fb − score_p ≥ 8
-  weak_specialization_max: 49    # primary ≤ this on a relevant area → weak specialist
-  hard_threshold: 70             # difficulty on a relevant area ≥ this for mis-spec path
+  score_advantage_threshold: 8   # systems.md: switch only when Δfitness ≥ 8
+  hard_threshold: 70             # difficulty on a relevant area for quality gate
   capacity_margin: 5             # kept for diagnostics / future planners
   warn_hy3_days: 3               # CLI warning window (days before free_until)
   expired_score_cap: 49          # cap model area scores after free_until (auto-scorer)
@@ -736,7 +735,10 @@ roles:
     # No role fallback in model_router.yaml — selector never invents one
     relevant_areas: [ground]
     hard_threshold: 90
-    # Never replace compound-mini; no live search → abort (graph), not model swap
+    # WAVE-21: structural pin — ranking must never propose a swap; no live
+    # search → abort (graph), not model swap. Formerly an accident of missing
+    # config, now enforced by select_for_role.
+    pin: true
   deep_research.grounding:
     relevant_areas: [ground, synth, reason]
     hard_threshold: 65

@@ -152,11 +152,14 @@ vibe_coding:
   # Coder (WAVE-18: the former architect planning role is folded into this
   # agent — planning rules are part of the coder's system prompt).
   coder:
-    provider: mistral
-    model: codestral-latest
+    # WAVE-21: score-driven re-tune — cerebras/gpt-oss-120b is the fitness top
+    # for [code, reason]; the displaced former primary stays as the role
+    # fallback and the provider DAG continues from there.
+    provider: cerebras
+    model: gpt-oss-120b
     fallback:
-      provider: agnes
-      model: agnes-2.0-flash
+      provider: mistral
+      model: codestral-latest
   # Debugger: Groq gpt-oss reasoning; Agnes if Groq exhausted
   debugger:
     provider: groq
@@ -169,11 +172,15 @@ deep_research:
   # Compressor (WAVE-18: safety gate + planning folded in from the removed
   # safety_filter role). Free Agnes volume (replaces OpenRouter hy3).
   context_compressor:
-    provider: agnes
-    model: agnes-2.0-flash
+    # WAVE-21: score-driven re-tune — cerebras/gpt-oss-120b tops [reason,
+    # synth, safety]; former primary agnes stays as fallback. The old gemini
+    # fallback is gone: gemini-2.0-flash is marked available: false (quota 0 /
+    # 404 for this key, WAVE-20 follow-up).
+    provider: cerebras
+    model: gpt-oss-120b
     fallback:
-      provider: gemini
-      model: gemini-2.0-flash
+      provider: agnes
+      model: agnes-2.0-flash
   # Live web search — only free path with Tavily; ~250 RPD
   web_search:
     provider: groq
@@ -224,18 +231,22 @@ fallback_cascade:
     model: agnes-2.0-flash
 cli:
   chat:
-    provider: agnes
-    model: agnes-2.0-flash
+    # WAVE-21: score-driven re-tune — cli.chat now goes through role selection
+    # (was a raw invoke_router bypass); primary cerebras/gpt-oss-120b with the
+    # former primary agnes as fallback (cascade continues via agnes_fallback).
+    provider: cerebras
+    model: gpt-oss-120b
     fallback:
-      provider: groq
-      model: openai/gpt-oss-120b
+      provider: agnes
+      model: agnes-2.0-flash
   planner:
     # Keep free-durable; do not use OpenRouter hy3 on hot path (50 RPD / expiry)
-    provider: agnes
-    model: agnes-2.0-flash
+    # WAVE-21: score-driven re-tune — cerebras/gpt-oss-120b tops [reason, synth].
+    provider: cerebras
+    model: gpt-oss-120b
     fallback:
-      provider: groq
-      model: openai/gpt-oss-120b
+      provider: agnes
+      model: agnes-2.0-flash
 
   context_limit_tokens: 16000
   compact_keep_recent_messages: 4

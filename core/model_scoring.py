@@ -33,6 +33,7 @@ _EFFICIENCY_WEIGHTS: dict[str, float] = {
 }
 
 _bench_cache: Optional[dict[str, Any]] = None
+_providers_cache: Optional[list[str]] = None
 
 
 def _load_benchmarks() -> dict[str, Any]:
@@ -44,12 +45,17 @@ def _load_benchmarks() -> dict[str, Any]:
 
 
 def reload_benchmarks() -> None:
-    global _bench_cache
+    """Clear benchmarks + provider-prefix caches (tests / live YAML edit)."""
+    global _bench_cache, _providers_cache
     _bench_cache = None
+    _providers_cache = None
 
 
 def _providers() -> list[str]:
-    return sorted(get_registered_providers(), key=len, reverse=True)
+    global _providers_cache
+    if _providers_cache is None:
+        _providers_cache = sorted(get_registered_providers(), key=len, reverse=True)
+    return _providers_cache
 
 
 def split_model_key(key: str) -> tuple[str, str]:

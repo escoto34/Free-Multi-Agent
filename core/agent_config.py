@@ -65,6 +65,17 @@ def reload_config() -> None:
     except Exception:
         # Router may not be importable in minimal test contexts
         pass
+    try:
+        from core.model_selector import reload_benchmarks as _reload_msel
+        from core.model_scoring import reload_benchmarks as _reload_msc
+        from core.provider_registry import reset_provider_registry_cache
+
+        reset_provider_registry_cache()
+        _reload_msel()
+        _reload_msc()
+    except Exception:
+        # Import may fail in minimal test contexts (e.g. no benchmark file)
+        pass
 
 
 def get_full_config(config_path: Optional[Path] = None) -> dict[str, Any]:

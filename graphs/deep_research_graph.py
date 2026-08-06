@@ -30,7 +30,11 @@ from core.difficulty_scorer import (
     plan_pipeline_difficulties,
 )
 from core.handoff import HandoffError, transfer_control
-from core.model_selector import record_model_selection_handoff, select_for_role
+from core.model_selector import (
+    default_quota_remaining,
+    record_model_selection_handoff,
+    select_for_role,
+)
 from core.runs import get_run_history
 from schemas.deep_research import CondensedTrends, GroundedReport
 from schemas.requests import DeepResearchRequest
@@ -94,7 +98,10 @@ def context_compressor_node(state: DeepResearchState) -> dict[str, Any]:
             role_path="deep_research.context_compressor",
         )
         selection = select_for_role(
-            "deep_research", "context_compressor", assessment=assess
+            "deep_research",
+            "context_compressor",
+            assessment=assess,
+            quota_remaining=default_quota_remaining,
         )
         state_for_call = {
             **dict(state),

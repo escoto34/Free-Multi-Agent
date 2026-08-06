@@ -309,8 +309,11 @@ def test_dangerous_command_blocked_windows():
         "format c:",
         "deltree c:/windows",
         "net user hack pass /add",
+        "reg add HKLM\\Software /f",
         "reg delete HKLM\\Software /f",
         "cacls C:\\ / /T /G everyone:F",
+        "del /f /s /q C:\\",
+        "rd /s /q C:\\",
     ):
         res = tools.exec_tool("run_terminal", {"command": bad})
         assert not res.ok, bad

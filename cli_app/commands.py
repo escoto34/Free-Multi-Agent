@@ -133,16 +133,19 @@ def _clear(_args: list[str], session: ConversationSession) -> CommandResult:
 def _compact(args: list[str], session: ConversationSession) -> CommandResult:
     use_llm = "--llm" in args or "-l" in args
     if use_llm:
-        settings = get_cli_settings()
-        chat = settings["chat"]
+        from core.agent_runtime import resolve_role_selection
 
         def llm_call(messages: list[dict[str, str]]) -> str:
+            cp, cm, cfb, _sel_, _as_ = resolve_role_selection(
+                "cli", "chat", messages=messages
+            )
             resp = invoke_router(
                 None,
-                provider=chat["provider"],
-                model=chat["model"],
+                provider=cp,
+                model=cm,
                 messages=messages,
-                fallback=chat.get("fallback"),
+                fallback=cfb,
+                role_path="cli.chat",
             )
             return resp.content
 
@@ -481,16 +484,20 @@ def _do(args: list[str], session: ConversationSession) -> CommandResult:
 
     # Systems A/B work best in English — translate when the user writes otherwise.
     from cli_app.language import to_english_for_pipelines
+    from core.agent_runtime import resolve_role_selection
 
-    settings = get_cli_settings()
-    chat = settings.get("chat") or {}
+    chat_p, chat_m, chat_fb, _csel_, _cas_ = resolve_role_selection(
+        "cli",
+        "chat",
+        messages=[{"role": "user", "content": prompt}],
+    )
     _prog("planning" + get_icon("ellipsis"))
     pipeline_prompt = to_english_for_pipelines(
         prompt,
         invoke_fn=invoke_router,
-        provider=str(chat.get("provider") or prov),
-        model=str(chat.get("model") or model),
-        fallback=chat.get("fallback"),
+        provider=chat_p or prov,
+        model=chat_m or model,
+        fallback=chat_fb,
     )
     translated = pipeline_prompt.strip() != prompt.strip()
 

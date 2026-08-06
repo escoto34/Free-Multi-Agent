@@ -265,8 +265,9 @@ def get_cli_settings(config_path: Optional[Path] = None) -> dict[str, Any]:
     cfg = _read(config_path or _LIVE)
     cli = cfg.get("cli") or {}
     chat = cli.get("chat") or {
-        "provider": "groq",
-        "model": "openai/gpt-oss-120b",
+        "provider": "cerebras",
+        "model": "gpt-oss-120b",
+        "fallback": {"provider": "groq", "model": "openai/gpt-oss-120b"},
     }
     use_g = cli.get("use_graphify")
     if use_g is None:
