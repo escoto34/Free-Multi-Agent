@@ -383,7 +383,7 @@ Scores are **relative within this free-durable stack** (snapshot mid-2026). They
 | **`openrouter` / `poolside/laguna-s-2.1:free`** | 60 | 62 | 36 | 54 | 32 | live probe 2026-08-04: empty stream in 128 tokens -> efficiency 0 (heavy reasoning). |
 | **`openrouter` / `poolside/laguna-xs-2.1:free`** | 56 | 58 | 34 | 50 | 30 | live probe 2026-08-04: empty stream in 128 tokens -> efficiency 0 (heavy reasoning). |
 | **`opencode_zen` / `big-pickle`** | 62 | 62 | 38 | 58 | 34 | re-scored WAVE-20 + measured efficiency |
-| **`opencode_zen` / `deepseek-v4-flash-free`** | 66 | 72 | 40 | 62 | 36 | re-scored WAVE-20 + measured efficiency |
+| **`opencode_zen` / `deepseek-v4-flash-free`** | 70 | 72 | 40 | 62 | 36 | re-scored 2026-08-05: V4-Flash '0731' update — Artificial Analysis Coding Index 69, parity w/ Gemini 3.6 Flash (69) |
 | **`opencode_zen` / `nemotron-3-ultra-free`** | 62 | 66 | 38 | 56 | 34 | re-scored WAVE-20 + measured efficiency |
 | **`opencode_zen` / `mimo-v2.5-free`** | 60 | 60 | 36 | 54 | 32 | re-scored WAVE-20 + measured efficiency |
 | **`opencode_zen` / `north-mini-code-free`** | 60 | 54 | 36 | 50 | 32 | re-scored WAVE-20 + measured efficiency |

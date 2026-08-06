@@ -34,6 +34,7 @@ rubric_bands:
 models:
   mistral/codestral-latest:
     scores: {code: 88, reason: 62, ground: 40, synth: 55, safety: 35}
+    quality_evidence: provisional
     efficiency:
       speed_score: 5.6
       context_score: 90.1
@@ -46,6 +47,7 @@ models:
     verified: "2026-08-04"
   groq/openai/gpt-oss-120b:
     scores: {code: 82, reason: 90, ground: 48, synth: 85, safety: 45}
+    quality_evidence: provisional
     efficiency:
       speed_score: 16.0
       context_score: 85.3
@@ -58,6 +60,7 @@ models:
     verified: "2026-08-04"
   agnes/agnes-2.0-flash:
     scores: {code: 78, reason: 76, ground: 42, synth: 80, safety: 40}
+    quality_evidence: provisional
     efficiency:
       speed_score: 4.5
       context_score: 83.3
@@ -98,6 +101,7 @@ models:
     verified: "2026-08-04"
   gemini/gemini-2.0-flash:
     scores: {code: 70, reason: 78, ground: 55, synth: 75, safety: 50}
+    quality_evidence: provisional
     efficiency: {}
     evidence: benchmark_error
     available: false
@@ -105,6 +109,7 @@ models:
     note: "live probe 2026-08-04: quota limit 0 for this key -> currently unusable (follow-up: drop or rotate)."
   cohere/command-a-plus-05-2026:
     scores: {code: 58, reason: 72, ground: 93, synth: 78, safety: 48}
+    quality_evidence: provisional
     efficiency:
       speed_score: 7.4
       context_score: 94.0
@@ -117,6 +122,7 @@ models:
     verified: "2026-08-04"
   mistral/mistral-small-latest:
     scores: {code: 58, reason: 62, ground: 55, synth: 65, safety: 40}
+    quality_evidence: provisional
     efficiency:
       speed_score: 4.8
       context_score: 90.3
@@ -129,6 +135,7 @@ models:
     verified: "2026-08-04"
   groq/groq/compound-mini:
     scores: {code: 50, reason: 58, ground: 88, synth: 52, safety: 30}
+    quality_evidence: provisional
     efficiency:
       speed_score: 16.3
       context_score: 85.3
@@ -141,6 +148,7 @@ models:
     verified: "2026-08-04"
   groq/openai/gpt-oss-safeguard-20b:
     scores: {code: 35, reason: 55, ground: 30, synth: 40, safety: 92}
+    quality_evidence: provisional
     efficiency: {}
     evidence: skipped_non_conversational
     available: true
@@ -150,6 +158,7 @@ models:
   # free_until past → is_model_available=false; get_model_scores caps each area ≤49.
   openrouter/tencent/hy3:free:
     scores: {code: 55, reason: 60, ground: 38, synth: 58, safety: 35}
+    quality_evidence: provisional
     efficiency: {}
     evidence: temporal_example
     available: false
@@ -165,6 +174,7 @@ models:
   # are scored conservatively (adequate band, 50-69) pending real usage data.
   groq/openai/gpt-oss-20b:
     scores: {code: 72, reason: 80, ground: 44, synth: 72, safety: 40}
+    quality_evidence: provisional
     efficiency:
       speed_score: 41.2
       context_score: 85.3
@@ -218,6 +228,7 @@ models:
     verified: "2026-08-04"
   cohere/command-r-plus-08-2024:
     scores: {code: 54, reason: 68, ground: 88, synth: 72, safety: 44}
+    quality_evidence: provisional
     efficiency:
       speed_score: 0.5
       context_score: 85.1
@@ -230,6 +241,7 @@ models:
     verified: "2026-08-04"
   cohere/command-r7b-12-2024:
     scores: {code: 50, reason: 60, ground: 80, synth: 62, safety: 40}
+    quality_evidence: provisional
     efficiency:
       speed_score: 2.4
       context_score: 85.3
@@ -242,6 +254,7 @@ models:
     verified: "2026-08-04"
   mistral/mistral-medium-latest:
     scores: {code: 66, reason: 68, ground: 48, synth: 64, safety: 38}
+    quality_evidence: provisional
     efficiency:
       speed_score: 5.6
       context_score: 90.3
@@ -254,6 +267,7 @@ models:
     verified: "2026-08-04"
   mistral/devstral-latest:
     scores: {code: 80, reason: 58, ground: 36, synth: 52, safety: 34}
+    quality_evidence: provisional
     efficiency:
       speed_score: 1.3
       context_score: 90.3
@@ -266,6 +280,7 @@ models:
     verified: "2026-08-04"
   mistral/ministral-8b-latest:
     scores: {code: 56, reason: 54, ground: 40, synth: 50, safety: 34}
+    quality_evidence: provisional
     efficiency:
       speed_score: 3.7
       context_score: 90.3
@@ -332,6 +347,7 @@ models:
     verified: "2026-08-04"
   gemini/gemini-2.5-flash:
     scores: {code: 74, reason: 82, ground: 58, synth: 78, safety: 52}
+    quality_evidence: provisional
     efficiency: {}
     evidence: benchmark_error
     available: false
@@ -339,6 +355,7 @@ models:
     note: "live probe 2026-08-04: 404 'no longer available to new users' -> currently unusable (follow-up: remove from catalog)."
   gemini/gemini-2.5-flash-lite:
     scores: {code: 66, reason: 74, ground: 52, synth: 70, safety: 48}
+    quality_evidence: provisional
     efficiency: {}
     evidence: benchmark_error
     available: false
@@ -439,6 +456,7 @@ models:
     verified: "2026-08-04"
   cerebras/gemma-4-31b:
     scores: {code: 74, reason: 80, ground: 46, synth: 72, safety: 42}
+    quality_evidence: provisional
     efficiency:
       speed_score: 100.0
       context_score: 85.3
@@ -451,6 +469,7 @@ models:
     verified: "2026-08-04"
   cerebras/gpt-oss-120b:
     scores: {code: 82, reason: 90, ground: 48, synth: 85, safety: 45}
+    quality_evidence: provisional
     efficiency:
       speed_score: 56.9
       context_score: 85.3
@@ -559,6 +578,7 @@ models:
     verified: "2026-08-04"
   openrouter/nvidia/nemotron-3.5-content-safety:free:
     scores: {code: 50, reason: 54, ground: 34, synth: 50, safety: 62}
+    quality_evidence: provisional
     efficiency: {}
     evidence: skipped_non_conversational
     available: true
@@ -609,8 +629,8 @@ models:
     available: true
     verified: "2026-08-04"
   opencode_zen/deepseek-v4-flash-free:
-    scores: {code: 66, reason: 72, ground: 40, synth: 62, safety: 36}
-    quality_evidence: research_2026-08-04
+    scores: {code: 70, reason: 72, ground: 40, synth: 62, safety: 36}
+    quality_evidence: research_2026-08-05
     efficiency:
       speed_score: 3.0
       context_score: 0.0
