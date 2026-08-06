@@ -362,7 +362,7 @@ Parametrized test over the new denylist patterns, asserting each candidate comma
 `README.md` — new "Windows support (WSL2)" section. `systems.md` — none (it doesn't currently discuss platform support).
 
 ### Acceptance criteria
-- [ ] `_BLOCKED_CMD` rejects representative Windows-destructive commands (`del /f /s /q C:\`, `format C:`, `rd /s /q C:\`).
+- [x] `_BLOCKED_CMD` rejects representative Windows-destructive commands (`del /f /s /q C:\`, `format C:`, `rd /s /q C:\`) — closed in the WAVE-21 session (`cli_app/tools.py` denylist + `test_dangerous_command_blocked_windows` covers del/rd/reg-add).
 - [ ] `env_setup.py:55` typo fixed.
 - [ ] `README.md` has an explicit WSL2 section listing all four known limitations with file:line refs.
 - [ ] New denylist tests pass under WAVE-02's harness with zero real command execution.
@@ -1685,15 +1685,15 @@ Existing `tests/test_model_selector.py` suite must still pass or be deliberately
 ### Documentation impact
 `systems.md` §0 (role inventory), §4.3 (primary-vs-fallback policy — the "runtime selection rules" numbered list changes materially now that ranking is real), §4.4 (end-to-end selection walkthrough), §5 (System A role assignments if re-tuned), §6 (System B role assignments if re-tuned), §7 (CLI roles — `cli.chat` now goes through selection), §8 (fallback cascade DAG if any role fallback changed).
 
-### Acceptance criteria
-- [ ] `select_for_role` ranks by `fitness()` with hysteresis preserved; existing "don't switch on a marginal fallback edge" test still passes.
-- [ ] `hard_threshold` demonstrably affects selection on a hard-task fixture (it did not, before this wave).
-- [ ] `primary_status` derived from real quota state, not left at the hardcoded `"ok"` default.
-- [ ] `deep_research.web_search` is pinned and never proposed for a swap.
-- [ ] `cli.chat`/`cli.planner`/`/compact --llm`/pipeline translation all route through `resolve_role_selection`; a chat turn's handoff record carries a `role_path`.
-- [ ] `difficulty_scorer.py`'s dead `elif` fixed; `cli.chat` gets a role-bias branch.
-- [ ] Any re-tuned role change kept in sync across all 4 files (router, defaults, benchmark models, benchmark roles/reasoning).
-- [ ] Full test suite green; `systems.md` fully synced.
+### Acceptance criteria (WAVE-21 — all met 2026-08-05)
+- [x] `select_for_role` ranks by `fitness()` with hysteresis preserved; existing "don't switch on a marginal fallback edge" test still passes (`test_hysteresis_no_switch_...`, `test_healthy_primary_...`).
+- [x] `hard_threshold` demonstrably affects selection on a hard-task fixture (it did not, before this wave) — `test_hard_threshold_escalates_on_hard_task`.
+- [x] `primary_status` derived from real quota state, not left at the hardcoded `"ok"` default — `quota_remaining=default_quota_remaining` at all live call sites; `test_quota_derived_status_from_mocked_tracker`.
+- [x] `deep_research.web_search` is pinned (`roles.deep_research.web_search.pin: true`) and never proposed for a swap — `test_pinned_web_search_never_swapped`.
+- [x] `cli.chat`/`cli.planner`/`/compact --llm`/pipeline translation all route through `resolve_role_selection`; a chat turn's selection record carries a `role_path` — `test_chat_turn_selection_carries_role_path`.
+- [x] `difficulty_scorer.py`'s dead `elif` fixed; `cli.chat` gets a role-bias branch (+5 reason, −5 synth, −5 code) — `test_difficulty_scorer_cli_chat_bias_fires`.
+- [x] Re-tuned roles kept in sync across router, defaults, benchmark models, roles/reasoning (coder, context_compressor, cli.chat, cli.planner → `cerebras/gpt-oss-120b`; former primaries kept as fallbacks; debugger/grounding/synthesizer deliberately unchanged — fitness Δ < 8, hysteresis holds).
+- [x] Full default suite green (385 passed, 78s); `systems.md` §0/§4.3/§4.4/§5/§6/§7/§8 + README fully synced.
 
 ### Prohibitions
 Do not remove the hysteresis / anti-churn guard — score-driven does not mean "swap on every fractional edge," per the explicit policy already documented in `systems.md` §4.3 rule 4. Do not unpin `deep_research.web_search` or give it a model fallback. Do not change `run_structured_agent`/`run_role_raw`'s validation-repair behavior. Do not touch `Trend-AI/` or `graphify-out/`.
